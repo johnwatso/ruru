@@ -1,0 +1,77 @@
+<p align="center">
+  <img src="Documentation/Images/app-icon.png" width="120" alt="Ruru owl icon">
+</p>
+
+<h1 align="center">Ruru</h1>
+
+<p align="center"><strong>A native macOS guardian for your services.</strong></p>
+
+<p align="center">
+  Ruru gives each guarded service an independent ownership group, so one server has permission to act at a time. Built for SwiftBot, with room for other apps.
+</p>
+
+<p align="center">
+  <a href="https://github.com/johnwatso/ruru/releases"><strong>GitHub Releases</strong></a> ·
+  <a href="Documentation/SETUP.md">Getting Started</a> ·
+  <a href="Documentation/README.md">Documentation</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-macOS%2015+-blue" alt="macOS 15 or later">
+  <img src="https://img.shields.io/badge/swift-6.0-orange" alt="Swift 6">
+  <img src="https://img.shields.io/badge/architecture-Intel%20%2B%20Apple%20silicon-blue" alt="Intel and Apple silicon">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
+</p>
+
+> [!NOTE]
+> **Ruru 0.2.0 is a development preview.** The local build is signed for development; public distribution signing and notarisation are still pending. The DuckDB revision also needs a complete failover drill on the deployment Mac.
+
+<!-- The Overview image shows isolated preview state with a sample additional service. -->
+<p align="center">
+  <img src="Documentation/Images/overview.png" alt="Ruru Overview showing ownership and service health">
+</p>
+
+## Highlights
+
+- A focused macOS app built with Swift 6, SwiftUI, and native frameworks
+- A Guarding page for SwiftBot groups and other apps, with independent ownership per service
+- Per-service connection credentials, known servers, and scoped activity
+- Add or remove services while preserving ownership terms
+- Durable ownership terms stored with DuckDB through its official Swift package
+- A live Overview of guarded services and authority health, with readable server names
+- Searchable ownership history without recording bearer credentials or bot data
+- Built-in Cloudflare Internet Access with an optional bundled connector
+- A menu bar service that keeps running when the window closes, with an optional Dock icon
+- Universal Release builds for Intel and Apple silicon, targeting macOS Sequoia
+
+## Installation
+
+Ruru requires **macOS 15.0 or later** and an independent Mac that all participating servers can reach. It runs separately from the guarded apps and does not process their workloads.
+
+Public release assets are not published yet. For now, [build Ruru from source](Documentation/DEVELOPMENT.md), move `Ruru.app` into Applications, and follow the [setup guide](Documentation/SETUP.md) to pair SwiftBot or [integrate another app](Documentation/INTEGRATIONS.md). Published builds will be available from [GitHub Releases](https://github.com/johnwatso/ruru/releases).
+
+## Why Ruru?
+
+When two bots lose contact, neither can safely infer that the other has stopped. Ruru provides a shared authority on a third Mac, with short leases and durable ownership terms. If that authority becomes unreachable, bots stop acting when their permission expires.
+
+The name comes from the ruru, New Zealand's native owl. The app is a small guardian: it watches ownership and keeps the decision in one place.
+
+## Acknowledgements
+
+Ruru is a sister app to SwiftBot and uses its SwiftMesh lease protocol and native console design. The README follows the presentation used by [SwiftMiner](https://github.com/johnwatso/SwiftMiner).
+
+[DuckDB Swift](https://github.com/duckdb/duckdb-swift) provides the database API, wrapping DuckDB's native engine. [Cloudflare Tunnel](https://github.com/cloudflare/cloudflared) provides the bundled optional connector. Application-owned runtime code is Swift; dependencies may include native engines and helpers. Dependency licences and attributions are included in [Third-Party Notices](Resources/ThirdPartyNotices.md).
+
+## Development
+
+Open `Ruru.xcodeproj` and select the **Ruru** scheme. `project.yml` is the XcodeGen source of truth. Start with the [development guide](Documentation/DEVELOPMENT.md), [architecture](Documentation/ARCHITECTURE.md), and [design reference](Documentation/DESIGN.md).
+
+## Releases
+
+The planned repository is [johnwatso/ruru](https://github.com/johnwatso/ruru). See the [draft release notes](CHANGELOG.md) and [release guide](Documentation/RELEASING.md) for building, validating, signing, and packaging a universal app. Current validation and remaining deployment work are recorded in the [development log](Documentation/ROADMAP.md).
+
+Ruru was previously named SwiftMesh Witness. Its bundle, Keychain, settings, and tunnel identities are preserved. Version 0.2.0 does not migrate old SQLite storage; read [ownership and storage](Documentation/STORAGE.md) before replacing an existing authority.
+
+## License
+
+Ruru is available under the [MIT License](LICENSE). Bundled dependencies retain their own licences.

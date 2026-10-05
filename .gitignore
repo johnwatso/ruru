@@ -1,0 +1,17 @@
+.DS_Store
+DerivedData/
+build/
+Build/
+Dist/
+*.xcuserstate
+xcuserdata/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp/
+*.lock
+*.initialized
+*.dSYM/
+*.xcresult/

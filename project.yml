@@ -1,0 +1,116 @@
+name: Ruru
+options:
+  deploymentTarget:
+    macOS: "15.0"
+  developmentLanguage: en
+  xcodeVersion: "16.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    ARCHS: "$(ARCHS_STANDARD)"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    GENERATE_INFOPLIST_FILE: YES
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2026100612"
+  configs:
+    Debug:
+      ONLY_ACTIVE_ARCH: YES
+    Release:
+      ONLY_ACTIVE_ARCH: NO
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.9.5
+  DuckDB:
+    url: https://github.com/duckdb/duckdb-swift
+    exactVersion: 1.1.3
+targets:
+  WitnessKit:
+    type: framework
+    platform: macOS
+    sources: [Sources/WitnessKit]
+    dependencies:
+      - package: DuckDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.swiftmesh.witness.kit
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+  Ruru:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/Ruru
+      - path: ruru.icon
+        type: file
+        buildPhase: resources
+      - path: Resources
+        buildPhase: resources
+      - path: LICENSE
+        buildPhase: resources
+    dependencies:
+      - target: WitnessKit
+      - package: Sparkle
+        product: Sparkle
+    info:
+      path: Configuration/Ruru-Info.plist
+      properties:
+        SUFeedURL: $(SPARKLE_FEED_URL)
+        SUPublicEDKey: $(SPARKLE_PUBLIC_ED_KEY)
+        SUEnableAutomaticChecks: true
+        SUAutomaticallyUpdate: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.swiftmesh.witness
+        PRODUCT_NAME: Ruru
+        INFOPLIST_KEY_CFBundleDisplayName: Ruru
+        INFOPLIST_KEY_CFBundleIconFile: ruru
+        ASSETCATALOG_COMPILER_APPICON_NAME: ruru
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        INFOPLIST_KEY_LSUIElement: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Configuration/Development.entitlements
+        ENABLE_APP_SANDBOX: NO
+        SPARKLE_FEED_URL: https://johnwatso.github.io/ruru/appcast.xml
+        # ShipHook owns the private release key. Set its public Ed25519 key here
+        # or through the publishing build's SPARKLE_PUBLIC_ED_KEY override.
+        SPARKLE_PUBLIC_ED_KEY: ""
+  WitnessKitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/WitnessKitTests
+      - Sources/Ruru/WitnessConfiguration.swift
+      - Sources/Ruru/RuruUpdateConfiguration.swift
+    dependencies:
+      - target: WitnessKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.swiftmesh.witness.tests
+  WitnessStorageProbe:
+    type: tool
+    platform: macOS
+    sources: [Tests/StorageProbe]
+    dependencies:
+      - target: WitnessKit
+    settings:
+      base:
+        SKIP_INSTALL: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path"
+schemes:
+  Ruru:
+    build:
+      targets:
+        Ruru: all
+        WitnessKitTests: [test]
+        WitnessStorageProbe: [test]
+    test:
+      targets: [WitnessKitTests]
+      parallelizable: false
+    run:
+      config: Debug
+    archive:
+      config: Release
