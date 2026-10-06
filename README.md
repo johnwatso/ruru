@@ -26,9 +26,17 @@
 > [!NOTE]
 > **Ruru 0.2.0 is a development preview.** The local build is signed for development; public distribution signing and notarisation are still pending. The DuckDB revision also needs a complete failover drill on the deployment Mac.
 
-<!-- The Overview image shows isolated preview state with a sample additional service. -->
+<!-- Both Overview images use isolated screenshot fixtures, not a live authority. -->
 <p align="center">
-  <img src="Documentation/Images/overview.png" alt="Ruru Overview showing ownership and service health">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="Documentation/Images/overview-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="Documentation/Images/overview.png">
+    <img src="Documentation/Images/overview.png" alt="Ruru Overview showing a running authority, guarded service and connected HTTPS address">
+  </picture>
+</p>
+<p align="center">
+  <a href="Documentation/Images/overview.png">Light appearance</a> ·
+  <a href="Documentation/Images/overview-dark.png">Dark appearance</a>
 </p>
 
 ## Highlights

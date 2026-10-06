@@ -345,5 +345,4 @@ extension WitnessAppModel {
     }
 }
 
-var witnessVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0" }
 private let witnessHostName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName

@@ -24,7 +24,8 @@ final class AppUpdater: NSObject, ObservableObject {
     var prepareForInstallation: (() async -> Void)?
 
     init(bundle: Bundle = .main, defaults: UserDefaults = .standard,
-         preview: Bool = ProcessInfo.processInfo.arguments.contains("--preview")) {
+         preview: Bool = ProcessInfo.processInfo.arguments.contains("--preview") ||
+         ProcessInfo.processInfo.arguments.contains("--preview-screenshots")) {
         isPreview = preview
         self.defaults = defaults
         hostBundle = bundle

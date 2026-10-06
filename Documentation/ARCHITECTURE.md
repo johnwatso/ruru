@@ -189,6 +189,14 @@ page, while service lifetime remains owned by the app model.
 All UI uses macOS 15 APIs; macOS 26-only glass effects/buttons are not used. The
 console preserves lease fencing, Keychain accounts and Cloudflare provisioning.
 Display metadata is isolated from lease identity as described above.
+SwiftBot service rows and detail headers use locally bundled light/dark app
+logos; other application kinds retain a generic icon.
+
+Launch with `--preview-screenshots` for stable screenshot fixtures, including
+Home Mac/Backup Mac ownership history and `https://gaurd.ruruapp.dev`. This flag
+enables preview isolation for both the model and updater. Running/connected
+status is simulated without opening storage, loading credentials, starting a
+listener/connector, provisioning Cloudflare or registering login items.
 
 ## Guarded services
 

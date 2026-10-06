@@ -1,0 +1,11 @@
+{
+  "images": [
+    { "filename": "SwiftBotLogo.png", "idiom": "universal" },
+    {
+      "appearances": [{ "appearance": "luminosity", "value": "dark" }],
+      "filename": "SwiftBotLogo-dark.png",
+      "idiom": "universal"
+    }
+  ],
+  "info": { "author": "xcode", "version": 1 }
+}

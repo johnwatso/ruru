@@ -75,6 +75,7 @@ struct ConsoleSection<Content: View, Accessory: View>: View {
     let title: String
     var padding: CGFloat = 22
     var headerInset: CGFloat = 0
+    var fillsAvailableHeight = false
     @ViewBuilder var accessory: Accessory
     @ViewBuilder var content: Content
     var body: some View {
@@ -86,14 +87,16 @@ struct ConsoleSection<Content: View, Accessory: View>: View {
             }.padding(.horizontal, headerInset)
             content
         }
+        .frame(maxHeight: fillsAvailableHeight ? .infinity : nil, alignment: .top)
         .padding(padding).frame(maxWidth: .infinity, alignment: .leading)
         .consoleSurface()
     }
 }
 
 extension ConsoleSection where Accessory == EmptyView {
-    init(_ title: String, padding: CGFloat = 22, headerInset: CGFloat = 0, @ViewBuilder content: () -> Content) {
-        self.init(title: title, padding: padding, headerInset: headerInset, accessory: { EmptyView() }, content: content)
+    init(_ title: String, padding: CGFloat = 22, headerInset: CGFloat = 0, fillsAvailableHeight: Bool = false, @ViewBuilder content: () -> Content) {
+        self.init(title: title, padding: padding, headerInset: headerInset, fillsAvailableHeight: fillsAvailableHeight,
+                  accessory: { EmptyView() }, content: content)
     }
 }
 

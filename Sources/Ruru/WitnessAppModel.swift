@@ -34,9 +34,14 @@ final class WitnessAppModel: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private let preview: Bool
 
-    init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--preview")) {
+    init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--preview") ||
+         ProcessInfo.processInfo.arguments.contains("--preview-screenshots")) {
         self.preview = preview
         if preview {
+            if ProcessInfo.processInfo.arguments.contains("--preview-screenshots") {
+                loadScreenshotPreview()
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("--preview-primary-preference") {
                 // Static, ephemeral UI fixtures. No store, listener or credentials.
                 snapshot = WitnessSnapshot(recoverySeconds: 0,
@@ -68,6 +73,34 @@ final class WitnessAppModel: ObservableObject {
             self.error = error.localizedDescription
             state = .failed
         }
+    }
+
+    private func loadScreenshotPreview() {
+        // Display-only fixtures: never initialize storage, credentials, a listener,
+        // a connector or polling. The lease remains stable while taking screenshots.
+        configuration.publicEndpoint = "https://gaurd.ruruapp.dev"
+        configuration.tunnel.hostname = "gaurd.ruruapp.dev"
+        configuration.tunnel.enabled = true
+        configuration.tunnel.tunnelID = "00000000-0000-4000-8000-000000000001"
+        configuration.tunnel.accountID = "screenshot-preview"
+        configuration.servicePrimaryPreferences["swiftbot"] = .init(preferredPrimaryNodeID: "home-mac", revision: 1)
+        state = .running
+        listenerPort = UInt16(configuration.port)
+        serviceStartedAt = .now.advanced(by: .seconds(-18_240))
+        internetStatus = WitnessInternetStatus(state: .enabled, publicURL: configuration.publicEndpoint,
+                                              detail: "Connected to Cloudflare.")
+        let now = Date()
+        snapshot = WitnessSnapshot(recoverySeconds: 0,
+            leases: [LeaseStatus(clusterID: configuration.clusterID, ownerNodeID: "home-mac", term: 42,
+                                 remainingSeconds: 26, ownerNodeName: "Home Mac")],
+            events: [WitnessEvent(clusterID: configuration.clusterID, id: 4, time: now.addingTimeInterval(-180),
+                                  action: "Acquired", nodeID: "home-mac", term: 42, nodeName: "Home Mac"),
+                     WitnessEvent(clusterID: configuration.clusterID, id: 3, time: now.addingTimeInterval(-900),
+                                  action: "Acquired", nodeID: "backup-mac", term: 41, nodeName: "Backup Mac"),
+                     WitnessEvent(clusterID: configuration.clusterID, id: 2, time: now.addingTimeInterval(-7_200),
+                                  action: "Acquired", nodeID: "home-mac", term: 40, nodeName: "Home Mac"),
+                     WitnessEvent(clusterID: configuration.clusterID, id: 1, time: now.addingTimeInterval(-18_240),
+                                  action: "Acquired", nodeID: "backup-mac", term: 39, nodeName: "Backup Mac")])
     }
 
     var currentLease: LeaseStatus? { lease(for: configuration.clusterID) }

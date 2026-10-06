@@ -1,5 +1,52 @@
 # Development log and next steps
 
+## 2026-10-07 — Overview card alignment and sidebar cleanup
+
+- Quick Actions and System now share equal card heights in the wide Overview
+  layout. Content stays at the top, leaving spare space below Quick Actions.
+  The narrow stacked layout retains natural card heights.
+- Removed the sidebar's Running/status badge and version footer, including
+  its unused model dependency and version helper. Authority status/version
+  remain in Overview and the menu bar.
+- XcodeGen and the Xcode Debug build passed. Native light/dark previews verified
+  equal card outlines and the empty sidebar bottom. Refreshed both cursor-free
+  README Overview images and left the preview open. No automated tests,
+  narrow-window visual check or universal Release validation were run for this
+  UI-only change.
+- Re-took both README screenshots after the final layout fix, verifying equal
+  Quick Actions/System outlines, no sidebar footer or cursor, and the corrected
+  `gaurd.ruruapp.dev` address. Both native captures are 2610 × 1700 pixels.
+  Refreshed the dark capture again from the open preview at the user's request;
+  visual inspection passed, with the light image retained.
+
+## 2026-10-07 — Screenshot preview and SwiftBot branding
+
+- Added `--preview-screenshots`, which independently enables isolated preview
+  mode in the app and updater. It displays a running authority, stable Home Mac
+  ownership, Backup Mac history, a Preferred Primary and a connected sample
+  HTTPS address at `https://gaurd.ruruapp.dev`. All service and tunnel status is
+  display-only; no production storage, Keychain, listener, Cloudflare setup,
+  login item or updater is used.
+- SwiftBot services now use locally bundled copies of SwiftBot's current light
+  and dark app logos in the Guarding list and service detail header. Other app
+  kinds retain their generic service icon, with no dependency on SwiftBot's
+  project.
+- XcodeGen and the Xcode Debug build passed. Native preview verified Overview,
+  the SwiftBot logo in the list/detail header, sample owner/preference/history,
+  and the Internet Access address. Left the preview running for screenshots;
+  window captures omit the cursor. Automated tests, dark-mode Guarding checks
+  and universal Release validation were not run for this UI/fixture change.
+- Corrected the preview domain to the owned `ruruapp.dev` domain. Rebuilt Debug
+  and verified `https://gaurd.ruruapp.dev` in Overview and Internet Access;
+  relaunched the isolated preview for screenshots.
+- Captured matching cursor-free Overview PNGs in light and dark appearance at
+  2610 × 1700 pixels. README uses theme-aware picture sources with direct links
+  to both images. Preview-only `--preview-light`/`--preview-dark` flags set this
+  process's appearance and a consistent 1305 × 850 window; system appearance
+  preferences are untouched. XcodeGen/Debug build and visual inspection of
+  both captures passed. No automated tests or Release validation were run for
+  these capture controls and documentation updates.
+
 ## 2026-10-06 — Per-service Preferred Primary
 
 - Added Guarding → service → Preferred Primary. Choose an observed server or

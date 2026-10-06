@@ -45,7 +45,7 @@ struct WitnessGuardedServicesSummary: View {
                 ForEach(model.configuration.guardedServices) { service in
                     Button { onOpen(service) } label: {
                         HStack(spacing: 14) {
-                            ConsoleIconTile(symbol: service.symbol, active: model.guardHealth(for: service.clusterID) == .healthy)
+                            WitnessGuardedServiceIcon(service: service, active: model.guardHealth(for: service.clusterID) == .healthy)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(service.name).font(.headline)
                                 Text(service.kind.rawValue + " · " + model.guardOwner(for: service.clusterID))
@@ -60,6 +60,21 @@ struct WitnessGuardedServicesSummary: View {
                 }
             }.consoleRowGroup()
         })
+    }
+}
+
+private struct WitnessGuardedServiceIcon: View {
+    let service: GuardedService
+    var active = true
+    var size: CGFloat = 42
+
+    var body: some View {
+        if service.kind == .swiftBot {
+            Image("SwiftBotLogo").resizable().interpolation(.high).scaledToFit()
+                .frame(width: size, height: size).accessibilityHidden(true)
+        } else {
+            ConsoleIconTile(symbol: service.symbol, active: active, size: size)
+        }
     }
 }
 
@@ -81,14 +96,17 @@ private struct WitnessGuardedServiceDetails: View {
 
     var body: some View {
         Button("Guarding", systemImage: "chevron.left", action: onBack).buttonStyle(.borderless)
-        ConsolePageHeader(title: service.name, subtitle: service.kind.rawValue + " · " + service.clusterID) {
-            HStack(spacing: 10) {
-                Button("Remove…", systemImage: "trash", role: .destructive) { confirmingRemoval = true }
-                    .buttonStyle(.bordered).buttonBorderShape(.capsule)
-                    .disabled(model.busy || model.internetBusy)
-                Button("Rename", systemImage: "pencil") { renaming = true }.buttonStyle(.bordered).buttonBorderShape(.capsule)
-                Button("Connection Details", systemImage: "link") { connecting = true }
-                    .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+        HStack(spacing: 16) {
+            WitnessGuardedServiceIcon(service: service, size: 48)
+            ConsolePageHeader(title: service.name, subtitle: service.kind.rawValue + " · " + service.clusterID) {
+                HStack(spacing: 10) {
+                    Button("Remove…", systemImage: "trash", role: .destructive) { confirmingRemoval = true }
+                        .buttonStyle(.bordered).buttonBorderShape(.capsule)
+                        .disabled(model.busy || model.internetBusy)
+                    Button("Rename", systemImage: "pencil") { renaming = true }.buttonStyle(.bordered).buttonBorderShape(.capsule)
+                    Button("Connection Details", systemImage: "link") { connecting = true }
+                        .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                }
             }
         }
         if let removalError { ConsoleIssue(title: "Service could not be removed", detail: removalError) }

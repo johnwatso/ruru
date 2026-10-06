@@ -38,7 +38,12 @@ existing owner; choosing, clearing or cancelling updates only the preview's
 metadata. It opens no database, listener or Keychain. The Preferred Primary
 image uses this fixture rather than a live workload.
 
-The screenshot in the README shows this preview, not a live authority. Sparkle is disabled in preview mode, including network checks and preference writes. Do not enable login registration, alter power settings, or deploy a tunnel as part of development verification.
+For README captures, `--preview-screenshots` supplies a running/connected display
+with Home Mac and Backup Mac history and `https://gaurd.ruruapp.dev`. Add
+`--preview-light` or `--preview-dark` to override only this process's appearance,
+without changing system preferences. Capture the window without the cursor.
+
+The screenshots in the README show isolated preview data, not a live authority. Sparkle is disabled in preview mode, including network checks and preference writes. Do not enable login registration, alter power settings, or deploy a tunnel as part of development verification.
 
 ## Updates
 

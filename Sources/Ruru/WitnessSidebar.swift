@@ -4,7 +4,6 @@ import SwiftUI
 /// Local Sequoia-compatible adaptation of SwiftMiner's sidebar.
 struct WitnessSidebar: View {
     @Binding var selection: WitnessPage?
-    @EnvironmentObject private var model: WitnessAppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var selectionHighlightNamespace
     @State private var rowFrames: [WitnessPage: CGRect] = [:]
@@ -37,11 +36,6 @@ struct WitnessSidebar: View {
                 }
 
                 Spacer(minLength: 0)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    WitnessStatusBadge(text: model.statusText, health: model.serviceHealth)
-                    Text("Version \(witnessVersion)").font(.caption).foregroundStyle(.secondary)
-                }.padding(16)
             }
         }
     }

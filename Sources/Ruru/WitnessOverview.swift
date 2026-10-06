@@ -31,6 +31,7 @@ struct WitnessOverview: View {
                         quickActions.frame(minWidth: 280, maxWidth: .infinity)
                         systemDetails.frame(minWidth: 340, maxWidth: .infinity)
                     }
+                    .fixedSize(horizontal: false, vertical: true)
                     VStack(alignment: .leading, spacing: 32) {
                         quickActions
                         systemDetails
@@ -186,7 +187,7 @@ struct WitnessOverview: View {
     }
 
     private var quickActions: some View {
-        ConsoleSection("Quick Actions", padding: 14, headerInset: 10) {
+        ConsoleSection("Quick Actions", padding: 14, headerInset: 10, fillsAvailableHeight: true) {
             VStack(spacing: 0) {
                 ConsoleActionRow(title: "Manage Services", subtitle: "Ownership, servers and connection details", symbol: "checkmark.shield") { onNavigate(.guarding) }
                 Divider().padding(.leading, 42)
@@ -198,7 +199,7 @@ struct WitnessOverview: View {
     }
 
     private var systemDetails: some View {
-        ConsoleSection("System") {
+        ConsoleSection("System", fillsAvailableHeight: true) {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 18, verticalSpacing: 14) {
                 systemRow("Computer", symbol: "desktopcomputer", value: host.computerName)
                 systemRow("Architecture", symbol: "cpu", value: host.architecture)

@@ -11,8 +11,9 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
   Guarding, Internet Access, Activity and Settings. Navigation starts directly
   below the window controls, without an app branding or section header. Match
   SwiftMiner's 14pt row typography, 8pt outer gutters, 2pt row gaps, sidebar
-  material and animated 11pt rounded selection. Preserve Ruru's status/version
-  footer, native button accessibility and reduced-motion/transparency fallbacks.
+  material and animated 11pt rounded selection. Keep the sidebar free of a
+  status/version footer; preserve native button accessibility and
+  reduced-motion/transparency fallbacks.
   The extra 20pt over SwiftMiner accommodates the full Internet Access label.
   Service cards open the corresponding destination.
 - Reuse the local adaptations in `WitnessConsoleStyle.swift`: `ConsolePageHeader`,
@@ -60,7 +61,8 @@ icon with a live status dot, app name/status/environment, and version/node/uptim
 facts. Put named issue review actions at the foot of the summary. Follow with
 four equal service cards (Authority, Guarding, Internet Access, Activity), using
 SwiftBot's 168pt minimum width and a 2×2 fallback. Quick Actions and a read-only
-System inspector sit side by side when wide and stack when narrow; Recent
+System inspector share equal card heights when side by side, with spare space
+below the shorter card's content. They stack at natural heights when narrow; Recent
 Activity follows. Keep the full catalog and individual ownership in Guarding.
 Uptime is display-only and uses the monotonic service start instant. Use native
 Sequoia button styles in place of SwiftBot's macOS 26 glass controls.

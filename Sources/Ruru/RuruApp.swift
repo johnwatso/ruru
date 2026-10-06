@@ -62,6 +62,23 @@ private struct WitnessWindowContent: View {
 
     var body: some View {
         WitnessDashboard().onAppear {
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("--preview-screenshots") {
+                if arguments.contains("--preview-dark") {
+                    NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+                } else if arguments.contains("--preview-light") {
+                    NSApplication.shared.appearance = NSAppearance(named: .aqua)
+                }
+                if arguments.contains("--preview-light") || arguments.contains("--preview-dark") {
+                    Task { @MainActor in
+                        if let window = NSApplication.shared.windows.first(where: { $0.title == "Ruru" && $0.canBecomeMain }) {
+                            let frame = window.frame
+                            window.setFrame(NSRect(x: frame.minX, y: frame.maxY - 850,
+                                                   width: 1305, height: 850), display: true)
+                        }
+                    }
+                }
+            }
             delegate.model = model
             delegate.openMainWindow = { openWindow(id: "witness") }
             model.applyDockVisibility()
