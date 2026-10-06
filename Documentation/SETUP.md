@@ -54,6 +54,20 @@ Start the service and re-pair each remaining service’s servers using its new
 files into active storage. No leases/history are migrated. Removing service
 entries alone does not replace SQLite storage.
 
+## Software updates
+
+Open **Settings → Software Updates** to choose Stable or Beta, enable background
+update prompts, or opt in to automatic downloads, then save. **Check for Updates**
+is also available in the Ruru application menu and menu bar menu. Downloaded
+updates normally install when Ruru quits; a requested install/relaunch briefly
+interrupts the authority and keeps its restart quarantine.
+
+ShipHook handles publishing. Update controls remain unavailable until its public
+signing key is included in the build and feeds are published. Current development
+previews do not claim a working public update channel.
+
+See the [isolated Software Updates preview](Images/software-updates.png).
+
 ## Cloudflare Internet Access
 
 Create an API token with **Zone → Zone → Read**, **Zone → DNS → Edit**, and
@@ -114,6 +128,18 @@ Open a service to see its current owner, retained activity and **Known Servers**
 There is no two-server limit. Known servers are successful past participants,
 not a live uptime roster; standby servers may not appear until they acquire
 ownership. Other applications must [implement the lease protocol](INTEGRATIONS.md).
+
+## Choose a Preferred Primary
+
+Open a service in **Guarding → Preferred Primary → Choose Primary**. Choose an
+observed server or enter the intended standby's stable node ID, then Save
+Preference. Clear Preference removes the preference. Current Owner continues
+to show the actual lease holder.
+
+Updated clients can use this selection for coordinated return while keeping
+failover available. Saving it alone does not transfer ownership, and older
+SwiftBots keep their current behavior. See [Preferred Primary](PRIMARY_PREFERENCE.md)
+for the client update contract.
 
 ## Readable server names
 

@@ -62,12 +62,18 @@ enum HTTPParser {
 public struct WitnessServiceCredential: Sendable {
     public let clusterID: String
     public let token: String
-    public init(clusterID: String, token: String) { self.clusterID = clusterID; self.token = token }
+    public let primaryPreference: WitnessPrimaryPreference
+    public init(clusterID: String, token: String, primaryPreference: WitnessPrimaryPreference = .init()) {
+        self.clusterID = clusterID
+        self.token = token
+        self.primaryPreference = primaryPreference
+    }
 }
 
 struct WitnessRouter: Sendable {
     let store: LeaseStore
     private let codes: [String: Data]
+    private let policies: [String: WitnessServicePolicy]
     private static let authContext = Data("SwiftMesh-witness-auth-v1".utf8)
 
     init(store: LeaseStore, clusterID: String, token: String) throws {
@@ -83,12 +89,16 @@ struct WitnessRouter: Sendable {
             guard !service.clusterID.isEmpty, service.clusterID.utf8.count <= 128,
                   !service.clusterID.contains(where: { $0.isNewline }),
                   service.token.utf8.count >= 32, service.token.utf8.count <= 512,
-                  !service.token.contains(where: \.isWhitespace) else { throw WitnessError.invalidConfiguration }
+                  !service.token.contains(where: \.isWhitespace),
+                  service.primaryPreference.isValid else { throw WitnessError.invalidConfiguration }
             let key = SymmetricKey(data: Data(service.token.utf8))
             codes[service.clusterID] = Data(HMAC<SHA256>.authenticationCode(for: Self.authContext, using: key))
         }
         self.store = store
         self.codes = codes
+        policies = Dictionary(uniqueKeysWithValues: services.map {
+            ($0.clusterID, WitnessServicePolicy(clusterID: $0.clusterID, preference: $0.primaryPreference))
+        })
     }
 
     func route(_ request: HTTPRequest) async -> LeaseReply {
@@ -99,6 +109,19 @@ struct WitnessRouter: Sendable {
                 return LeaseReply(status: ready ? 200 : 503,
                                   body: Data((ready ? #"{"ready":true}"# : #"{"ready":false}"#).utf8))
             } catch { return .error("authority_unavailable", status: 503) }
+        }
+        if request.method == "POST", request.path == "/v1/service/policy" {
+            guard let allowedCluster = authorizedCluster(request.headers["authorization"]) else {
+                return .error("unauthorized", status: 401)
+            }
+            guard !request.body.isEmpty, request.body.count <= HTTPParser.maxBodyBytes,
+                  let payload = try? JSONDecoder().decode(WitnessServicePolicyRequest.self, from: request.body) else {
+                return .error("invalid_request", status: 400)
+            }
+            guard let policy = policies[payload.clusterID] else { return .error("unknown_cluster", status: 403) }
+            guard payload.clusterID == allowedCluster else { return .error("forbidden_cluster", status: 403) }
+            guard let body = try? JSONEncoder().encode(policy) else { return .error("authority_unavailable", status: 503) }
+            return LeaseReply(status: 200, body: body)
         }
         guard request.method == "POST", request.path.hasPrefix("/v1/lease/"),
               let action = LeaseAction(rawValue: String(request.path.dropFirst("/v1/lease/".count))) else {

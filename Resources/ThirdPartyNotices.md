@@ -38,6 +38,17 @@ license, reproduced in `DuckDB-LICENSE.txt` beside this notice together with the
 upstream engine's third-party licenses and notices. The Swift API embeds the
 upstream C++ database engine; application-owned code remains Swift.
 
+## Sparkle and SwiftMiner updater integration
+
+Ruru embeds Sparkle 2.9.5, matching SwiftMiner:
+https://github.com/sparkle-project/Sparkle/releases/tag/2.9.5
+
+Sparkle is copyright its contributors and distributed under its upstream
+license, reproduced in `Sparkle-LICENSE.txt`. The Swift updater wrapper and
+standard user-driver wording are adapted from SwiftMiner
+(https://github.com/johnwatso/SwiftMiner), copyright (c) 2026 johnwatso, under
+the MIT license reproduced above. Ruru keeps its own feeds and authority lifecycle.
+
 ## cloudflared
 
 The application includes the official Cloudflare connector, version 2026.9.3,

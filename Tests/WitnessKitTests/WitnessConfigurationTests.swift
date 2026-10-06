@@ -3,6 +3,56 @@ import XCTest
 import WitnessKit
 
 final class WitnessConfigurationTests: XCTestCase {
+    func testPrimaryPreferencePersistsPerServiceAndClearingAdvancesRevision() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("RuruPrimaryPreference-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var configuration = WitnessConfiguration()
+        let worker = GuardedService(name: "Worker", clusterID: "worker")
+        configuration.additionalServices = [worker]
+        XCTAssertTrue(try configuration.setPreferredPrimary("primary-a", for: "swiftbot"))
+        XCTAssertTrue(try configuration.setPreferredPrimary("worker-b", for: worker.id))
+        XCTAssertFalse(try configuration.setPreferredPrimary("primary-a", for: "swiftbot"))
+        try WitnessStorage.save(configuration, in: folder)
+        var restored = try WitnessStorage.load(from: folder)
+        XCTAssertEqual(restored.primaryPreference(for: "swiftbot").preferredPrimaryNodeID, "primary-a")
+        XCTAssertEqual(restored.primaryPreference(for: worker.id).preferredPrimaryNodeID, "worker-b")
+        XCTAssertEqual(restored.primaryPreference(for: "swiftbot").revision, 1)
+        XCTAssertTrue(try restored.setPreferredPrimary(nil, for: "swiftbot"))
+        try WitnessStorage.save(restored, in: folder)
+        let cleared = try WitnessStorage.load(from: folder)
+        XCTAssertNil(cleared.primaryPreference(for: "swiftbot").preferredPrimaryNodeID)
+        XCTAssertEqual(cleared.primaryPreference(for: "swiftbot").revision, 2)
+        XCTAssertEqual(cleared.primaryPreference(for: worker.id).revision, 1)
+        XCTAssertEqual(cleared.clusterID, configuration.clusterID)
+        XCTAssertEqual(cleared.tunnel, configuration.tunnel)
+    }
+
+    func testPreferenceRejectsInvalidIDsAndRemovedServicesCannotInheritPreferences() throws {
+        var configuration = WitnessConfiguration()
+        for invalid in ["", "  node", "node\n", String(repeating: "a", count: 129)] {
+            XCTAssertThrowsError(try configuration.setPreferredPrimary(invalid, for: "swiftbot"))
+        }
+        XCTAssertThrowsError(try configuration.setPreferredPrimary("node", for: "missing"))
+        try configuration.setPreferredPrimary("node-a", for: "swiftbot")
+        try configuration.removeGuardedService(id: "swiftbot")
+        XCTAssertTrue(configuration.servicePrimaryPreferences.isEmpty)
+        let replacement = GuardedService(name: "Replacement", clusterID: configuration.clusterID)
+        configuration.additionalServices = [replacement]
+        XCTAssertNil(configuration.primaryPreference(for: replacement.id).preferredPrimaryNodeID)
+        XCTAssertEqual(configuration.primaryPreference(for: replacement.id).revision, 0)
+        configuration.servicePrimaryPreferences["missing"] = .init(preferredPrimaryNodeID: "node")
+        XCTAssertFalse(configuration.isValid)
+    }
+
+    func testPreferenceRevisionExhaustionFailsWithoutChangingSelection() throws {
+        var configuration = WitnessConfiguration()
+        configuration.servicePrimaryPreferences["swiftbot"] = .init(preferredPrimaryNodeID: "node-a", revision: Int64.max)
+        XCTAssertThrowsError(try configuration.setPreferredPrimary("node-b", for: "swiftbot"))
+        XCTAssertEqual(configuration.primaryPreference(for: "swiftbot").preferredPrimaryNodeID, "node-a")
+        configuration.servicePrimaryPreferences["swiftbot"] = .init(revision: -1)
+        XCTAssertFalse(configuration.isValid)
+    }
+
     func testLegacySettingsRetainTheirValuesWithoutEnablingInternetAccess() throws {
         let data = Data(#"{"clusterID":"my-cluster","bindAddress":"127.0.0.1","port":38990,"publicEndpoint":"https://witness.example.com","startAutomatically":false}"#.utf8)
         let configuration = try JSONDecoder().decode(WitnessConfiguration.self, from: data)
@@ -14,6 +64,7 @@ final class WitnessConfigurationTests: XCTestCase {
         XCTAssertFalse(configuration.tunnel.isConfigured)
         XCTAssertTrue(configuration.isValid)
         XCTAssertTrue(configuration.nodeDisplayNames.isEmpty)
+        XCTAssertTrue(configuration.servicePrimaryPreferences.isEmpty)
         let restored = try JSONDecoder().decode(WitnessConfiguration.self, from: JSONEncoder().encode(configuration))
         XCTAssertEqual(restored.tunnel.instanceID, configuration.tunnel.instanceID)
     }

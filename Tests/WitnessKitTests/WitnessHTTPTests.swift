@@ -3,6 +3,129 @@ import XCTest
 @testable import WitnessKit
 
 final class WitnessHTTPTests: XCTestCase {
+    func testPolicyDuringRestartQuarantineDoesNotGrantPermission() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("RuruPolicyQuarantine-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("leases.duckdb")
+        let clock = TestClock(0)
+        var previous: LeaseStore? = try LeaseStore(databaseURL: url, clock: clock.now)
+        _ = await previous!.apply(.acquire, request: LeaseRequest(clusterID: "bot", nodeID: "old-owner", term: 9))
+        previous = nil
+        let restarted = try LeaseStore(databaseURL: url, clock: clock.now)
+        let router = try WitnessRouter(store: restarted, services: [WitnessServiceCredential(clusterID: "bot", token: token,
+            primaryPreference: .init(preferredPrimaryNodeID: "new-primary", revision: 1))])
+        let policy = await router.route(HTTPRequest(method: "POST", path: "/v1/service/policy",
+            headers: ["authorization": "Bearer " + token], body: try JSONEncoder().encode(["clusterID": "bot"])))
+        XCTAssertEqual(policy.status, 200)
+        let denied = await router.route(try request(token: token))
+        XCTAssertEqual(denied.status, 503)
+        let snapshot = try await restarted.snapshot()
+        XCTAssertEqual(snapshot.recoverySeconds, 30)
+        XCTAssertEqual(snapshot.leases.first?.remainingSeconds, 0)
+        XCTAssertEqual(snapshot.leases.first?.term, 10)
+        XCTAssertEqual(snapshot.events.count, 1)
+    }
+
+    func testServicePolicyRequiresScopedCredentialsAndDoesNotAllocateLeases() async throws {
+        let database = try store()
+        let workerToken = String(repeating: "worker-secret-", count: 4)
+        let router = try WitnessRouter(store: database, services: [
+            WitnessServiceCredential(clusterID: "bot", token: token,
+                primaryPreference: .init(preferredPrimaryNodeID: "preferred-a", revision: 4)),
+            WitnessServiceCredential(clusterID: "worker", token: workerToken)
+        ])
+        func policyRequest(_ cluster: String, credential: String?) -> HTTPRequest {
+            HTTPRequest(method: "POST", path: "/v1/service/policy",
+                headers: credential.map { ["authorization": "Bearer " + $0] } ?? [:],
+                body: try! JSONEncoder().encode(["clusterID": cluster]))
+        }
+        for credential in [nil, "incorrect"] {
+            let denied = await router.route(policyRequest("bot", credential: credential))
+            XCTAssertEqual(denied.status, 401)
+        }
+        let crossService = await router.route(policyRequest("bot", credential: workerToken))
+        XCTAssertEqual(crossService.status, 403)
+        let unknown = await router.route(policyRequest("missing", credential: token))
+        XCTAssertEqual(unknown.status, 403)
+        let accepted = await router.route(policyRequest("bot", credential: token))
+        XCTAssertEqual(accepted.status, 200)
+        let policy = try JSONDecoder().decode(WitnessServicePolicy.self, from: accepted.body)
+        XCTAssertEqual(policy.version, 1)
+        XCTAssertEqual(policy.clusterID, "bot")
+        XCTAssertEqual(policy.preferredPrimaryNodeID, "preferred-a")
+        XCTAssertEqual(policy.preferenceRevision, 4)
+        XCTAssertNil(accepted.body.range(of: Data(token.utf8)))
+        let emptyPolicy = await router.route(policyRequest("worker", credential: workerToken))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: emptyPolicy.body) as? [String: Any])
+        XCTAssertTrue(object["preferredPrimaryNodeID"] is NSNull)
+        let snapshot = try await database.snapshot()
+        XCTAssertTrue(snapshot.leases.isEmpty)
+        XCTAssertTrue(snapshot.events.isEmpty)
+        let malformed = await router.route(HTTPRequest(method: "POST", path: "/v1/service/policy",
+            headers: ["authorization": "Bearer " + token], body: Data(#"{"clusterID":true}"#.utf8)))
+        XCTAssertEqual(malformed.status, 400)
+        let health = await router.route(HTTPRequest(method: "GET", path: "/health", headers: [:], body: Data()))
+        XCTAssertEqual(String(decoding: health.body, as: UTF8.self), #"{"ready":true}"#)
+    }
+
+    func testLivePreferenceChangeAndClearDoNotTransferOwnershipOrBlockFailover() async throws {
+        let database = try store()
+        let server = try WitnessHTTPServer(store: database, services: [
+            WitnessServiceCredential(clusterID: "bot", token: token,
+                primaryPreference: .init(preferredPrimaryNodeID: "offline-primary", revision: 1))
+        ])
+        let port = try await server.start(port: 0)
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        do {
+            func send(path: String, body: Data) async throws -> (Data, Int) {
+                var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)" + path)!)
+                request.httpMethod = "POST"
+                request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+                request.httpBody = body
+                let (data, response) = try await session.data(for: request)
+                return (data, (response as? HTTPURLResponse)?.statusCode ?? -1)
+            }
+            let acquired = try await send(path: "/v1/lease/acquire",
+                body: JSONEncoder().encode(LeaseRequest(clusterID: "bot", nodeID: "failover", term: 0)))
+            XCTAssertEqual(acquired.1, 200)
+            let grant = try JSONDecoder().decode(LeaseGrant.self, from: acquired.0)
+            try await server.configureServices([WitnessServiceCredential(clusterID: "bot", token: token,
+                primaryPreference: .init(preferredPrimaryNodeID: "new-primary", revision: 2))])
+            let fetched = try await send(path: "/v1/service/policy", body: JSONEncoder().encode(["clusterID": "bot"]))
+            let changed = try JSONDecoder().decode(WitnessServicePolicy.self, from: fetched.0)
+            XCTAssertEqual(changed.preferredPrimaryNodeID, "new-primary")
+            XCTAssertEqual(changed.preferenceRevision, 2)
+            do {
+                try await server.configureServices([WitnessServiceCredential(clusterID: "bot", token: token,
+                    primaryPreference: .init(preferredPrimaryNodeID: "node", revision: -1))])
+                XCTFail("Invalid preference was accepted")
+            } catch { }
+            let retained = try await send(path: "/v1/service/policy", body: JSONEncoder().encode(["clusterID": "bot"]))
+            XCTAssertEqual(try JSONDecoder().decode(WitnessServicePolicy.self, from: retained.0), changed)
+            let competing = try await send(path: "/v1/lease/acquire",
+                body: JSONEncoder().encode(LeaseRequest(clusterID: "bot", nodeID: "new-primary", term: 0)))
+            XCTAssertEqual(competing.1, 409)
+            let renewed = try await send(path: "/v1/lease/renew",
+                body: JSONEncoder().encode(LeaseRequest(clusterID: "bot", nodeID: "failover", term: grant.term)))
+            XCTAssertEqual(renewed.1, 200)
+            try await server.configureServices([WitnessServiceCredential(clusterID: "bot", token: token,
+                primaryPreference: .init(revision: 3))])
+            let cleared = try await send(path: "/v1/service/policy", body: JSONEncoder().encode(["clusterID": "bot"]))
+            let value = try JSONDecoder().decode(WitnessServicePolicy.self, from: cleared.0)
+            XCTAssertNil(value.preferredPrimaryNodeID)
+            XCTAssertEqual(value.preferenceRevision, 3)
+            let snapshot = try await database.snapshot()
+            XCTAssertEqual(snapshot.leases.first?.ownerNodeID, "failover")
+            XCTAssertEqual(snapshot.leases.first?.term, grant.term)
+            XCTAssertEqual(snapshot.events.count, 1)
+            try await server.configureServices([])
+            let removed = try await send(path: "/v1/service/policy", body: JSONEncoder().encode(["clusterID": "bot"]))
+            XCTAssertEqual(removed.1, 401)
+            await server.stop()
+        } catch { await server.stop(); throw error }
+    }
+
     private let token = String(repeating: "test-authority-", count: 4)
 
     private func store(clock: (@Sendable () -> Double)? = nil) throws -> LeaseStore {

@@ -37,6 +37,16 @@ final class WitnessAppModel: ObservableObject {
     init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--preview")) {
         self.preview = preview
         if preview {
+            if ProcessInfo.processInfo.arguments.contains("--preview-primary-preference") {
+                // Static, ephemeral UI fixtures. No store, listener or credentials.
+                snapshot = WitnessSnapshot(recoverySeconds: 0,
+                    leases: [LeaseStatus(clusterID: configuration.clusterID, ownerNodeID: "backup-mac", term: 7,
+                                         remainingSeconds: 26, ownerNodeName: "Backup Mac")],
+                    events: [WitnessEvent(clusterID: configuration.clusterID, id: 2, time: Date(), action: "Acquired",
+                                          nodeID: "backup-mac", term: 7, nodeName: "Backup Mac"),
+                             WitnessEvent(clusterID: configuration.clusterID, id: 1, time: Date(), action: "Acquired",
+                                          nodeID: "home-mac", term: 6, nodeName: "Home Mac")])
+            }
             if ProcessInfo.processInfo.arguments.contains("--preview-legacy-storage") {
                 legacyStorageNeedsReplacement = true
                 state = .failed
@@ -167,6 +177,10 @@ final class WitnessAppModel: ObservableObject {
         draft.primaryServiceName = configuration.primaryServiceName
         draft.primaryServiceRemoved = configuration.primaryServiceRemoved
         draft.additionalServices = configuration.additionalServices
+        draft.servicePrimaryPreferences = configuration.servicePrimaryPreferences
+        if draft.clusterID != configuration.clusterID, !configuration.primaryServiceRemoved {
+            try draft.setPreferredPrimary(nil, for: "swiftbot")
+        }
         guard draft.isValid else { throw WitnessStorage.ConfigurationError.invalid }
         guard !busy, !internetBusy, !savingConfiguration else { throw WitnessStorage.ConfigurationError.invalid }
         savingConfiguration = true
@@ -317,7 +331,8 @@ final class WitnessAppModel: ObservableObject {
         let tokens = tokens ?? serviceCredentials
         return try configuration.guardedServices.map { service in
             guard let token = tokens[service.clusterID] else { throw WitnessStorage.ConfigurationError.invalid }
-            return WitnessServiceCredential(clusterID: service.clusterID, token: token)
+            return WitnessServiceCredential(clusterID: service.clusterID, token: token,
+                                            primaryPreference: configuration.primaryPreference(for: service.id))
         }
     }
 
@@ -388,6 +403,7 @@ final class WitnessAppModel: ObservableObject {
               cluster != configuration.clusterID else { throw WitnessStorage.ConfigurationError.invalid }
         saved.clusterID = cluster
         saved.nodeDisplayNames = [:]
+        saved.servicePrimaryPreferences = [:]
         for index in saved.additionalServices.indices {
             saved.additionalServices[index].clusterID = "service-" + UUID().uuidString.lowercased()
             saved.additionalServices[index].nodeDisplayNames = [:]
@@ -451,6 +467,32 @@ final class WitnessAppModel: ObservableObject {
         guard saved.isValid else { throw WitnessStorage.ConfigurationError.invalid }
         if !preview { try WitnessStorage.save(saved) }
         configuration = saved
+    }
+
+    func setPreferredPrimary(_ nodeID: String?, for serviceID: String) async throws {
+        guard !busy, !internetBusy, !savingConfiguration, !shuttingDown else { throw WitnessStorage.ConfigurationError.invalid }
+        var saved = configuration
+        guard try saved.setPreferredPrimary(nodeID, for: serviceID) else { return }
+        guard saved.isValid else { throw WitnessStorage.ConfigurationError.invalidPrimaryPreference }
+        let access = server == nil ? nil : try accessCredentials(configuration: saved)
+        busy = true
+        defer { busy = false }
+        // Publish operator intent only after its durable configuration checkpoint.
+        // The same store, leases and authority clock stay alive.
+        if !preview { try WitnessStorage.save(saved) }
+        configuration = saved
+        do { if let access { try await server?.configureServices(access) } }
+        catch {
+            await server?.stop()
+            server = nil
+            listenerPort = nil
+            state = .failed
+            serviceStartedAt = nil
+            self.error = error.localizedDescription
+            await internetAccess.stop()
+            internetStatus = WitnessInternetStatus()
+            throw error
+        }
     }
 
     func hasCredential(for clusterID: String) -> Bool { serviceCredentials[clusterID]?.isEmpty == false }

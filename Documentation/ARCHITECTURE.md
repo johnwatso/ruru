@@ -24,6 +24,11 @@ Success returns `ownerNodeID`, `term`, `expiresInSeconds`; release returns
 `{"released":true}`. Errors return a machine-readable `error` with
 400/401/403/409/503 status. JSON field names match SwiftBot's `MeshWitnessClient`.
 
+`POST /v1/service/policy` is a separate, read-only authenticated route for the
+configured service's Preferred Primary and preference revision. It never
+changes ownership and returns no credential/display-name data. Legacy lease
+request/reply JSON is unchanged. See [the client contract](PRIMARY_PREFERENCE.md).
+
 Bearer authorization uses a constant-time CryptoKit HMAC check. The listener admits only explicitly configured service clusters. Each service
 has a separate Keychain bearer token, scoped to that cluster. It never accepts
 arbitrary new clusters from requests. Participants within a service are trusted; this token is separate from mesh transport and
@@ -142,6 +147,29 @@ Swift package when it is not cached. Setup remains user initiated and the
 listener stays on IPv4 loopback for managed access. No live tunnel, login item,
 power setting or remote Mac was changed during development.
 
+## Software updates
+
+Ruru embeds Sparkle **2.9.5**, matching SwiftMiner, through its native Swift API.
+The app owns one updater for its lifetime. Settings drafts expose Stable/Beta,
+background prompts and automatic downloads, with Check for Updates also in the
+application and menu bar menus. Background checks default on; automatic downloads
+default off. Sparkle owns its scheduler and persisted update preferences; there
+is no second polling timer. A separate Ruru preference selects the channel.
+
+ShipHook owns release signing, publication and appcast items. The stable feed is
+`https://johnwatso.github.io/ruru/appcast.xml`; beta uses `/ruru/beta/appcast.xml`.
+`docs/` holds the source feeds for publishing, initially empty. The ShipHook
+Ed25519 public key is pending; the build setting `SPARKLE_PUBLIC_ED_KEY` is empty
+and the updater cannot start until a valid public key is embedded. No private
+release key or local signing pipeline is part of this repository.
+
+Downloaded updates follow Sparkle's normal install-on-quit behavior. Ruru does
+not copy SwiftMiner's mining-specific forced/scheduled restart policy. A requested
+update relaunch waits for listener/connector shutdown, and ordinary termination
+also awaits shutdown. Durable terms, lifetime locking and restart quarantine
+remain owned by WitnessKit. Update checks do not restart the authority. Preview
+mode never starts Sparkle, checks feeds or writes updater preferences.
+
 ## Native console
 
 The console combines SwiftBot's current Overview design with SwiftMiner's
@@ -192,3 +220,14 @@ registry; a standby that has never held ownership may not appear. Independent
 uptime probes, alerts and automatic application discovery are future work.
 Other apps must implement the lease protocol and stop output before their local
 monotonic permission expires; see [integrations](INTEGRATIONS.md).
+
+Per-service Primary preferences are non-secret settings keyed by stable service
+metadata ID. Selection/clearing checkpoints and synchronizes configuration
+before updating the live router. The router publishes a validated immutable
+policy alongside each admitted service credential; updating it preserves the
+store, epoch, terms and live leases. Service removal deletes its preference and
+revokes reads. New clusters from SQLite replacement start without preferences;
+changing the initial service's cluster clears its preference. Settings drafts
+preserve concurrent preference edits. Node IDs remain independent from names,
+observed history and current ownership. Compatible clients implement failover
+and coordinated return; the authority never forces a transfer.

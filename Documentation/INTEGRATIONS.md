@@ -51,6 +51,16 @@ unknown cluster is also rejected. Missing/incorrect credentials receive 401.
 `GET /health` reports only the readiness of the authority, without exposing
 service names, server IDs or credentials.
 
+## Preferred Primary
+
+Each service can store a Preferred Primary, separate from its live owner. A
+compatible client reads `POST /v1/service/policy` with its scoped bearer token
+and `{"clusterID":"..."}`. Ruru returns a versioned preferred node ID and
+revision. Reading/changing this intent never grants permission, blocks failover
+or revokes a live lease. See [Preferred Primary](PRIMARY_PREFERENCE.md) for the
+exact request/reply schema and safe handover requirements. Older clients retain
+their current selection behavior until updated.
+
 ## What the console knows
 
 Known Servers comes from successful ownership history and the last stored

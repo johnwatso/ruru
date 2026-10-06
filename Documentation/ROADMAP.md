@@ -1,5 +1,83 @@
 # Development log and next steps
 
+## 2026-10-06 — Per-service Preferred Primary
+
+- Added Guarding → service → Preferred Primary. Choose an observed server or
+  enter a stable node ID for an unseen standby; clear restores normal selection.
+  Current Owner remains separate and observed servers are not invented from a
+  preference. Metadata is keyed by stable service ID, saved durably before
+  publication, with revisions that survive relaunch and increment on actual
+  changes. Removing/replacing a service clears its preference. Settings drafts
+  preserve newer preferences instead of overwriting them.
+- Added authenticated read-only `POST /v1/service/policy`, version 1, scoped to
+  the existing service credential and cluster. Clearing returns explicit null.
+  Live policy edits preserve the listener, store, lease owner, term and expiry;
+  policy reads never grant ownership or write audit events. Quarantine still
+  blocks grants even when policy reads succeed. Lease request/reply JSON stays
+  unchanged. Added the client contract and a Claude implementation prompt.
+- All **75 Xcode Debug tests passed**, including isolated durable configuration,
+  revision overflow, service isolation/removal, live router changes, unavailable
+  preferred-node failover and restart quarantine. Native development preview
+  verified known-node selection, manual unseen standby entry, invalid-ID
+  rejection, cancellation and clearing while the existing owner stayed put.
+  The preview uses in-memory fixture metadata and touches no production storage,
+  listener, Keychain or update preferences.
+- Universal Release passed, version **0.2.0**, build **2026100615**. Verified
+  Intel/Apple silicon slices in all eight bundled Mach-O executables/frameworks,
+  macOS 15.0 load commands for Ruru, WitnessKit and the connector, and no SQLite
+  linkage or test helper. Strict signatures passed before/after ZIP extraction;
+  every bundled file and symlink matched the source. Sparkle's development
+  preflight passed with ShipHook's public key still pending and updates disabled.
+  The extracted Release preview confirmed manual and observed-server changes
+  while preserving the owner; saved a Preferred Primary documentation image
+  and stopped the preview. No production settings or credentials were edited.
+- Refreshed `Build/Release/Ruru.zip` (**73.8 MB**, 73,813,354 bytes), SHA-256
+  `8a90ae1135f40b7f2a5c50774f6c556bd648011971fae594724c29d52b397d20`.
+  The prior export is retained under
+  `Build/Previous/2026100612-before-preferred-primary/`. This remains an ad-hoc
+  development package. Actual Intel/Sequoia execution and coordinated handback
+  remain unverified; SwiftBot still needs the client integration. No publishing
+  or release-key setup changed for this feature.
+
+## 2026-10-06 — Sparkle support and ShipHook handoff
+
+- Added Sparkle **2.9.5**, matching SwiftMiner's installed package, through its
+  Swift API. Adapted its standard updater UI wording, Stable/Beta channels,
+  background prompt preference and optional automatic downloads. Added Check
+  for Updates to Settings, the application menu and menu bar menu. Preferences
+  remain drafts until Save. Sparkle owns scheduling and persisted check/download
+  preferences; Ruru stores only its channel selection.
+- Default background checks are enabled and automatic downloads disabled.
+  Updates use normal install-on-quit behavior rather than mining-specific forced
+  restart timing. Requested update relaunches await listener/connector shutdown;
+  ordinary termination retains the same shutdown path. Lease terms, protocol,
+  database locking and restart quarantine are unchanged. Preview never starts
+  Sparkle, checks a feed or writes update preferences.
+- ShipHook owns signing, publishing and appcast items. Added empty source feeds
+  under `docs/`, generated Info.plist properties in `project.yml`, Sparkle
+  licensing, a distribution entitlement file and a read-only Swift configuration
+  preflight. The owner confirmed ShipHook's public key is not available yet;
+  `SPARKLE_PUBLIC_ED_KEY` is intentionally empty and updates remain disabled.
+  The temporary local key generated before that clarification was deleted and
+  was never used to sign or publish anything. No private key remains part of
+  this setup. No ShipHook job, GitHub release or live authority was changed.
+- All **69 Xcode Debug tests passed**, including valid Stable/Beta feed selection
+  and rejection of missing/unresolved signing keys or unsafe feeds. The built
+  bundle's development preflight passed; strict publishing validation correctly
+  fails without ShipHook's public key. Native preview verified the update section
+  and unavailable controls. Universal Release passed. Verified arm64/x86_64
+  in the app, WitnessKit, connector, Sparkle and its nested helpers; app/authority
+  code still targets macOS 15. Strict signatures passed before and after ZIP
+  extraction; binary/icon/licence hashes matched and no SQLite linkage or test
+  helper was bundled. The extracted Release preview verified the final update
+  section; saved a Software Updates documentation image and stopped previews.
+- Refreshed the development export at `Build/Release/Ruru.zip` (**73.7 MB**),
+  build **2026100612**, SHA-256
+  `72458181fe9d1905db24a7da2ca665324a68ba887b112a1b64abb4df66649d7d`.
+  Preserved the previous export under `Build/Previous/2026100604-before-sparkle/`.
+  No release signature was generated. Live feeds, final archive signatures and end-to-end update/relaunch
+  need ShipHook provisioning; actual Intel/Sequoia execution remains untested.
+
 ## 2026-10-06 — Service removal, Dock option and SwiftBot Overview
 
 - Added Remove in guarded-service details with a native confirmation. Every

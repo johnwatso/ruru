@@ -46,6 +46,11 @@ public struct LeaseStatus: Identifiable, Sendable {
     public let term: Int64
     public let remainingSeconds: Double
     public let ownerNodeName: String?
+
+    public init(clusterID: String, ownerNodeID: String, term: Int64, remainingSeconds: Double, ownerNodeName: String? = nil) {
+        self.clusterID = clusterID; self.ownerNodeID = ownerNodeID; self.term = term
+        self.remainingSeconds = remainingSeconds; self.ownerNodeName = ownerNodeName
+    }
 }
 
 public struct WitnessEvent: Identifiable, Sendable {
@@ -56,6 +61,11 @@ public struct WitnessEvent: Identifiable, Sendable {
     public let nodeID: String
     public let term: Int64
     public let nodeName: String?
+
+    public init(clusterID: String, id: Int64, time: Date, action: String, nodeID: String, term: Int64, nodeName: String? = nil) {
+        self.clusterID = clusterID; self.id = id; self.time = time; self.action = action
+        self.nodeID = nodeID; self.term = term; self.nodeName = nodeName
+    }
 }
 
 /// Cosmetic metadata only. Ownership always uses the unchanged node ID and term.
@@ -72,6 +82,10 @@ public struct WitnessSnapshot: Sendable {
     public let recoverySeconds: Double
     public let leases: [LeaseStatus]
     public let events: [WitnessEvent]
+
+    public init(recoverySeconds: Double, leases: [LeaseStatus], events: [WitnessEvent]) {
+        self.recoverySeconds = recoverySeconds; self.leases = leases; self.events = events
+    }
 }
 
 enum WitnessError: LocalizedError {

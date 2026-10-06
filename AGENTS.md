@@ -11,6 +11,10 @@ and lease authority, not a SwiftBot bot/worker and not a root Swift package.
   Apple Intelligence and third-party UI libraries. Application-owned code must
   be Swift; prefer Swift dependency APIs, with native engine wrappers allowed.
   DuckDB uses the official Swift package pinned in `project.yml`.
+- Sparkle mirrors SwiftMiner's pinned 2.9.5 integration. ShipHook owns release
+  signing, publishing and appcast items. Only its public Ed25519 key belongs in
+  app configuration; never generate/export a release private key locally.
+  Updates remain disabled while that public key is missing.
 - `project.yml` is the XcodeGen source of truth. Run `xcodegen` after changes.
 - Build/test with Xcode, never root `swift build` or `swift test`:
   `xcodebuild -project Ruru.xcodeproj -scheme Ruru build`

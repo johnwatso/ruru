@@ -43,6 +43,11 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
 - Stop/Pause explain their operational effect using native confirmation dialogs.
 - Closing the window preserves the menu bar service and tunnel.
 - Settings → Appearance offers Show in Dock, off by default; it applies on Save.
+- Settings → Software Updates mirrors SwiftMiner's channel and update-check
+  controls with Sequoia-native styling. Preferences apply on Save. Missing
+  publishing configuration shows a plain unavailable message and disabled
+  controls. No build-setting names appear in the product flow. Installing an
+  update may interrupt authority service; explain that restart quarantine applies.
 
 No macOS 26-only APIs, third-party UI libraries or dependencies on SwiftBot's
 app target are permitted. Use the native Sequoia equivalent where SwiftBot uses
@@ -72,6 +77,12 @@ clients, and SwiftMesh pairing instructions only for a SwiftBot service.
 Distinguish current ownership from health. Label past participants “Previously
 observed”; do not call them connected, online or healthy without fresh evidence.
 Empty service ownership remains a neutral state.
+
+Keep Preferred Primary in a separate service-detail panel from Current Owner.
+Its sheet offers No preference, observed servers and manual node-ID entry for
+unobserved standbys. Show the selected stable ID and a separate marker on known
+server rows. Do not relabel the owner when a preference changes or imply the
+target is online. Explain compatible-client handover and continued failover.
 
 Service details include Remove with a confirmation describing lost renewal,
 normal lease expiry and retained terms/history. All services can be removed,

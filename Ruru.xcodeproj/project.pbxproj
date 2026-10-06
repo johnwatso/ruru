@@ -23,8 +23,10 @@
 		450FA8148A8536BD90E1E5DD /* WitnessHTTP.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98950267BA9C100B20121F7A /* WitnessHTTP.swift */; };
 		4CA3FB9A9A0716FD44C06BE3 /* DuckDBDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50C7050FD1324FC6941EE508 /* DuckDBDatabase.swift */; };
 		4CF6A2204BDC3941AB23D4E4 /* WitnessKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A39FDFEDFEDFC2836F06E21 /* WitnessKeychain.swift */; };
+		56B7A83DD2DC5C773E0EFF69 /* Sparkle-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 53BAEA3F57493AEC0AD71AD3 /* Sparkle-LICENSE.txt */; };
 		5BBB1913D8A1C40FC0C80D6C /* CloudflareDNSProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361B6452A7FA6B958247E39C /* CloudflareDNSProvider.swift */; };
 		5D7FB7DFC165C57646866D11 /* RuruApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41754CE5DDF212A3E5D325FC /* RuruApp.swift */; };
+		5F44C38191639314373AFE79 /* AppUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC039156A34B2774A50AC5D8 /* AppUpdater.swift */; };
 		6475CF92FE41D745F5FE317D /* WitnessGuardingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53A80BFD855DE6B16681EEB9 /* WitnessGuardingViews.swift */; };
 		71BCE4D9DD0B3213874E984D /* WitnessConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AC48CD1649D9EC56E0B2A88 /* WitnessConfiguration.swift */; };
 		76DB392066DE4E42DB1A5A29 /* WitnessSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 137FFD2E32735C0F299A0186 /* WitnessSidebar.swift */; };
@@ -34,14 +36,21 @@
 		7E8653657367B67F565D27F7 /* WitnessHTTPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCC680F6E57E9994BE1BC16D /* WitnessHTTPTests.swift */; };
 		85075B9DF2F33F14C790EA1C /* cloudflared-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 63879848CC86E8B53CE30747 /* cloudflared-LICENSE.txt */; };
 		8B9A58ADF82F7B7DDF648233 /* WitnessInternetAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB0DE86CD88FFB20F836FC48 /* WitnessInternetAccess.swift */; };
+		94CC5799968C03A87B27F47A /* UpToDateUserDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA714710207684117CA4DD8F /* UpToDateUserDriver.swift */; };
 		9BB7D0589625396D14C05F45 /* DuckDB-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 7F578465B5907701B1A9B525 /* DuckDB-LICENSE.txt */; };
+		9F4FC631F800A074F5698106 /* RuruUpdateConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B2014C61EC1C9648C1C16D /* RuruUpdateConfiguration.swift */; };
 		A74389F6485962044328FC80 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = ED154C66DC59BA294AB08EB8 /* LICENSE */; };
 		AED7BC71F13AA14CD7D1FF56 /* WitnessKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E8147699CA289B1F065001B /* WitnessKit.framework */; };
+		B215C536FA43AABAEF4101F4 /* WitnessPreferredPrimarySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E524AFD498B4D66069C76234 /* WitnessPreferredPrimarySheet.swift */; };
 		B624B5E8C68B5C4321515FE5 /* WitnessInternetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B7AEB160DF8CCFE691C0549 /* WitnessInternetTests.swift */; };
 		B6EF4145A27C8B6A0F7B62DE /* CloudflareTunnelClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF8D3058FEE8AA4A62308A99 /* CloudflareTunnelClient.swift */; };
 		BC0AC4BC26AC09E1664AA847 /* StorageProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4849497892124A0AC81F8B5D /* StorageProbe.swift */; };
 		C137E10FA5B102C47816647B /* WitnessOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139481AB632E0A52F5FEB8B2 /* WitnessOverview.swift */; };
+		C49D294B2238269ECF6490AE /* RuruUpdateConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B2014C61EC1C9648C1C16D /* RuruUpdateConfiguration.swift */; };
+		D13008D67C966B7313B57B1A /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = BFC20F58A33E9AACC1DBA1E3 /* Sparkle */; };
 		D19D9B1FCB678B93439A2B98 /* TunnelManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1600100A033FF4455132B5E /* TunnelManagerTests.swift */; };
+		D8B74A9100E149CA0788F484 /* RuruUpdateConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EC614478546A63BBFE4B88E /* RuruUpdateConfigurationTests.swift */; };
+		DCEE07C9D0AEFA6B9FA6A296 /* WitnessServicePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E693FF768D6A33CE65656535 /* WitnessServicePolicy.swift */; };
 		DDA8F9D69E61651CFEB1E197 /* ThirdPartyNotices.md in Resources */ = {isa = PBXBuildFile; fileRef = 71D3C228A732FABCE91E9177 /* ThirdPartyNotices.md */; };
 		E5E13F03418D35D816E9AF8D /* LeaseDatabaseSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC05E7778A1E41F80FAE8557 /* LeaseDatabaseSetup.swift */; };
 		EEE9B3D345E31C7AF9B2C3F6 /* LeaseStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26B9F3DF5E6D5909C8F67940 /* LeaseStore.swift */; };
@@ -112,6 +121,7 @@
 		2197E021E81DE5F0EC0DD31C /* LeaseModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseModels.swift; sourceTree = "<group>"; };
 		26B9F3DF5E6D5909C8F67940 /* LeaseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseStore.swift; sourceTree = "<group>"; };
 		30683891C4D2D3A7A796B86F /* DatabaseInstanceLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseInstanceLock.swift; sourceTree = "<group>"; };
+		31B2014C61EC1C9648C1C16D /* RuruUpdateConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruUpdateConfiguration.swift; sourceTree = "<group>"; };
 		361B6452A7FA6B958247E39C /* CloudflareDNSProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareDNSProvider.swift; sourceTree = "<group>"; };
 		41754CE5DDF212A3E5D325FC /* RuruApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruApp.swift; sourceTree = "<group>"; };
 		470816112A8C7BD4807FA2F8 /* WitnessStorageProbe */ = {isa = PBXFileReference; includeInIndex = 0; path = WitnessStorageProbe; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -119,8 +129,10 @@
 		4A163ADE0242C15F834D9531 /* ruru.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = ruru.icon; sourceTree = "<group>"; };
 		4E8147699CA289B1F065001B /* WitnessKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = WitnessKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		4EB1D944D9DF13483B3F58F9 /* WitnessHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessHTTPServer.swift; sourceTree = "<group>"; };
+		4EC614478546A63BBFE4B88E /* RuruUpdateConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruUpdateConfigurationTests.swift; sourceTree = "<group>"; };
 		50C7050FD1324FC6941EE508 /* DuckDBDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuckDBDatabase.swift; sourceTree = "<group>"; };
 		53A80BFD855DE6B16681EEB9 /* WitnessGuardingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessGuardingViews.swift; sourceTree = "<group>"; };
+		53BAEA3F57493AEC0AD71AD3 /* Sparkle-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Sparkle-LICENSE.txt"; sourceTree = "<group>"; };
 		63879848CC86E8B53CE30747 /* cloudflared-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "cloudflared-LICENSE.txt"; sourceTree = "<group>"; };
 		661580073990BB810644BED5 /* LeaseStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseStoreTests.swift; sourceTree = "<group>"; };
 		665E47E1E6268C552D5F5490 /* DuckDBStorageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuckDBStorageTests.swift; sourceTree = "<group>"; };
@@ -135,10 +147,14 @@
 		891A5721155305E6E037FA30 /* WitnessConsoleStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessConsoleStyle.swift; sourceTree = "<group>"; };
 		900E2AEDDE0AEC7F10FBF786 /* Ruru.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Ruru.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		98950267BA9C100B20121F7A /* WitnessHTTP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessHTTP.swift; sourceTree = "<group>"; };
+		AA714710207684117CA4DD8F /* UpToDateUserDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpToDateUserDriver.swift; sourceTree = "<group>"; };
 		BC05E7778A1E41F80FAE8557 /* LeaseDatabaseSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseDatabaseSetup.swift; sourceTree = "<group>"; };
 		BCC680F6E57E9994BE1BC16D /* WitnessHTTPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessHTTPTests.swift; sourceTree = "<group>"; };
 		C25D22615849F5D68ABBDD49 /* WitnessKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WitnessKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC039156A34B2774A50AC5D8 /* AppUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdater.swift; sourceTree = "<group>"; };
 		D1600100A033FF4455132B5E /* TunnelManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelManagerTests.swift; sourceTree = "<group>"; };
+		E524AFD498B4D66069C76234 /* WitnessPreferredPrimarySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessPreferredPrimarySheet.swift; sourceTree = "<group>"; };
+		E693FF768D6A33CE65656535 /* WitnessServicePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessServicePolicy.swift; sourceTree = "<group>"; };
 		E6EF0A5DA812F3130511BD6C /* WitnessConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessConfigurationTests.swift; sourceTree = "<group>"; };
 		ED154C66DC59BA294AB08EB8 /* LICENSE */ = {isa = PBXFileReference; path = LICENSE; sourceTree = "<group>"; };
 		EF8D3058FEE8AA4A62308A99 /* CloudflareTunnelClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareTunnelClient.swift; sourceTree = "<group>"; };
@@ -168,6 +184,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AED7BC71F13AA14CD7D1FF56 /* WitnessKit.framework in Frameworks */,
+				D13008D67C966B7313B57B1A /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -187,6 +204,7 @@
 			children = (
 				665E47E1E6268C552D5F5490 /* DuckDBStorageTests.swift */,
 				661580073990BB810644BED5 /* LeaseStoreTests.swift */,
+				4EC614478546A63BBFE4B88E /* RuruUpdateConfigurationTests.swift */,
 				D1600100A033FF4455132B5E /* TunnelManagerTests.swift */,
 				E6EF0A5DA812F3130511BD6C /* WitnessConfigurationTests.swift */,
 				BCC680F6E57E9994BE1BC16D /* WitnessHTTPTests.swift */,
@@ -202,6 +220,7 @@
 				F018A0414FBFE44DE1E447D5 /* cloudflared */,
 				63879848CC86E8B53CE30747 /* cloudflared-LICENSE.txt */,
 				7F578465B5907701B1A9B525 /* DuckDB-LICENSE.txt */,
+				53BAEA3F57493AEC0AD71AD3 /* Sparkle-LICENSE.txt */,
 				71D3C228A732FABCE91E9177 /* ThirdPartyNotices.md */,
 			);
 			path = Resources;
@@ -210,8 +229,11 @@
 		5FC28BA58315DC63CC565EBE /* Ruru */ = {
 			isa = PBXGroup;
 			children = (
+				CC039156A34B2774A50AC5D8 /* AppUpdater.swift */,
 				6E642B2BFDC2E9B39904B319 /* Assets.xcassets */,
 				41754CE5DDF212A3E5D325FC /* RuruApp.swift */,
+				31B2014C61EC1C9648C1C16D /* RuruUpdateConfiguration.swift */,
+				AA714710207684117CA4DD8F /* UpToDateUserDriver.swift */,
 				009C66BAB02995987EF84403 /* WitnessAppModel.swift */,
 				1AC48CD1649D9EC56E0B2A88 /* WitnessConfiguration.swift */,
 				891A5721155305E6E037FA30 /* WitnessConsoleStyle.swift */,
@@ -219,6 +241,7 @@
 				53A80BFD855DE6B16681EEB9 /* WitnessGuardingViews.swift */,
 				6A39FDFEDFEDFC2836F06E21 /* WitnessKeychain.swift */,
 				139481AB632E0A52F5FEB8B2 /* WitnessOverview.swift */,
+				E524AFD498B4D66069C76234 /* WitnessPreferredPrimarySheet.swift */,
 				842C25B120FE3975CB7807AB /* WitnessSettingsViews.swift */,
 				137FFD2E32735C0F299A0186 /* WitnessSidebar.swift */,
 				8809B91AA7B6A4EB9F4E6F18 /* WitnessStorageRecoveryViews.swift */,
@@ -251,6 +274,7 @@
 				98950267BA9C100B20121F7A /* WitnessHTTP.swift */,
 				4EB1D944D9DF13483B3F58F9 /* WitnessHTTPServer.swift */,
 				FB0DE86CD88FFB20F836FC48 /* WitnessInternetAccess.swift */,
+				E693FF768D6A33CE65656535 /* WitnessServicePolicy.swift */,
 			);
 			name = WitnessKit;
 			path = Sources/WitnessKit;
@@ -358,6 +382,7 @@
 			);
 			name = Ruru;
 			packageProductDependencies = (
+				BFC20F58A33E9AACC1DBA1E3 /* Sparkle */,
 			);
 			productName = Ruru;
 			productReference = 900E2AEDDE0AEC7F10FBF786 /* Ruru.app */;
@@ -397,6 +422,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				3EC90959819AD983E1E0CF43 /* XCRemoteSwiftPackageReference "duckdb-swift" */,
+				8EE8C21633D7C4D7F7DD03FD /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F15BB1020D571ADA9CD4D8D4 /* Products */;
@@ -419,6 +445,7 @@
 				36E39751CEE7B58A60C161F4 /* Assets.xcassets in Resources */,
 				9BB7D0589625396D14C05F45 /* DuckDB-LICENSE.txt in Resources */,
 				A74389F6485962044328FC80 /* LICENSE in Resources */,
+				56B7A83DD2DC5C773E0EFF69 /* Sparkle-LICENSE.txt in Resources */,
 				DDA8F9D69E61651CFEB1E197 /* ThirdPartyNotices.md in Resources */,
 				7755A053AE3C76E6AE729A03 /* cloudflared in Resources */,
 				85075B9DF2F33F14C790EA1C /* cloudflared-LICENSE.txt in Resources */,
@@ -441,7 +468,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5F44C38191639314373AFE79 /* AppUpdater.swift in Sources */,
 				5D7FB7DFC165C57646866D11 /* RuruApp.swift in Sources */,
+				9F4FC631F800A074F5698106 /* RuruUpdateConfiguration.swift in Sources */,
+				94CC5799968C03A87B27F47A /* UpToDateUserDriver.swift in Sources */,
 				F1AB34C16AAFBC8C7788CD53 /* WitnessAppModel.swift in Sources */,
 				09E392C237912E4BA94838F6 /* WitnessConfiguration.swift in Sources */,
 				23E1D42CA1DE6CBA18E52B3B /* WitnessConsoleStyle.swift in Sources */,
@@ -449,6 +479,7 @@
 				6475CF92FE41D745F5FE317D /* WitnessGuardingViews.swift in Sources */,
 				4CF6A2204BDC3941AB23D4E4 /* WitnessKeychain.swift in Sources */,
 				C137E10FA5B102C47816647B /* WitnessOverview.swift in Sources */,
+				B215C536FA43AABAEF4101F4 /* WitnessPreferredPrimarySheet.swift in Sources */,
 				FD79605E2C9AD55F44161401 /* WitnessSettingsViews.swift in Sources */,
 				76DB392066DE4E42DB1A5A29 /* WitnessSidebar.swift in Sources */,
 				3E33A38CE7D6ED42CE5DE346 /* WitnessStorageRecoveryViews.swift in Sources */,
@@ -471,6 +502,7 @@
 				450FA8148A8536BD90E1E5DD /* WitnessHTTP.swift in Sources */,
 				27D5F1476A6E13CE7F0DBB8C /* WitnessHTTPServer.swift in Sources */,
 				8B9A58ADF82F7B7DDF648233 /* WitnessInternetAccess.swift in Sources */,
+				DCEE07C9D0AEFA6B9FA6A296 /* WitnessServicePolicy.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -480,6 +512,8 @@
 			files = (
 				FD995F83B6EFB5D9F2D8855D /* DuckDBStorageTests.swift in Sources */,
 				445C8F7AF2DD571A2DE2DFBD /* LeaseStoreTests.swift in Sources */,
+				C49D294B2238269ECF6490AE /* RuruUpdateConfiguration.swift in Sources */,
+				D8B74A9100E149CA0788F484 /* RuruUpdateConfigurationTests.swift in Sources */,
 				D19D9B1FCB678B93439A2B98 /* TunnelManagerTests.swift in Sources */,
 				71BCE4D9DD0B3213874E984D /* WitnessConfiguration.swift in Sources */,
 				FDF44B05A0BDF782DB61C25F /* WitnessConfigurationTests.swift in Sources */,
@@ -517,6 +551,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = "Configuration/Ruru-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Ruru;
 				INFOPLIST_KEY_CFBundleIconFile = ruru;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
@@ -528,6 +563,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.swiftmesh.witness;
 				PRODUCT_NAME = Ruru;
 				SDKROOT = macosx;
+				SPARKLE_FEED_URL = "https://johnwatso.github.io/ruru/appcast.xml";
+				SPARKLE_PUBLIC_ED_KEY = "";
 			};
 			name = Debug;
 		};
@@ -539,6 +576,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = "Configuration/Ruru-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Ruru;
 				INFOPLIST_KEY_CFBundleIconFile = ruru;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
@@ -550,6 +588,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.swiftmesh.witness;
 				PRODUCT_NAME = Ruru;
 				SDKROOT = macosx;
+				SPARKLE_FEED_URL = "https://johnwatso.github.io/ruru/appcast.xml";
+				SPARKLE_PUBLIC_ED_KEY = "";
 			};
 			name = Release;
 		};
@@ -622,7 +662,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2026100604;
+				CURRENT_PROJECT_VERSION = 2026100615;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -748,7 +788,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2026100604;
+				CURRENT_PROJECT_VERSION = 2026100615;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -840,6 +880,14 @@
 				version = 1.1.3;
 			};
 		};
+		8EE8C21633D7C4D7F7DD03FD /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.5;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -847,6 +895,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 3EC90959819AD983E1E0CF43 /* XCRemoteSwiftPackageReference "duckdb-swift" */;
 			productName = DuckDB;
+		};
+		BFC20F58A33E9AACC1DBA1E3 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8EE8C21633D7C4D7F7DD03FD /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

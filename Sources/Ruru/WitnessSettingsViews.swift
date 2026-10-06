@@ -3,12 +3,20 @@ import WitnessKit
 
 struct WitnessSettingsPage: View {
     @EnvironmentObject private var model: WitnessAppModel
+    @EnvironmentObject private var updater: AppUpdater
     @State var configuration: WitnessConfiguration
     @State private var launchAtLogin = false
     @State private var saving = false
     @State private var error: String?
     @State private var feedback: String?
-    private var changed: Bool { configuration != model.configuration || launchAtLogin != model.launchAtLogin }
+    @State private var updateChannel: AppUpdater.UpdateChannel = .stable
+    @State private var automaticChecks = false
+    @State private var automaticDownloads = false
+    private var changed: Bool {
+        configuration != model.configuration || launchAtLogin != model.launchAtLogin ||
+        updateChannel != updater.selectedChannel || automaticChecks != updater.automaticallyChecksForUpdates ||
+        automaticDownloads != updater.automaticallyDownloadsUpdates
+    }
 
     var body: some View {
         ScrollView {
@@ -88,6 +96,47 @@ struct WitnessSettingsPage: View {
                         : "Use Internet Access to create a Cloudflare tunnel, or enter an existing HTTPS endpoint.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
+                ConsoleSection("Software Updates") {
+                    VStack(spacing: 0) {
+                        ConsoleSettingRow(title: "Update channel", subtitle: "Stable releases are recommended for an ownership authority.") {
+                            Picker("Update channel", selection: $updateChannel) {
+                                ForEach(AppUpdater.UpdateChannel.allCases) { channel in
+                                    Text(channel.label).tag(channel)
+                                }
+                            }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
+                        }
+                        Divider().padding(.leading, 16)
+                        ConsoleSettingRow(title: "Prompt for available updates", subtitle: "Check in the background and show an update prompt when needed.") {
+                            Toggle("Prompt for available updates", isOn: $automaticChecks).toggleStyle(.switch).labelsHidden()
+                        }
+                        Divider().padding(.leading, 16)
+                        ConsoleSettingRow(title: "Download updates automatically", subtitle: "Download eligible updates in the background and install when Ruru quits.") {
+                            Toggle("Download updates automatically", isOn: $automaticDownloads).toggleStyle(.switch).labelsHidden()
+                                .disabled(!automaticChecks)
+                        }
+                    }.consoleRowGroup().disabled(!updater.canCheckForUpdates)
+                    HStack {
+                        Button("Check for Updates…") { updater.checkForUpdates() }.buttonStyle(.bordered)
+                            .disabled(!updater.canCheckForUpdates)
+                        Spacer()
+                        Link("GitHub Releases", destination: URL(string: "https://github.com/johnwatso/ruru/releases")!)
+                    }
+                    if let lastCheck = updater.lastCheckDate {
+                        Text("Last checked " + lastCheck.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if updateChannel == .beta {
+                        Text("Beta releases may contain unfinished changes.").font(.callout).foregroundStyle(.secondary)
+                    }
+                    if updater.isPreview {
+                        Text("Update checks are disabled in this preview.").font(.callout).foregroundStyle(.secondary)
+                    } else if !updater.isConfigured {
+                        Text("Updates will be available once release publishing is configured.").font(.callout).foregroundStyle(.secondary)
+                    }
+                    if let error = updater.error { ConsoleIssue(title: "Updates unavailable", detail: error) }
+                    Text("Installing an update can briefly interrupt ownership service. Restart quarantine still applies.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
                 ConsoleSection("About") {
                     VStack(spacing: 0) {
                         ConsoleValueRow(title: "Application", value: "Ruru")
@@ -104,13 +153,21 @@ struct WitnessSettingsPage: View {
                 .frame(maxWidth: 1120, alignment: .leading).frame(maxWidth: .infinity)
                 .disabled(saving)
         }
-        .onAppear { model.refreshLoginStatus(); launchAtLogin = model.launchAtLogin }
+        .onAppear { model.refreshLoginStatus(); launchAtLogin = model.launchAtLogin; resetUpdateDraft() }
+        .onChange(of: updater.automaticallyChecksForUpdates) { _, value in automaticChecks = value }
+        .onChange(of: updater.automaticallyDownloadsUpdates) { _, value in automaticDownloads = value }
     }
 
     private func reset() {
         configuration = model.configuration
         launchAtLogin = model.launchAtLogin
+        resetUpdateDraft()
         error = nil; feedback = nil
+    }
+    private func resetUpdateDraft() {
+        updateChannel = updater.selectedChannel
+        automaticChecks = updater.automaticallyChecksForUpdates
+        automaticDownloads = updater.automaticallyDownloadsUpdates
     }
     private func save() async {
         saving = true; error = nil; feedback = nil
@@ -118,8 +175,11 @@ struct WitnessSettingsPage: View {
         do {
             try await model.saveConfiguration(configuration)
             if launchAtLogin != model.launchAtLogin { await model.setLaunchAtLogin(launchAtLogin) }
+            updater.apply(channel: updateChannel, automaticChecks: automaticChecks,
+                          automaticDownloads: automaticDownloads)
             configuration = model.configuration
             launchAtLogin = model.launchAtLogin
+            resetUpdateDraft()
             feedback = "Settings saved."
         } catch { self.error = error.localizedDescription }
     }

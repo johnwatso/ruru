@@ -72,6 +72,9 @@ private struct WitnessGuardedServiceDetails: View {
     @State private var selectedNode: String?
     @State private var confirmingRemoval = false
     @State private var removalError: String?
+    @State private var choosingPrimary = false
+    @State private var preferenceError: String?
+    private var preference: WitnessPrimaryPreference { model.configuration.primaryPreference(for: service.id) }
     private var lease: LeaseStatus? { model.lease(for: service.clusterID) }
     private var nodes: [String] { model.knownNodes(for: service.clusterID) }
     private var events: [WitnessEvent] { model.events(for: service.clusterID) }
@@ -112,6 +115,35 @@ private struct WitnessGuardedServiceDetails: View {
                 }
             }
         })
+        ConsoleSection("Preferred Primary") {
+            HStack(spacing: 14) {
+                ConsoleIconTile(symbol: "star", active: preference.preferredPrimaryNodeID != nil, size: 46)
+                VStack(alignment: .leading, spacing: 5) {
+                    if let node = preference.preferredPrimaryNodeID {
+                        Text(model.nodeDisplayName(for: node, reportedName: model.reportedName(for: node, clusterID: service.clusterID), clusterID: service.clusterID))
+                            .font(.headline).textSelection(.enabled).id(node + "-name")
+                        Text(node).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled).id(node + "-id")
+                    } else {
+                        Text("No preference").font(.headline)
+                        Text("Clients use their normal ownership selection.").font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 12)
+                Button(preference.preferredPrimaryNodeID == nil ? "Choose Primary…" : "Change…") { choosingPrimary = true }
+                    .buttonStyle(.bordered).disabled(model.busy || model.internetBusy)
+            }
+            if preference.preferredPrimaryNodeID != nil {
+                Button("Clear Preference") {
+                    Task {
+                        do { try await model.setPreferredPrimary(nil, for: service.id); preferenceError = nil }
+                        catch { preferenceError = error.localizedDescription }
+                    }
+                }.buttonStyle(.borderless).disabled(model.busy || model.internetBusy)
+            }
+            if let preferenceError { ConsoleIssue(title: "Preference could not be saved", detail: preferenceError) }
+            Text("Compatible clients use this preference for a coordinated handover. Saving it does not transfer ownership or confirm that a server is online. Failover remains available when the preferred Primary is unavailable.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
         ConsoleSection(title: "Known Servers", accessory: { Text("\(nodes.count) observed") }, content: {
             if nodes.isEmpty {
                 ConsoleEmptyState(symbol: "server.rack", title: "No servers observed yet", detail: "Servers appear after successfully participating in this service’s ownership.")
@@ -127,8 +159,13 @@ private struct WitnessGuardedServiceDetails: View {
                                     Text(node).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 Spacer()
-                                Text(lease?.ownerNodeID == node && (lease?.remainingSeconds ?? 0) > 0 ? "Current owner" : "Previously observed")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                VStack(alignment: .trailing, spacing: 5) {
+                                    if preference.preferredPrimaryNodeID == node {
+                                        Label("Preferred Primary", systemImage: "star.fill").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Text(lease?.ownerNodeID == node && (lease?.remainingSeconds ?? 0) > 0 ? "Current owner" : "Previously observed")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                                 Image(systemName: "info.circle").foregroundStyle(.secondary)
                             }.padding(12).contentShape(Rectangle())
                         }.buttonStyle(.plain)
@@ -152,6 +189,7 @@ private struct WitnessGuardedServiceDetails: View {
             }
         }
         .sheet(isPresented: $connecting) { ConnectionDetailsSheet(clusterID: service.clusterID).environmentObject(model) }
+        .sheet(isPresented: $choosingPrimary) { WitnessPreferredPrimarySheet(service: service).environmentObject(model) }
         .sheet(isPresented: $renaming) { WitnessRenameServiceSheet(service: service).environmentObject(model) }
         .confirmationDialog("Remove \(service.name)?", isPresented: $confirmingRemoval, titleVisibility: .visible) {
             Button("Remove Service", role: .destructive) {

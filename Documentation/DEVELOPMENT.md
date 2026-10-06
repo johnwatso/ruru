@@ -20,7 +20,7 @@ xcodebuild -project Ruru.xcodeproj -scheme Ruru \
 
 `project.yml` is the source of truth. Run `xcodegen` after changes to targets, dependencies, resources, or build settings. This is not a root Swift package; use Xcode to build and test.
 
-Xcode resolves DuckDB Swift at the pinned version **1.1.3**. The connector is already vendored in `Resources/cloudflared`. The app does not download database extensions or require a package manager at runtime. `Scripts/vendor_cloudflared.py` is a maintenance tool, not part of the app runtime.
+Xcode resolves DuckDB Swift at the pinned version **1.1.3** and Sparkle **2.9.5**, matching SwiftMiner. The connector is already vendored in `Resources/cloudflared`. The app does not download database extensions or require a package manager at runtime. `Scripts/vendor_cloudflared.py` is a maintenance tool, not part of the app runtime.
 
 ## Tests and preview
 
@@ -32,7 +32,32 @@ Run the application with `--preview` to inspect the native console without creat
 open /path/to/Ruru.app --args --preview
 ```
 
-The screenshot in the README shows this preview, not a live authority. Do not enable login registration, alter power settings, or deploy a tunnel as part of development verification.
+For Preferred Primary UI checks, add `--preview-primary-preference` alongside
+`--preview`. This supplies two static, in-memory observed server fixtures and an
+existing owner; choosing, clearing or cancelling updates only the preview's
+metadata. It opens no database, listener or Keychain. The Preferred Primary
+image uses this fixture rather than a live workload.
+
+The screenshot in the README shows this preview, not a live authority. Sparkle is disabled in preview mode, including network checks and preference writes. Do not enable login registration, alter power settings, or deploy a tunnel as part of development verification.
+
+## Updates
+
+`AppUpdater.swift` adapts SwiftMiner's Sparkle integration. ShipHook owns the
+release private key and publishing; this app needs only its public Ed25519 key.
+`SPARKLE_PUBLIC_ED_KEY` is intentionally empty until ShipHook supplies it, so
+development builds show updates as unavailable. Never substitute a developer's
+local key or disable signature validation to make updates appear enabled.
+
+Run the read-only built-bundle preflight after building:
+
+```sh
+swift Scripts/validate_sparkle.swift /path/to/Ruru.app --allow-unconfigured
+```
+
+Omit `--allow-unconfigured` for release validation; it then rejects a missing
+public key. The script checks generated Info.plist values, embedded Sparkle and
+the source feeds, and rejects unsigned/malformed published items. It does not
+sign, publish, contact ShipHook or prove that a live archive signature is valid.
 
 ## App icon
 

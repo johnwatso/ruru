@@ -36,12 +36,14 @@
 - A focused macOS app built with Swift 6, SwiftUI, and native frameworks
 - A Guarding page for SwiftBot groups and other apps, with independent ownership per service
 - Per-service connection credentials, known servers, and scoped activity
+- A Preferred Primary per service, available to clients through a scoped policy API
 - Add or remove services while preserving ownership terms
 - Durable ownership terms stored with DuckDB through its official Swift package
 - A live Overview of guarded services and authority health, with readable server names
 - Searchable ownership history without recording bearer credentials or bot data
 - Built-in Cloudflare Internet Access with an optional bundled connector
 - A menu bar service that keeps running when the window closes, with an optional Dock icon
+- Sparkle update support with Stable/Beta channels, ready for ShipHook publishing
 - Universal Release builds for Intel and Apple silicon, targeting macOS Sequoia
 
 ## Installation
@@ -60,7 +62,7 @@ The name comes from the ruru, New Zealand's native owl. The app is a small guard
 
 Ruru is a sister app to SwiftBot and uses its SwiftMesh lease protocol and native console design. The README follows the presentation used by [SwiftMiner](https://github.com/johnwatso/SwiftMiner).
 
-[DuckDB Swift](https://github.com/duckdb/duckdb-swift) provides the database API, wrapping DuckDB's native engine. [Cloudflare Tunnel](https://github.com/cloudflare/cloudflared) provides the bundled optional connector. Application-owned runtime code is Swift; dependencies may include native engines and helpers. Dependency licences and attributions are included in [Third-Party Notices](Resources/ThirdPartyNotices.md).
+[DuckDB Swift](https://github.com/duckdb/duckdb-swift) provides the database API, wrapping DuckDB's native engine. [Cloudflare Tunnel](https://github.com/cloudflare/cloudflared) provides the bundled optional connector. [Sparkle](https://sparkle-project.org/) provides app updates, following SwiftMiner's integration. Application-owned runtime code is Swift; dependencies may include native engines and helpers. Dependency licences and attributions are included in [Third-Party Notices](Resources/ThirdPartyNotices.md).
 
 ## Development
 
