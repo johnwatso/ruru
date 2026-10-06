@@ -1,5 +1,21 @@
 # Development log and next steps
 
+## 2026-10-07 — Simpler README purpose
+
+- Removed the explicit light/dark screenshot links; the README image still
+  switches automatically with the reader's appearance. Documentation diff
+  checks passed; no runtime validation required for this markup change.
+- Replaced the README's version-specific preview note with an early-development
+  note explaining that Ruru is being designed around SwiftBot's needs and is
+  highly likely to change. Documentation diff checks passed; no runtime or
+  deployment validation performed for this wording change.
+- Reworded the README introduction and purpose around making complicated service
+  coordination easy to manage. Shortened Highlights to the main user-facing
+  features while keeping the ownership explanation and preview limitations.
+- Reviewed wording against the architecture and checked the documentation diff.
+  Documentation-only change; no runtime tests, Release build or target-Mac
+  validation performed.
+
 ## 2026-10-07 — Overview card alignment and sidebar cleanup
 
 - Quick Actions and System now share equal card heights in the wide Overview

@@ -4,10 +4,10 @@
 
 <h1 align="center">Ruru</h1>
 
-<p align="center"><strong>A native macOS guardian for your services.</strong></p>
+<p align="center"><strong>Complicated service coordination, made easy to manage.</strong></p>
 
 <p align="center">
-  Ruru gives each guarded service an independent ownership group, so one server has permission to act at a time. Built for SwiftBot, with room for other apps.
+  A native macOS app for managing which server has permission to act. Built for SwiftBot, with room for other apps.
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 </p>
 
 > [!NOTE]
-> **Ruru 0.2.0 is a development preview.** The local build is signed for development; public distribution signing and notarisation are still pending. The DuckDB revision also needs a complete failover drill on the deployment Mac.
+> **Ruru is in very early development.** I'm designing it around the needs of SwiftBot, so features, setup, and behaviour are highly likely to change.
 
 <!-- Both Overview images use isolated screenshot fixtures, not a live authority. -->
 <p align="center">
@@ -34,25 +34,15 @@
     <img src="Documentation/Images/overview.png" alt="Ruru Overview showing a running authority, guarded service and connected HTTPS address">
   </picture>
 </p>
-<p align="center">
-  <a href="Documentation/Images/overview.png">Light appearance</a> ·
-  <a href="Documentation/Images/overview-dark.png">Dark appearance</a>
-</p>
 
 ## Highlights
 
-- A focused macOS app built with Swift 6, SwiftUI, and native frameworks
-- A Guarding page for SwiftBot groups and other apps, with independent ownership per service
-- Per-service connection credentials, known servers, and scoped activity
-- A Preferred Primary per service, available to clients through a scoped policy API
-- Add or remove services while preserving ownership terms
-- Durable ownership terms stored with DuckDB through its official Swift package
-- A live Overview of guarded services and authority health, with readable server names
-- Searchable ownership history without recording bearer credentials or bot data
-- Built-in Cloudflare Internet Access with an optional bundled connector
-- A menu bar service that keeps running when the window closes, with an optional Dock icon
-- Sparkle update support with Stable/Beta channels, ready for ShipHook publishing
-- Universal Release builds for Intel and Apple silicon, targeting macOS Sequoia
+- See your services, their current owners, and connection status in one place
+- Manage separate SwiftBot groups and other compatible apps
+- Choose a Preferred Primary for clients that support it
+- Search ownership history using readable server names
+- Set up Internet Access through built-in Cloudflare support
+- Keep the service running in the menu bar when the window closes
 
 ## Installation
 
@@ -62,7 +52,9 @@ Public release assets are not published yet. For now, [build Ruru from source](D
 
 ## Why Ruru?
 
-When two bots lose contact, neither can safely infer that the other has stopped. Ruru provides a shared authority on a third Mac, with short leases and durable ownership terms. If that authority becomes unreachable, bots stop acting when their permission expires.
+Ruru exists to make a complicated feature easy to manage. Keeping multiple servers coordinated takes care; setting them up and seeing which one is allowed to act should be straightforward.
+
+It runs on a separate Mac and gives one server at a time permission to act for each service. If a server cannot reach Ruru, it stops acting when that permission expires. The app brings setup, status, and ownership history together in one place.
 
 The name comes from the ruru, New Zealand's native owl. The app is a small guardian: it watches ownership and keeps the decision in one place.
 
