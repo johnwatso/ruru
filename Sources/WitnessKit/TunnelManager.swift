@@ -102,10 +102,14 @@ actor TunnelManager {
             pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
                 let data = handle.availableData
                 guard !data.isEmpty else { handle.readabilityHandler = nil; return }
-                Task { await self?.readOutput(String(decoding: data, as: UTF8.self), id: id) }
+                guard let manager = self else { return }
+                let text = String(decoding: data, as: UTF8.self)
+                Task { await manager.readOutput(text, id: id) }
             }
             connector.terminationHandler = { [weak self] child in
-                Task { await self?.exited(id: id, status: child.terminationStatus) }
+                guard let manager = self else { return }
+                let status = child.terminationStatus
+                Task { await manager.exited(id: id, status: status) }
             }
             try connector.run()
             process = connector
@@ -187,7 +191,8 @@ actor TunnelManager {
         monitor.pathUpdateHandler = { [weak self] path in
             let signature = "\(path.status):" + path.availableInterfaces.map { "\($0.type):\($0.name)" }.sorted().joined(separator: ",")
             let online = path.status == .satisfied
-            Task { await self?.pathChanged(signature, online: online) }
+            guard let manager = self else { return }
+            Task { await manager.pathChanged(signature, online: online) }
         }
         monitor.start(queue: DispatchQueue(label: "dev.ruruapp.ruru.tunnel-network"))
     }

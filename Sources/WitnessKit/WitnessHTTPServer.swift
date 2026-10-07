@@ -56,11 +56,15 @@ public actor WitnessHTTPServer {
         listenerID = generation
         failureMessage = nil
         listener = networkListener
+        // Unwrap the weak reference before creating each Task: Swift 6.1 rejects
+        // sending a captured `weak var` into a Task closure.
         networkListener.newConnectionHandler = { [weak self] connection in
-            Task { await self?.accept(connection, generation: generation) }
+            guard let server = self else { connection.cancel(); return }
+            Task { await server.accept(connection, generation: generation) }
         }
         networkListener.stateUpdateHandler = { [weak self] state in
-            Task { await self?.listenerChanged(state, generation: generation) }
+            guard let server = self else { return }
+            Task { await server.listenerChanged(state, generation: generation) }
         }
         return try await withCheckedThrowingContinuation { continuation in
             startContinuation = continuation
@@ -131,8 +135,12 @@ public actor WitnessHTTPServer {
         }
         connections[id] = Connection(network: network, timeout: timeout)
         network.stateUpdateHandler = { [weak self] state in
-            if case .failed = state { Task { await self?.close(id) } }
-            if case .cancelled = state { Task { await self?.close(id) } }
+            switch state {
+            case .failed, .cancelled:
+                guard let server = self else { return }
+                Task { await server.close(id) }
+            default: break
+            }
         }
         network.start(queue: queue)
         receive(id)
@@ -140,7 +148,9 @@ public actor WitnessHTTPServer {
 
     private func receive(_ id: UUID) {
         connections[id]?.network.receive(minimumIncompleteLength: 1, maximumLength: 8_192) { [weak self] data, _, complete, error in
-            Task { await self?.received(data, id: id, complete: complete, failed: error != nil) }
+            guard let server = self else { return }
+            let failed = error != nil
+            Task { await server.received(data, id: id, complete: complete, failed: failed) }
         }
     }
 
@@ -178,7 +188,8 @@ public actor WitnessHTTPServer {
         var bytes = Data("HTTP/1.1 \(reply.status) \(reasons[reply.status] ?? "Error")\r\nContent-Type: application/json\r\nContent-Length: \(reply.body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".utf8)
         bytes.append(reply.body)
         connections[id]?.network.send(content: bytes, completion: .contentProcessed { [weak self] _ in
-            Task { await self?.close(id) }
+            guard let server = self else { return }
+            Task { await server.close(id) }
         })
     }
 
