@@ -51,7 +51,7 @@ public struct LeaseSnapshot: Codable, Equatable, Sendable {
             (allowEmpty || !value.isEmpty) && value.utf8.count <= 128
         }
         guard format == Self.currentFormat, version == Self.currentVersion else { throw LeaseRestoreError.unsupportedSnapshot }
-        guard leases.count <= 1024, events.count <= 256, nodeNames.count <= 4096,
+        guard leases.count <= 1024, events.count <= 32 * LeaseStore.eventsKeptPerService, nodeNames.count <= 4096,
               Set(leases.map(\.clusterID)).count == leases.count,
               Set(events.map(\.id)).count == events.count,
               Set(nodeNames.map { [$0.clusterID, $0.nodeID] }).count == nodeNames.count,
@@ -195,10 +195,12 @@ public enum LeaseRestore {
             do {
                 try DuckDBDatabase.createSchema(connection)
                 for (cluster, term) in terms.sorted(by: { $0.key < $1.key }) {
-                    // Ownerless with a non-zero expiry: the next LeaseStore applies
-                    // a full restart quarantine before granting anything.
-                    _ = try database.query(connection, "INSERT INTO leases VALUES (?, '', ?, 1)") {
+                    // Ownerless with a non-zero expiry and the longest permitted
+                    // length: the previous authority's lengths are unknown, so the
+                    // next LeaseStore waits out any lease it could have granted.
+                    _ = try database.query(connection, "INSERT INTO leases (cluster, owner, term, expires, duration) VALUES (?, '', ?, 1, ?)") {
                         try $0.bind(cluster, at: 1); try $0.bind(term, at: 2)
+                        try $0.bind(LeaseStore.leaseDurationRange.upperBound, at: 3)
                     }
                 }
                 for event in snapshot.events {

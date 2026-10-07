@@ -64,17 +64,20 @@ public struct WitnessServiceCredential: Sendable {
     public let token: String
     public let primaryPreference: WitnessPrimaryPreference
     public let coordinationPolicy: CoordinationPolicy
-    public init(clusterID: String, token: String, primaryPreference: WitnessPrimaryPreference = .init(), coordinationPolicy: CoordinationPolicy = .init()) {
+    public let leaseSeconds: Double
+    public init(clusterID: String, token: String, primaryPreference: WitnessPrimaryPreference = .init(),
+                coordinationPolicy: CoordinationPolicy = .init(), leaseSeconds: Double = LeaseStore.leaseDuration) {
         self.clusterID = clusterID
         self.token = token
         self.primaryPreference = primaryPreference
         self.coordinationPolicy = coordinationPolicy
+        self.leaseSeconds = leaseSeconds
     }
 }
 
 struct WitnessAuthorization: Sendable {
     private let codes: [String: Data]
-    private static let authContext = Data("SwiftMesh-witness-auth-v1".utf8)
+    private static let authContext = Data("Ruru-auth-v1".utf8)
     init() { codes = [:] }
 
     init(services: [WitnessServiceCredential]) throws {
@@ -87,7 +90,8 @@ struct WitnessAuthorization: Sendable {
                   !service.clusterID.contains(where: { $0.isNewline }),
                   service.token.utf8.count >= 32, service.token.utf8.count <= 512,
                   !service.token.contains(where: \.isWhitespace),
-                  service.primaryPreference.isValid, service.coordinationPolicy.isValid else { throw WitnessError.invalidConfiguration }
+                  service.primaryPreference.isValid, service.coordinationPolicy.isValid,
+                  LeaseStore.leaseDurationRange.contains(service.leaseSeconds) else { throw WitnessError.invalidConfiguration }
             let key = SymmetricKey(data: Data(service.token.utf8))
             codes[service.clusterID] = Data(HMAC<SHA256>.authenticationCode(for: Self.authContext, using: key))
         }
@@ -112,6 +116,7 @@ struct WitnessRouter: Sendable {
     let services: [WitnessServiceCredential]
     let catalogue: CoordinationCatalogue
     private let policies: [String: WitnessServicePolicy]
+    private let leaseSeconds: [String: Double]
 
     init(store: LeaseStore, clusterID: String, token: String) throws {
         try self.init(store: store, services: [WitnessServiceCredential(clusterID: clusterID, token: token)])
@@ -125,6 +130,7 @@ struct WitnessRouter: Sendable {
         policies = Dictionary(uniqueKeysWithValues: services.map {
             ($0.clusterID, WitnessServicePolicy(clusterID: $0.clusterID, preference: $0.primaryPreference))
         })
+        leaseSeconds = Dictionary(uniqueKeysWithValues: services.map { ($0.clusterID, $0.leaseSeconds) })
     }
 
     func route(_ request: HTTPRequest) async -> LeaseReply {
@@ -135,6 +141,18 @@ struct WitnessRouter: Sendable {
                 let ready = snapshot.recoverySeconds <= 0
                 return LeaseReply(status: ready ? 200 : 503,
                                   body: Data((ready ? #"{"ready":true}"# : #"{"ready":false}"#).utf8))
+            } catch { return .error("authority_unavailable", status: 503) }
+        }
+        if request.method == "GET", request.path == "/v1/service" {
+            guard let cluster = authorization.cluster(for: request.headers["authorization"]),
+                  let service = services.first(where: { $0.clusterID == cluster }) else {
+                return .error("unauthorized", status: 401)
+            }
+            do {
+                let status = try await store.status(for: cluster)
+                let body = try JSONEncoder().encode(WitnessServiceDescription(service: service, lease: status.lease,
+                                                                             recoverySeconds: status.recoverySeconds))
+                return LeaseReply(status: 200, body: body)
             } catch { return .error("authority_unavailable", status: 503) }
         }
         if request.method == "POST", request.path == "/v1/service/policy" {
@@ -163,6 +181,7 @@ struct WitnessRouter: Sendable {
         }
         guard policies[payload.clusterID] != nil else { return .error("unknown_cluster", status: 403) }
         guard payload.clusterID == allowedCluster else { return .error("forbidden_cluster", status: 403) }
-        return await store.apply(action, request: payload)
+        return await store.apply(action, request: payload,
+                                 leaseDuration: leaseSeconds[payload.clusterID] ?? LeaseStore.leaseDuration)
     }
 }

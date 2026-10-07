@@ -24,6 +24,12 @@ Xcode resolves DuckDB Swift at the pinned version **1.1.3** and Sparkle **2.9.5*
 
 ## Tests and preview
 
+The RuruClient package has its own unit tests:
+`swift test --package-path Clients/RuruClient`. The Xcode test target also links
+it, so `ClientConformanceTests` exercise the public client against the real
+server. CI (`.github/workflows/ci.yml`) runs both on macOS 15 and verifies the
+universal Release binary.
+
 Tests use temporary storage and injected credentials. The test-only `WitnessStorageProbe` verifies recovery after killing an authority process immediately after an acknowledged grant. It is not bundled in the app.
 
 Run the application with `--preview` to inspect the native console without creating Keychain data, opening a listener, or registering a login item:

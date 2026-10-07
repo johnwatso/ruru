@@ -45,7 +45,7 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
 - Stop/Pause explain their operational effect using native confirmation dialogs.
 - Closing the window preserves the menu bar service and tunnel.
 - Settings is a separate native preferences window, matching SwiftMiner’s compact
-  top icon tabs: General, Updates and Backup. General groups app presence and startup
+  top icon tabs: General, Alerts, Updates and Backup. General groups app presence and startup
   controls; connection controls live under Internet Access → Connection Settings.
   Each tab is a native grouped `Form` (`.formStyle(.grouped)`, available on
   Sequoia) sized to its content in a 540pt-wide window: plain section headers,
@@ -55,6 +55,20 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
   the saved value. The app menu’s Settings command (⌘,), menu bar
   Settings and Overview actions open the same window without changing console
   navigation. Closing either window leaves the menu bar service running.
+- Settings → Alerts groups "Alert Me When" toggles (service down, failover,
+  Ruru problems) and "Deliver To" (macOS notifications, Discord with Set Up…/
+  Replace…/Remove, Send Test). The Discord URL is entered in a sheet with a
+  secure field and kept in Keychain.
+- Show a lease like a one-time code (Passwords' verification code): the
+  ownership term in large monospaced digits grouped in threes, rolling with a
+  numeric transition when it changes, beside a countdown ring for the current
+  grant sized to the service's lease length. The ring interpolates between
+  one-second polls, refills on each renewal, and is green while renewals keep
+  up, orange ("Renewal late") below a third, red in the last seconds. No
+  progress bars for leases. Respect Reduce Motion.
+- Services are equal: Guarding lists only configured services, starting empty.
+  The SwiftBot template shows SwiftBot's app icon; other services use an SF
+  Symbol tile. Add Service and Edit include a lease-length picker.
 - Settings → Backup shows the last automatic snapshot (Show in Finder, Snapshot
   Now), Export… and Restore…. Restore opens a sheet summarising the file, an
   optional Restore settings switch, and two required acknowledgements (other
@@ -103,7 +117,9 @@ Distinguish current ownership from health. Label past participants “Previously
 observed”; do not call them connected, online or healthy without fresh evidence.
 Empty service ownership remains a neutral state.
 
-Keep Preferred Primary in a separate service-detail panel from Current Owner.
+Preferred Primary is optional and secondary: show it as one compact row under
+Known Servers (star, name or "None", a borderless Change menu with Choose… and
+Clear, explanation in its help tooltip), never in the Ownership panel.
 Its sheet offers No preference, observed servers and manual node-ID entry for
 unobserved standbys. Show the selected stable ID and a separate marker on known
 server rows. Do not relabel the owner when a preference changes or imply the

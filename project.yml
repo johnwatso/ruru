@@ -27,6 +27,8 @@ packages:
   DuckDB:
     url: https://github.com/duckdb/duckdb-swift
     exactVersion: 1.1.3
+  RuruClient:
+    path: Clients/RuruClient
 targets:
   WitnessKit:
     type: framework
@@ -88,8 +90,11 @@ targets:
       - Sources/Ruru/WitnessConfiguration.swift
       - Sources/Ruru/RuruUpdateConfiguration.swift
       - Sources/Ruru/RuruBackup.swift
+      - Sources/Ruru/RuruAlerts.swift
     dependencies:
       - target: WitnessKit
+      # Conformance tests run the public client against the real server.
+      - package: RuruClient
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.ruruapp.ruru.tests

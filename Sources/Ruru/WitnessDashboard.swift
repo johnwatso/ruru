@@ -39,7 +39,7 @@ struct WitnessDashboard: View {
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 640)
         .sheet(isPresented: $showInternet) { WitnessInternetSheet(hostname: model.configuration.tunnel.hostname).environmentObject(model) }
-        .confirmationDialog("Stop the ownership witness?", isPresented: $confirmingStop) {
+        .confirmationDialog("Stop the Ruru service?", isPresented: $confirmingStop) {
             Button("Stop Service", role: .destructive) { Task { await model.stop() } }
         } message: {
             Text("Participating apps lose access to Ruru and stop acting when their current ownership permission expires.")
@@ -66,13 +66,13 @@ struct WitnessOwnerDetails: View {
     @EnvironmentObject private var model: WitnessAppModel
     let nodeID: String
     let reportedName: String?
-    let clusterID: String?
+    let clusterID: String
     let onSave: () -> Void
     @State private var name: String
     @State private var error: String?
     @State private var copied = false
 
-    init(nodeID: String, reportedName: String?, savedName: String?, clusterID: String? = nil, onSave: @escaping () -> Void) {
+    init(nodeID: String, reportedName: String?, savedName: String?, clusterID: String, onSave: @escaping () -> Void) {
         self.nodeID = nodeID
         self.reportedName = reportedName
         self.clusterID = clusterID
@@ -164,7 +164,7 @@ private struct WitnessInternetPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                ConsolePageHeader(title: "Internet Access", subtitle: "A dedicated HTTPS address for this witness.") {
+                ConsolePageHeader(title: "Internet Access", subtitle: "A dedicated HTTPS address for this Ruru.") {
                     Button(model.configuration.tunnel.isConfigured ? "Manage Cloudflare" : "Set Up Cloudflare", action: onSetup)
                         .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                         .disabled(model.busy || model.internetBusy)
@@ -237,7 +237,7 @@ private struct WitnessInternetPage: View {
                     catch { self.error = error.localizedDescription }
                 }
             }
-        } message: { Text("Apps using this HTTPS address lose access to the witness until the tunnel resumes.") }
+        } message: { Text("Apps using this HTTPS address lose access to Ruru until the tunnel resumes.") }
     }
 
     private func resume() async {
@@ -269,7 +269,7 @@ private struct WitnessActivityPage: View {
                 if events.isEmpty {
                     ConsoleEmptyState(symbol: search.isEmpty ? "clock.arrow.circlepath" : "magnifyingglass",
                         title: search.isEmpty ? "No ownership changes yet" : "No matching events",
-                        detail: search.isEmpty ? "This witness records transfers when your servers acquire or release ownership." : "Try another node ID, action, or term.")
+                        detail: search.isEmpty ? "Ruru records transfers when your servers acquire or release ownership." : "Try another node ID, action, or term.")
                         .frame(maxHeight: .infinity)
                 } else {
                     ScrollView {
@@ -321,7 +321,6 @@ struct WitnessEventRow: View {
 
 @MainActor
 extension WitnessAppModel {
-    var hasActiveOwner: Bool { (currentLease?.remainingSeconds ?? 0) > 0 }
     var serviceHealth: WitnessHealth {
         if isRecovering { return .warning }
         switch state {

@@ -40,7 +40,7 @@ struct DuckDBDatabase: Sendable {
 
     static func createSchema(_ connection: Connection) throws {
         _ = try connection.query("""
-            CREATE TABLE leases (cluster VARCHAR PRIMARY KEY, owner VARCHAR NOT NULL, term BIGINT NOT NULL, expires DOUBLE NOT NULL);
+            CREATE TABLE leases (cluster VARCHAR PRIMARY KEY, owner VARCHAR NOT NULL, term BIGINT NOT NULL, expires DOUBLE NOT NULL, duration DOUBLE NOT NULL DEFAULT 30);
             CREATE TABLE events (id BIGINT PRIMARY KEY, time DOUBLE NOT NULL, action VARCHAR NOT NULL, cluster VARCHAR NOT NULL, node VARCHAR NOT NULL, term BIGINT NOT NULL);
             CREATE TABLE node_names (cluster VARCHAR NOT NULL, node VARCHAR NOT NULL, name VARCHAR NOT NULL, PRIMARY KEY (cluster, node));
             """)

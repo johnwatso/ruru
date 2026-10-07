@@ -43,7 +43,7 @@ final class BackupTests: XCTestCase {
         let quarantined = try await restored.snapshot()
         XCTAssertTrue(quarantined.leases.allSatisfy { $0.ownerNodeID.isEmpty && $0.remainingSeconds == 0 })
         XCTAssertEqual(quarantined.events.count, backup.events.count)
-        clock.advance(31)
+        clock.advance(LeaseStore.leaseDurationRange.upperBound + 1)
         let actual4 = try term(await restored.apply(.acquire, request: LeaseRequest(clusterID: "bot", nodeID: "home", term: 0)))
         XCTAssertEqual(actual4, 3 + LeaseRestore.termMargin)
         let names = try await restored.snapshot().events.compactMap(\.nodeName)
@@ -86,7 +86,7 @@ final class BackupTests: XCTestCase {
         let restored = try LeaseStore(databaseURL: url, clock: clock.now)
         let actual6 = await restored.apply(.acquire, request: LeaseRequest(clusterID: "bot", nodeID: "home", term: 0)).status
         XCTAssertEqual(actual6, 503)
-        clock.advance(31)
+        clock.advance(LeaseStore.leaseDurationRange.upperBound + 1)
         let actual7 = try term(await restored.apply(.acquire, request: LeaseRequest(clusterID: "bot", nodeID: "home", term: 0)))
         XCTAssertEqual(actual7, 43 + LeaseRestore.termMargin)
     }
@@ -114,7 +114,7 @@ final class BackupTests: XCTestCase {
         exported.tunnel.tunnelID = "00000000-0000-4000-8000-000000000001"
         exported.tunnel.accountID = "account"
         exported.publicEndpoint = "https://old.ruruapp.dev"
-        exported.additionalServices = [GuardedService(name: "Worker", clusterID: "worker")]
+        exported.services = [GuardedService(name: "Worker", clusterID: "worker")]
         let backup = RuruBackup(configuration: exported, leases: nil)
         XCTAssertFalse(backup.configuration.tunnel.isConfigured)
         XCTAssertEqual(backup.configuration.publicEndpoint, "")

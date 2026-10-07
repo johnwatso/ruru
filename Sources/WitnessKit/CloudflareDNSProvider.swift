@@ -366,7 +366,7 @@ struct CloudflareDNSProvider: Sendable {
         var page = 2
         var count = response.result.count
         while count == 50 {
-            guard page <= 100 else { throw Error.apiFailed("Cloudflare returned too many zones. Scope this token to the witness domain.") }
+            guard page <= 100 else { throw Error.apiFailed("Cloudflare returned too many zones. Scope this token to Ruru’s domain.") }
             components?.queryItems = [URLQueryItem(name: "per_page", value: "50"), URLQueryItem(name: "page", value: String(page))]
             guard let nextURL = components?.url else { throw Error.apiFailed("Invalid zone request.") }
             let envelope: APIEnvelope<[Zone]> = try await send(makeRequest(url: nextURL, method: "GET"))

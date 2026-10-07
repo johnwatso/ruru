@@ -5,8 +5,14 @@
 - Only explicitly configured service clusters are admitted. Each has a separate
   bearer token, independent term, and one live owner. Cross-service credentials
   and unconfigured clusters are rejected.
-- Only one live owner per service is granted. The lease lasts 30 seconds; SwiftBot renews
-  every five seconds and applies an earlier local monotonic output deadline.
+- Only one live owner per service is granted. Each service has its own lease
+  length (10–300 seconds, 30 by default), stored with every grant; SwiftBot
+  renews every five seconds and applies an earlier local monotonic deadline.
+  After a restart Ruru waits out the longest stored grant before granting again.
+  Databases created before per-service lengths gain a `duration` column (30 s)
+  on first open.
+- History keeps the last 256 events per service, so one busy service cannot
+  evict another's.
 - Ownership terms never decrease. Grants are acknowledged only after the DuckDB
   transaction commits to persistent storage. Lost/corrupt storage
   fails closed; the app never silently resets an existing authority.
@@ -43,7 +49,8 @@ ownership database back into place**; it would reissue terms bots have seen.
   moves the current database/WAL to `Authority/Restore Archives/<time>/` (copying
   the marker), and renames the rebuilt file into place. Every service's term is
   `max(backup, current) + 1,000,000`; leases are ownerless with a non-zero expiry,
-  so the next open applies the full 30-second restart quarantine. Ownership and
+  and the longest permitted length (300 s), because the previous authority's
+  lengths are unknown, so the next open waits 5 minutes before granting. Ownership and
   deadlines are never restored. An interruption leaves the marker without a
   database, which fails closed; repeating the restore is safe. Settings import
   keeps this Mac's tunnel and listener. Existing Keychain tokens are reused;
@@ -70,7 +77,7 @@ app binaries from initializing a competing SQLite authority. No live installatio
 the build or tests.
 
 Removing a guarded service revokes grants and renewals without deleting durable
-leases, terms or history. Existing permission expires within 30 seconds.
+leases, terms or history. Existing permission expires within its lease length.
 Re-adding its cluster uses a new token and retains fencing against the former
 owner. Inactive Keychain items are retained but not admitted. SwiftBot removal
 is persisted; an empty catalog rejects all lease requests and still serves

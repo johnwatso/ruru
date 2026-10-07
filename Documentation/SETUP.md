@@ -1,37 +1,44 @@
 # Set up Ruru
 
-Ruru runs on a third Mac that both SwiftBot nodes can reach. It requires macOS 15.0 or later. Release builds contain Intel and Apple silicon executables.
+Ruru runs on a Mac that every participating server can reach, separate from
+those servers. It requires macOS 15.0 or later. Release builds contain Intel and
+Apple silicon executables.
 
-## Pair the bots
+## Add your first service
 
 1. Copy the universal Release `Ruru.app` to `/Applications` on the authority Mac, launch it,
-   and confirm the service reports **Running**. First launch generates its own
-   bearer token in that user's Keychain. It does not use SwiftBot's Keychain.
+   and confirm the service reports **Running**. A fresh Ruru has no services.
 2. Open **Internet Access** and click **Set Up Cloudflare**, enter an unused subdomain such as
-   `witness.example.com` and a Cloudflare API token, then click **Connect**.
+   `ruru.example.com` and a Cloudflare API token, then click **Connect**.
    The app checks access, creates its own remotely managed tunnel, configures
    `http://127.0.0.1:38990` as the origin, creates a proxied CNAME, and runs the
    bundled connector. Wait for **Connected**. No reverse proxy, certificate files,
    A record, Homebrew installation, or router port forwarding is required.
    HTTPS is supplied by Cloudflare. See [Cloudflare's setup flow](https://developers.cloudflare.com/tunnel/get-started/).
-3. Open **Connection Details**. Enter its endpoint, cluster ID, and bearer token
-   in the preferred SwiftBot Primary's **SwiftMesh → Recovery and Pairing**.
-   Both bots must use the same authority and cluster ID. A fresh SwiftBot Failover
-   Join Code can carry the saved witness configuration to the Failover.
-4. In **Settings → General**, enable **Launch at login** and **Start the service automatically**,
+3. Open **Guarding → Add Service**. Choose the **SwiftBot** template or **Other
+   app**, a name, a unique cluster ID and a lease length (30 seconds suits most
+   apps). Ruru creates a bearer token for that service in this Mac's Keychain.
+4. Open the service's **Connection Details** and give every participating server
+   the endpoint, cluster ID and token. For SwiftBot, enter them in the preferred
+   Primary's **SwiftMesh → Recovery and Pairing**; a fresh Failover Join Code
+   carries them to the Failover. Other apps use [RuruClient or the
+   protocol](INTEGRATIONS.md).
+5. In **Settings → General**, enable **Launch at login** and **Start the service automatically**,
    then save the changes. macOS may require approval under System Settings
    → General → Login Items. The login option is off until you choose it.
-5. Keep the Mac and its internet connection running. Configure the Mac's power
+6. Keep the Mac and its internet connection running. Configure the Mac's power
    settings to prevent automatic system sleep while plugged in; the display may
-   sleep. Verify the remote HTTPS endpoint from both bot locations before a drill.
-6. Test Primary loss, recovery/return, witness loss, and a witness restart.
+   sleep. Verify the remote HTTPS endpoint from every server location before a drill.
+7. In **Settings → Alerts**, choose what to be told about and set up macOS
+   notifications and/or a Discord webhook. Use **Send Test** to check delivery.
+8. Test Primary loss, recovery/return, witness loss, and a witness restart.
    The earlier SQLite version was launched and connected on the target Mac.
    Ruru's DuckDB revision and a complete failover/return/partition drill still
    need validation there.
 
 Closing the window leaves the menu bar service running. Quitting the app,
-logging out, system sleep, or loss of the witness's network makes it unavailable;
-the bots must stop output when their local permission expires. Launch at login
+logging out, system sleep, or loss of the Mac's network makes it unavailable;
+servers must stop exclusive work when their local permission expires. Launch at login
 requires a logged-in user session; this initial app is **not a pre-login daemon**
 and does not install a crash-restarting LaunchDaemon. See [Apple's login-item API](https://developer.apple.com/documentation/servicemanagement/smappservice/mainapp).
 
@@ -117,15 +124,17 @@ and `Resources/cloudflared-LICENSE.txt`.
 
 ## Guard additional services
 
-Open **Guarding** to see SwiftBot and its ownership. Choose **Add Service** for
-another SwiftBot group or another app, give it a name and a unique cluster ID,
-and open its **Connection Details**. Each service gets a separate bearer token;
+Choose **Add Service** in Guarding or Coordination for each further app or
+group, with its own name, cluster ID and lease length, and open its
+**Connection Details**. Each service gets a separate bearer token;
 all its participants use the same endpoint, cluster ID and service token.
 Adding a service keeps existing services and their leases running.
 
 Open a service and choose **Remove… → Remove Service** to stop guarding it.
-This works for SwiftBot and during startup failures. New grants and renewals
-are rejected; existing permission expires within 30 seconds. Terms/history are
+This works for every service and during startup failures. New grants and
+renewals are rejected; existing permission expires within that service's lease
+length. **Edit** changes a service's name or lease length without interrupting
+its owner; a new length applies from the next renewal. Terms/history are
 retained and other services keep running. You can remove every service and add
 a new one later.
 

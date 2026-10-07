@@ -1,0 +1,137 @@
+openapi: 3.1.0
+info:
+  title: Ruru lease protocol
+  version: "1"
+  description: >
+    Exclusive ownership leases for services that run on several servers.
+    Every request uses the service's own bearer token. Terms only increase and
+    are fencing tokens; see Documentation/INTEGRATIONS.md for the client rules.
+    The resource catalogue (/v1/coordination/*) is described in COORDINATION_API.md.
+servers:
+  - url: https://ruru.example.com
+security:
+  - bearer: []
+paths:
+  /v1/lease/acquire:
+    post:
+      summary: Obtain ownership, or confirm it for the current owner
+      requestBody: { $ref: "#/components/requestBodies/Lease" }
+      responses:
+        "200": { $ref: "#/components/responses/Grant" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { description: "ownership_held — another server owns the service", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { description: "authority_recovering or authority_unavailable — retry with backoff", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v1/lease/renew:
+    post:
+      summary: Extend the caller's lease; expired leases are never revived
+      requestBody: { $ref: "#/components/requestBodies/Lease" }
+      responses:
+        "200": { $ref: "#/components/responses/Grant" }
+        "409": { description: "ownership_expired_or_changed — stop guarded work now", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/lease/release:
+    post:
+      summary: Hand ownership back immediately
+      requestBody: { $ref: "#/components/requestBodies/Lease" }
+      responses:
+        "200":
+          description: Released
+          content: { application/json: { schema: { type: object, required: [released], properties: { released: { const: true } } } } }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/service:
+    get:
+      summary: Describe the caller's service, capabilities and current lease
+      responses:
+        "200":
+          description: Service description
+          content: { application/json: { schema: { $ref: "#/components/schemas/ServiceDescription" } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/service/policy:
+    post:
+      summary: Read the service's Preferred Primary (intent only, never permission)
+      requestBody:
+        content: { application/json: { schema: { type: object, required: [clusterID], properties: { clusterID: { type: string } } } } }
+      responses:
+        "200":
+          description: Policy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, clusterID, preferredPrimaryNodeID, preferenceRevision]
+                properties:
+                  version: { type: integer, const: 1 }
+                  clusterID: { type: string }
+                  preferredPrimaryNodeID: { type: [string, "null"] }
+                  preferenceRevision: { type: integer, format: int64 }
+  /health:
+    get:
+      summary: Authority readiness only; no service details
+      security: []
+      responses:
+        "200": { description: Ready, content: { application/json: { schema: { type: object, properties: { ready: { const: true } } } } } }
+        "503": { description: Recovering or unavailable }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, description: "The service's token from Connection Details" }
+  requestBodies:
+    Lease:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [clusterID, nodeID, term]
+            properties:
+              clusterID: { type: string, maxLength: 128 }
+              nodeID: { type: string, maxLength: 128, description: "Stable across restarts" }
+              nodeName: { type: string, description: "Optional display name" }
+              term: { type: integer, format: int64, minimum: 0, description: "Highest term seen (acquire) or the granted term (renew/release)" }
+  responses:
+    Grant:
+      description: Ownership granted or extended
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ownerNodeID, term, expiresInSeconds]
+            properties:
+              ownerNodeID: { type: string, description: "Only own the lease if this is your nodeID" }
+              term: { type: integer, format: int64, description: "Fencing token" }
+              expiresInSeconds: { type: number, description: "The service's lease length; measure from request send time" }
+    Error:
+      description: Error
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          enum: [invalid_request, unauthorized, unknown_cluster, forbidden_cluster, ownership_held,
+                 ownership_expired_or_changed, authority_recovering, authority_unavailable,
+                 authority_term_exhausted, not_found]
+    ServiceDescription:
+      type: object
+      required: [version, authority, clusterID, leaseSeconds, recoverySeconds, capabilities]
+      properties:
+        version: { type: integer, const: 1 }
+        authority: { type: string, const: Ruru }
+        clusterID: { type: string }
+        leaseSeconds: { type: number, minimum: 10, maximum: 300 }
+        recoverySeconds: { type: number, description: "Seconds until grants resume after a restart" }
+        capabilities:
+          type: object
+          additionalProperties:
+            type: object
+            required: [version, enabled]
+            properties: { version: { type: integer }, enabled: { type: boolean } }
+        lease:
+          type: [object, "null"]
+          properties:
+            ownerNodeID: { type: [string, "null"] }
+            term: { type: integer, format: int64 }
+            remainingSeconds: { type: number }

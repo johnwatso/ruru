@@ -9,7 +9,7 @@ public struct WitnessTunnelSettings: Codable, Equatable, Sendable {
     public var instanceID = UUID().uuidString.lowercased()
     public init() {}
     public var publicURL: String { hostname.isEmpty ? "" : "https://\(hostname)" }
-    public var name: String { "swiftmesh-witness-\(instanceID)" }
+    public var name: String { "ruru-\(instanceID)" }
     public var isConfigured: Bool { !hostname.isEmpty && !tunnelID.isEmpty && !accountID.isEmpty }
 }
 
@@ -62,7 +62,7 @@ public struct WitnessInternetSetup: Sendable {
                   record.content.caseInsensitiveCompare(CloudflareTunnelClient.tunnelTargetHostname(for: settings.tunnelID)) == .orderedSame
             else { throw SetupError.hostnameInUse }
         }
-        await progress("Creating the witness tunnel…")
+        await progress("Creating Ruru’s tunnel…")
         let client = CloudflareTunnelClient(apiToken: normalizedToken, session: session)
         let (tunnel, _) = try await client.createTunnel(hostname: hostname, zone: zone, name: settings.name)
         guard UUID(uuidString: tunnel.id) != nil, tunnel.name == settings.name else {
@@ -76,7 +76,7 @@ public struct WitnessInternetSetup: Sendable {
         saved.accountID = tunnel.accountID
         let provisioned = ProvisionedWitnessTunnel(settings: saved, connectorToken: tunnel.token)
         try await checkpoint(provisioned)
-        await progress("Connecting the local witness…")
+        await progress("Connecting the local Ruru service…")
         try await client.configureTunnel(tunnel, hostname: hostname, originURL: "http://127.0.0.1:\(port)")
         await progress("Creating the HTTPS address…")
         _ = try await dns.configureTunnelDNSRoute(hostname: hostname,
@@ -89,7 +89,7 @@ public struct WitnessInternetSetup: Sendable {
         case invalidConfiguration, missingToken, zoneNotFound, hostnameInUse
         public var errorDescription: String? {
             switch self {
-            case .invalidConfiguration: "Enter a subdomain such as witness.example.com and a valid listener port."
+            case .invalidConfiguration: "Enter a subdomain such as ruru.example.com and a valid listener port."
             case .missingToken: "Enter a Cloudflare API token."
             case .zoneNotFound: "This subdomain is not in a zone accessible to this Cloudflare API token. Check Zone Read and DNS Edit permissions."
             case .hostnameInUse: "This hostname already has a DNS record belonging to another service. Choose an unused subdomain."

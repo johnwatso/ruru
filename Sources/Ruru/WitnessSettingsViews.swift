@@ -9,11 +9,12 @@ struct WitnessSettingsView: View {
     /// Mirrors the saved preferences; each edit is applied immediately.
     @State var configuration: WitnessConfiguration
     private enum Pane: String, CaseIterable, Identifiable {
-        case general = "General", updates = "Updates", backup = "Backup"
+        case general = "General", alerts = "Alerts", updates = "Updates", backup = "Backup"
         var id: Self { self }
         var symbol: String {
             switch self {
             case .general: "gearshape"
+            case .alerts: "bell"
             case .updates: "arrow.clockwise.circle"
             case .backup: "externaldrive"
             }
@@ -38,6 +39,8 @@ struct WitnessSettingsView: View {
             .onAppear { model.refreshLoginStatus(); reset() }
             .onChange(of: configuration.showInDock) { applyPreferences() }
             .onChange(of: configuration.startAutomatically) { applyPreferences() }
+            .onChange(of: configuration.alerts) { applyPreferences() }
+            .onChange(of: model.configuration.alerts) { _, value in configuration.alerts = value }
             .onChange(of: launchAtLogin) { _, value in applyLaunchAtLogin(value) }
             .onChange(of: model.launchAtLogin) { _, value in launchAtLogin = value }
             .onChange(of: updateChannel) { applyUpdatePreferences() }
@@ -51,6 +54,7 @@ struct WitnessSettingsView: View {
         Form {
             switch pane {
             case .general: generalSettings
+            case .alerts: WitnessAlertSettings(preferences: $configuration.alerts)
             case .updates: updateSettings
             case .backup: WitnessBackupSettings()
             }
@@ -164,12 +168,13 @@ struct WitnessSettingsView: View {
         pendingSave = Task {
             await previous?.value
             let saved = model.configuration
-            guard configuration.showInDock != saved.showInDock ||
+            guard configuration.alerts != saved.alerts || configuration.showInDock != saved.showInDock ||
                   configuration.startAutomatically != saved.startAutomatically else { return }
             // Save only application preferences, preserving connection edits made
             // in the console while this window is open.
             var draft = saved
             draft.showInDock = configuration.showInDock
+            draft.alerts = configuration.alerts
             draft.startAutomatically = configuration.startAutomatically
             do {
                 try await model.saveConfiguration(draft)
@@ -177,6 +182,7 @@ struct WitnessSettingsView: View {
             } catch {
                 self.error = error.localizedDescription
                 configuration.showInDock = model.configuration.showInDock
+                configuration.alerts = model.configuration.alerts
                 configuration.startAutomatically = model.configuration.startAutomatically
             }
         }
@@ -206,7 +212,6 @@ struct WitnessConnectionSettingsSheet: View {
     @State private var error: String?
 
     private var changed: Bool {
-        configuration.clusterID != model.configuration.clusterID ||
         configuration.bindAddress != model.configuration.bindAddress ||
         configuration.port != model.configuration.port ||
         configuration.publicEndpoint != model.configuration.publicEndpoint
@@ -235,13 +240,6 @@ struct WitnessConnectionSettingsSheet: View {
     @ViewBuilder private var connectionSettings: some View {
         ConsoleSection("Connection") {
             VStack(spacing: 0) {
-                if !model.configuration.primaryServiceRemoved {
-                    ConsoleSettingRow(title: "Cluster ID", subtitle: "The original SwiftBot service’s ownership group. Additional services are managed in Guarding.") {
-                        TextField("Cluster ID", text: $configuration.clusterID)
-                            .textFieldStyle(.roundedBorder).frame(width: 220)
-                    }
-                    Divider().padding(.leading, 16)
-                }
                 ConsoleSettingRow(title: "Local listener", subtitle: "Cloudflare uses the listener on this Mac.") {
                     Picker("Local listener", selection: $configuration.bindAddress) {
                         Text("This Mac only").tag("127.0.0.1")
@@ -257,7 +255,7 @@ struct WitnessConnectionSettingsSheet: View {
                 }
                 Divider().padding(.leading, 16)
                 ConsoleSettingRow(title: "Public HTTPS endpoint") {
-                    TextField("Public HTTPS endpoint", text: $configuration.publicEndpoint, prompt: Text("https://witness.example.com"))
+                    TextField("Public HTTPS endpoint", text: $configuration.publicEndpoint, prompt: Text("https://ruru.example.com"))
                         .textFieldStyle(.roundedBorder).frame(width: 280)
                         .disabled(configuration.tunnel.isConfigured)
                 }
@@ -289,7 +287,6 @@ struct WitnessConnectionSettingsSheet: View {
             }
             // Preserve General preferences saved in the separate Settings window.
             var saved = model.configuration
-            saved.clusterID = configuration.clusterID
             saved.bindAddress = configuration.bindAddress
             saved.port = configuration.port
             saved.publicEndpoint = configuration.publicEndpoint
@@ -381,7 +378,7 @@ struct WitnessInternetSheet: View {
                     ConsoleSection("Cloudflare") {
                         VStack(spacing: 0) {
                             ConsoleSettingRow(title: "Hostname", subtitle: "Choose an unused subdomain.") {
-                                TextField("Hostname", text: $hostname, prompt: Text("witness.example.com"))
+                                TextField("Hostname", text: $hostname, prompt: Text("ruru.example.com"))
                                     .textFieldStyle(.roundedBorder).frame(width: 270)
                                     .disabled(model.configuration.tunnel.isConfigured)
                             }
@@ -412,7 +409,7 @@ struct WitnessInternetSheet: View {
             }
             Divider()
             HStack {
-                Text("A separate tunnel for this witness.").font(.caption).foregroundStyle(.secondary)
+                Text("A separate tunnel for this Ruru.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.internetBusy)
                 Button(model.internetBusy ? "Setting Up…" : "Connect") { connect() }
@@ -599,5 +596,125 @@ private struct WitnessRestoreSheet: View {
                               || contents.leases == nil && !(contents.configuration != nil && includeSettings))
             }.padding(16)
         }.frame(width: 500)
+    }
+}
+
+/// What Ruru reports and where. Changes apply immediately like other settings;
+/// the Discord webhook URL is stored in Keychain, never in settings.
+private struct WitnessAlertSettings: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    @Binding var preferences: RuruAlertPreferences
+    @State private var settingUpDiscord = false
+    @State private var sending = false
+    @State private var failure: String?
+
+    var body: some View {
+        Section {
+            Toggle(isOn: $preferences.serviceDown) {
+                Text("A service goes down")
+                Text("Its owner stops renewing and no other server takes over within 15 seconds.")
+            }
+            Toggle(isOn: $preferences.failover) {
+                Text("A service fails over")
+                Text("Ownership moves to another server without a planned release.")
+            }
+            Toggle(isOn: $preferences.authorityProblems) {
+                Text("Ruru has a problem")
+                Text("The listener stops, Internet Access drops, or a snapshot can’t be saved.")
+            }
+        } header: {
+            Text("Alert Me When")
+        } footer: {
+            Text("Ruru also tells you when each problem is resolved. Planned releases, stopping the service, and the wait after a restart never alert.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+        Section {
+            Toggle("macOS notifications", isOn: $preferences.notifications)
+            if model.discordConfigured {
+                Toggle(isOn: $preferences.discord) {
+                    Text("Discord")
+                    Text("Posts to the saved webhook.")
+                }
+                LabeledContent("Webhook") {
+                    HStack {
+                        Button("Replace…") { settingUpDiscord = true }
+                        Button("Remove", role: .destructive) {
+                            Task {
+                                do { try await model.removeDiscordWebhook() }
+                                catch { failure = error.localizedDescription }
+                            }
+                        }
+                    }
+                }
+            } else {
+                LabeledContent {
+                    Button("Set Up…") { settingUpDiscord = true }
+                } label: {
+                    Text("Discord")
+                    Text("Post alerts to a channel with a webhook.")
+                }
+            }
+            LabeledContent {
+                Button(sending ? "Sending…" : "Send Test") {
+                    sending = true
+                    Task { await model.sendTestAlert(); sending = false }
+                }.disabled(sending || !(preferences.notifications || model.discordConfigured))
+            } label: {
+                Text("Test")
+                Text("Sends one alert to each destination.")
+            }
+            if let error = failure ?? model.alertDeliveryError { warning(error) }
+        } header: {
+            Text("Deliver To")
+        }
+        .disabled(!model.backupAvailable)
+        .sheet(isPresented: $settingUpDiscord) { WitnessDiscordSetupSheet().environmentObject(model) }
+    }
+
+    private func warning(_ text: String) -> some View {
+        Label {
+            Text(text).textSelection(.enabled)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        }
+    }
+}
+
+private struct WitnessDiscordSetupSheet: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var url = ""
+    @State private var saving = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    SecureField("Webhook URL", text: $url, prompt: Text("https://discord.com/api/webhooks/…"))
+                    if let error { Text(error).foregroundStyle(.red) }
+                } header: {
+                    Text("Discord Webhook")
+                } footer: {
+                    Text("In Discord, open the channel’s settings → Integrations → Webhooks → New Webhook, then Copy Webhook URL. Ruru keeps it in Keychain and sends only alert titles, descriptions and times.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped).scrollDisabled(true).fixedSize(horizontal: false, vertical: true)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(saving ? "Saving…" : "Save") {
+                    saving = true
+                    Task {
+                        do { try await model.setDiscordWebhook(url); dismiss() }
+                        catch { self.error = error.localizedDescription; saving = false }
+                    }
+                }
+                .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                .disabled(RuruDiscordWebhook.validated(url) == nil || saving)
+            }.padding(16)
+        }.frame(width: 480)
     }
 }

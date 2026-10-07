@@ -12,8 +12,19 @@ including a helper built only for storage tests:
 
 The application owns the lease store for its whole lifetime, independently of
 the status window. Listener pause/restart preserves the same authority epoch and
-leases. Process restart creates a new monotonic epoch, waits 30 seconds if the
-durable database records outstanding ownership, and refuses earlier-epoch renewals.
+leases. Process restart creates a new monotonic epoch, waits out the longest
+outstanding grant recorded in the database, and refuses earlier-epoch renewals.
+
+Every service is an equal entry in the settings' `services` list, with its own
+cluster ID, Keychain token (`service-<id>`), lease length and display names.
+There is no built-in service; `kind` (SwiftBot or Other app) is only a template
+for the icon and pairing instructions, and SwiftBot keeps its own app icon.
+`GET /v1/service` lets a client discover its service's capabilities, lease
+length and current lease with its own token. `Clients/RuruClient` is the
+reference Swift client; its conformance tests run against the real server.
+Alerts (`RuruAlerts.swift`) watch each poll for services whose owner stops
+renewing, failovers and authority problems, and deliver them to macOS
+notifications and an optional Discord webhook kept in Keychain.
 
 ## Coordinator direction
 
@@ -143,7 +154,7 @@ stable across the rebrand. The project, application target and scheme are named
 
 The Cloudflare clients and connector supervision are adapted from SwiftBot's
 implementation, with no source/project dependency on the bot repository. The
-witness creates a dedicated `swiftmesh-witness-<installation UUID>` tunnel.
+app creates a dedicated `ruru-<installation UUID>` tunnel.
 Retries reuse only that identity; DNS conflicts fail before management writes.
 The flow checks the API token, lists scoped zones (including pagination), checks
 the hostname, creates/reuses the dedicated tunnel, checkpoints its ID and token,
@@ -248,9 +259,8 @@ admission. It does not restart the listener, tunnel, store or clock epoch, nor
 change existing leases. Renaming a service/server is cosmetic. Settings drafts
 preserve catalog updates. Additional service cluster IDs are fixed after setup;
 removal revokes admission while retaining durable leases, terms and history.
-The initial SwiftBot service can also be removed, and that state survives
-relaunch. An empty catalog serves health but admits no leases. Already granted
-permission expires normally within 30 seconds. Re-adding the same cluster uses
+Any service can be removed, and that state survives relaunch. An empty catalog serves health but admits no leases. Already granted
+permission expires normally within the service's lease length. Re-adding the same cluster uses
 a new token and the existing lease/term, preserving fencing. Inactive Keychain
 items are retained but are not loaded/admitted. Removal works during a database
 startup failure and never resets storage. Other services and the authority epoch

@@ -37,6 +37,15 @@ enum WitnessKeychain {
         } else if status != errSecSuccess { throw KeychainError(status: status) }
     }
 
+    static func delete(_ account: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service, kSecAttrAccount as String: account
+        ]
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError(status: status) }
+    }
+
     static func loadOrCreate(account: String = account) throws -> String {
         if let token = try read(account) {
             guard token.utf8.count >= 32 else { throw KeychainError(status: errSecDecode) }
@@ -57,6 +66,6 @@ enum WitnessKeychain {
 
     struct KeychainError: LocalizedError {
         let status: OSStatus
-        var errorDescription: String? { "Keychain could not access the witness credential (\(status))." }
+        var errorDescription: String? { "Keychain could not access Ruru’s stored credential (\(status))." }
     }
 }

@@ -51,3 +51,41 @@ public struct WitnessServicePolicy: Codable, Equatable, Sendable {
 struct WitnessServicePolicyRequest: Decodable {
     let clusterID: String
 }
+
+/// `GET /v1/service`: what the calling token's service supports, and its state.
+/// Clients feature-detect from `capabilities` instead of assuming a version.
+public struct WitnessServiceDescription: Codable, Equatable, Sendable {
+    public struct Capability: Codable, Equatable, Sendable {
+        public let version: Int
+        public let enabled: Bool
+    }
+    public struct Lease: Codable, Equatable, Sendable {
+        public let ownerNodeID: String?
+        public let term: Int64
+        public let remainingSeconds: Double
+    }
+
+    public let version: Int
+    public let authority: String
+    public let clusterID: String
+    public let leaseSeconds: Double
+    public let recoverySeconds: Double
+    public let capabilities: [String: Capability]
+    public let lease: Lease?
+
+    init(service: WitnessServiceCredential, lease: LeaseStatus?, recoverySeconds: Double) {
+        version = 1
+        authority = "Ruru"
+        clusterID = service.clusterID
+        leaseSeconds = service.leaseSeconds
+        self.recoverySeconds = recoverySeconds
+        capabilities = [
+            "lease": .init(version: 1, enabled: true),
+            "primaryPreference": .init(version: 1, enabled: true),
+            "coordination": .init(version: 1, enabled: service.coordinationPolicy.enabled)
+        ]
+        self.lease = lease.map {
+            Lease(ownerNodeID: $0.ownerNodeID.isEmpty ? nil : $0.ownerNodeID, term: $0.term, remainingSeconds: $0.remainingSeconds)
+        }
+    }
+}

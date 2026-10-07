@@ -140,6 +140,40 @@ final class WitnessHTTPTests: XCTestCase {
                            body: try JSONEncoder().encode(LeaseRequest(clusterID: cluster, nodeID: "primary", term: 0)))
     }
 
+    func testServiceDescriptionIsScopedToTheCallersServiceAndReportsLiveState() async throws {
+        let clock = TestClock(0)
+        let other = String(repeating: "other-authority-", count: 4)
+        let router = try WitnessRouter(store: store(clock: clock.now), services: [
+            WitnessServiceCredential(clusterID: "bot", token: token, leaseSeconds: 60),
+            WitnessServiceCredential(clusterID: "media", token: other,
+                                     coordinationPolicy: .init(enabled: true, allowedOrigins: ["https://media.example.com"]))
+        ])
+        let describe = { (token: String?) in
+            HTTPRequest(method: "GET", path: "/v1/service", headers: token.map { ["authorization": "Bearer " + $0] } ?? [:], body: Data())
+        }
+        let unauthorized = await router.route(describe(nil))
+        XCTAssertEqual(unauthorized.status, 401)
+        let empty = await router.route(describe(token))
+        XCTAssertEqual(empty.status, 200)
+        var description = try JSONDecoder().decode(WitnessServiceDescription.self, from: empty.body)
+        XCTAssertEqual(description.clusterID, "bot")
+        XCTAssertEqual(description.leaseSeconds, 60)
+        XCTAssertNil(description.lease)
+        XCTAssertEqual(description.capabilities["lease"]?.version, 1)
+        XCTAssertEqual(description.capabilities["coordination"]?.enabled, false)
+        let grant = await router.route(try request(token: token))
+        XCTAssertEqual(try JSONDecoder().decode(LeaseGrant.self, from: grant.body).expiresInSeconds, 60)
+        clock.advance(10)
+        description = try JSONDecoder().decode(WitnessServiceDescription.self, from: await router.route(describe(token)).body)
+        XCTAssertEqual(description.lease?.ownerNodeID, "primary")
+        XCTAssertEqual(description.lease?.remainingSeconds, 50)
+        let media = try JSONDecoder().decode(WitnessServiceDescription.self, from: await router.route(describe(other)).body)
+        XCTAssertEqual(media.clusterID, "media")
+        XCTAssertEqual(media.capabilities["coordination"]?.enabled, true)
+        XCTAssertNil(media.lease)
+        XCTAssertNil(empty.body.range(of: Data(token.utf8)))
+    }
+
     func testLeaseRoutesRequireBearerCredential() async throws {
         let router = try WitnessRouter(store: store(), clusterID: "bot", token: token)
         let missing = await router.route(try request())

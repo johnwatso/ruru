@@ -3,22 +3,61 @@ import XCTest
 import WitnessKit
 
 final class WitnessConfigurationTests: XCTestCase {
+    private let bot = GuardedService(name: "SwiftBot", clusterID: "swiftmesh", kind: .swiftBot)
+
+    private func configured(_ services: GuardedService...) -> WitnessConfiguration {
+        var configuration = WitnessConfiguration()
+        configuration.services = services
+        return configuration
+    }
+
+    func testFreshConfigurationHasNoBuiltInService() throws {
+        let configuration = WitnessConfiguration()
+        XCTAssertTrue(configuration.guardedServices.isEmpty)
+        XCTAssertTrue(configuration.isValid)
+        let restored = try JSONDecoder().decode(WitnessConfiguration.self, from: JSONEncoder().encode(configuration))
+        XCTAssertEqual(restored, configuration)
+    }
+
+    func testEveryServiceIsEqualAndTheSwiftBotTemplateOnlyChangesPresentation() {
+        let worker = GuardedService(name: "Worker", clusterID: "worker")
+        XCTAssertEqual(bot.brandAsset, "SwiftBotLogo")
+        XCTAssertNil(worker.brandAsset)
+        XCTAssertEqual(bot.keychainAccount, "service-" + bot.id)
+        XCTAssertEqual(worker.keychainAccount, "service-" + worker.id)
+        XCTAssertEqual(bot.leaseSeconds, worker.leaseSeconds)
+        XCTAssertTrue(configured(bot, worker).isValid)
+    }
+
+    func testLeaseLengthIsBoundedAndPersists() throws {
+        var service = GuardedService(name: "Media", clusterID: "media", leaseSeconds: 120)
+        XCTAssertTrue(configured(service).isValid)
+        let restored = try JSONDecoder().decode(WitnessConfiguration.self, from: JSONEncoder().encode(configured(service)))
+        XCTAssertEqual(restored.services.first?.leaseSeconds, 120)
+        for invalid in [0, 9, 301] {
+            service.leaseSeconds = invalid
+            XCTAssertFalse(configured(service).isValid)
+        }
+        let withoutLength = Data(#"{"id":"\#(bot.id)","name":"SwiftBot","clusterID":"swiftmesh"}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(GuardedService.self, from: withoutLength).leaseSeconds, 30)
+    }
+
     func testCoordinationPolicyPersistsAndRemovedServiceDoesNotTransferOptIn() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("RuruCoordinationPolicy-\(UUID())")
         defer { try? FileManager.default.removeItem(at: folder) }
-        var configuration = WitnessConfiguration()
-        XCTAssertFalse(configuration.coordinationPolicy(for: "swiftbot").enabled)
+        var configuration = configured(bot)
+        XCTAssertFalse(configuration.coordinationPolicy(for: bot.id).enabled)
         let policy = CoordinationPolicy(enabled: true, allowedOrigins: ["https://media.example.com"])
-        try configuration.setCoordinationPolicy(policy, for: "swiftbot")
+        try configuration.setCoordinationPolicy(policy, for: bot.id)
         try WitnessStorage.save(configuration, in: folder)
         let restored = try WitnessStorage.load(from: folder)
-        XCTAssertEqual(restored.coordinationPolicy(for: "swiftbot"), policy)
+        XCTAssertEqual(restored.coordinationPolicy(for: bot.id), policy)
         XCTAssertThrowsError(try configuration.setCoordinationPolicy(policy, for: "missing"))
-        XCTAssertThrowsError(try configuration.setCoordinationPolicy(.init(enabled: true, allowedOrigins: ["https://media.example.com/path"]), for: "swiftbot"))
-        try configuration.removeGuardedService(id: "swiftbot")
+        XCTAssertThrowsError(try configuration.setCoordinationPolicy(.init(enabled: true, allowedOrigins: ["https://media.example.com/path"]), for: bot.id))
+        try configuration.removeGuardedService(id: bot.id)
         XCTAssertTrue(configuration.serviceCoordinationPolicies.isEmpty)
-        let replacement = GuardedService(name: "Replacement", clusterID: configuration.clusterID)
-        configuration.additionalServices = [replacement]
+        let replacement = GuardedService(name: "Replacement", clusterID: bot.clusterID)
+        configuration.services = [replacement]
         XCTAssertFalse(configuration.coordinationPolicy(for: replacement.id).enabled)
         configuration.serviceCoordinationPolicies["missing"] = policy
         XCTAssertFalse(configuration.isValid)
@@ -27,39 +66,38 @@ final class WitnessConfigurationTests: XCTestCase {
     func testPrimaryPreferencePersistsPerServiceAndClearingAdvancesRevision() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("RuruPrimaryPreference-\(UUID())")
         defer { try? FileManager.default.removeItem(at: folder) }
-        var configuration = WitnessConfiguration()
         let worker = GuardedService(name: "Worker", clusterID: "worker")
-        configuration.additionalServices = [worker]
-        XCTAssertTrue(try configuration.setPreferredPrimary("primary-a", for: "swiftbot"))
+        var configuration = configured(bot, worker)
+        XCTAssertTrue(try configuration.setPreferredPrimary("primary-a", for: bot.id))
         XCTAssertTrue(try configuration.setPreferredPrimary("worker-b", for: worker.id))
-        XCTAssertFalse(try configuration.setPreferredPrimary("primary-a", for: "swiftbot"))
+        XCTAssertFalse(try configuration.setPreferredPrimary("primary-a", for: bot.id))
         try WitnessStorage.save(configuration, in: folder)
         var restored = try WitnessStorage.load(from: folder)
-        XCTAssertEqual(restored.primaryPreference(for: "swiftbot").preferredPrimaryNodeID, "primary-a")
+        XCTAssertEqual(restored.primaryPreference(for: bot.id).preferredPrimaryNodeID, "primary-a")
         XCTAssertEqual(restored.primaryPreference(for: worker.id).preferredPrimaryNodeID, "worker-b")
-        XCTAssertEqual(restored.primaryPreference(for: "swiftbot").revision, 1)
-        XCTAssertTrue(try restored.setPreferredPrimary(nil, for: "swiftbot"))
+        XCTAssertEqual(restored.primaryPreference(for: bot.id).revision, 1)
+        XCTAssertTrue(try restored.setPreferredPrimary(nil, for: bot.id))
         try WitnessStorage.save(restored, in: folder)
         let cleared = try WitnessStorage.load(from: folder)
-        XCTAssertNil(cleared.primaryPreference(for: "swiftbot").preferredPrimaryNodeID)
-        XCTAssertEqual(cleared.primaryPreference(for: "swiftbot").revision, 2)
+        XCTAssertNil(cleared.primaryPreference(for: bot.id).preferredPrimaryNodeID)
+        XCTAssertEqual(cleared.primaryPreference(for: bot.id).revision, 2)
         XCTAssertEqual(cleared.primaryPreference(for: worker.id).revision, 1)
-        XCTAssertEqual(cleared.clusterID, configuration.clusterID)
+        XCTAssertEqual(cleared.services, configuration.services)
         XCTAssertEqual(cleared.tunnel, configuration.tunnel)
     }
 
     func testPreferenceRejectsInvalidIDsAndRemovedServicesCannotInheritPreferences() throws {
-        var configuration = WitnessConfiguration()
+        var configuration = configured(bot)
         for invalid in ["", "  node", "node\n", String(repeating: "a", count: 129)] {
-            XCTAssertThrowsError(try configuration.setPreferredPrimary(invalid, for: "swiftbot"))
+            XCTAssertThrowsError(try configuration.setPreferredPrimary(invalid, for: bot.id))
         }
         XCTAssertThrowsError(try configuration.setPreferredPrimary("node", for: "missing"))
-        try configuration.setPreferredPrimary("node-a", for: "swiftbot")
-        try configuration.removeGuardedService(id: "swiftbot")
+        try configuration.setPreferredPrimary("node-a", for: bot.id)
+        try configuration.removeGuardedService(id: bot.id)
         XCTAssertTrue(configuration.servicePrimaryPreferences.isEmpty)
         XCTAssertTrue(configuration.serviceCoordinationPolicies.isEmpty)
-        let replacement = GuardedService(name: "Replacement", clusterID: configuration.clusterID)
-        configuration.additionalServices = [replacement]
+        let replacement = GuardedService(name: "Replacement", clusterID: bot.clusterID)
+        configuration.services = [replacement]
         XCTAssertNil(configuration.primaryPreference(for: replacement.id).preferredPrimaryNodeID)
         XCTAssertEqual(configuration.primaryPreference(for: replacement.id).revision, 0)
         configuration.servicePrimaryPreferences["missing"] = .init(preferredPrimaryNodeID: "node")
@@ -67,32 +105,21 @@ final class WitnessConfigurationTests: XCTestCase {
     }
 
     func testPreferenceRevisionExhaustionFailsWithoutChangingSelection() throws {
-        var configuration = WitnessConfiguration()
-        configuration.servicePrimaryPreferences["swiftbot"] = .init(preferredPrimaryNodeID: "node-a", revision: Int64.max)
-        XCTAssertThrowsError(try configuration.setPreferredPrimary("node-b", for: "swiftbot"))
-        XCTAssertEqual(configuration.primaryPreference(for: "swiftbot").preferredPrimaryNodeID, "node-a")
-        configuration.servicePrimaryPreferences["swiftbot"] = .init(revision: -1)
+        var configuration = configured(bot)
+        configuration.servicePrimaryPreferences[bot.id] = .init(preferredPrimaryNodeID: "node-a", revision: Int64.max)
+        XCTAssertThrowsError(try configuration.setPreferredPrimary("node-b", for: bot.id))
+        XCTAssertEqual(configuration.primaryPreference(for: bot.id).preferredPrimaryNodeID, "node-a")
+        configuration.servicePrimaryPreferences[bot.id] = .init(revision: -1)
         XCTAssertFalse(configuration.isValid)
     }
 
-    func testLegacySettingsRetainTheirValuesWithoutEnablingInternetAccess() throws {
-        let data = Data(#"{"clusterID":"my-cluster","bindAddress":"127.0.0.1","port":38990,"publicEndpoint":"https://witness.example.com","startAutomatically":false}"#.utf8)
-        let configuration = try JSONDecoder().decode(WitnessConfiguration.self, from: data)
-        XCTAssertEqual(configuration.clusterID, "my-cluster")
-        XCTAssertFalse(configuration.startAutomatically)
-        XCTAssertFalse(configuration.showInDock)
-        XCTAssertFalse(configuration.primaryServiceRemoved)
-        XCTAssertFalse(configuration.tunnel.enabled)
-        XCTAssertFalse(configuration.tunnel.isConfigured)
-        XCTAssertTrue(configuration.isValid)
-        XCTAssertTrue(configuration.nodeDisplayNames.isEmpty)
-        XCTAssertTrue(configuration.servicePrimaryPreferences.isEmpty)
-        let restored = try JSONDecoder().decode(WitnessConfiguration.self, from: JSONEncoder().encode(configuration))
-        XCTAssertEqual(restored.tunnel.instanceID, configuration.tunnel.instanceID)
+    func testPreReleaseSettingsWithoutAServiceListAreRejectedNotEmptied() {
+        let data = Data(#"{"clusterID":"my-cluster","bindAddress":"127.0.0.1","port":38990,"publicEndpoint":"","startAutomatically":false}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(WitnessConfiguration.self, from: data))
     }
 
-    func testRetiredAppearancePreferenceIsIgnoredAndDropped() throws {
-        let data = Data(#"{"clusterID":"my-cluster","bindAddress":"127.0.0.1","port":38990,"publicEndpoint":"","startAutomatically":true,"showInDock":true,"appearance":"dark"}"#.utf8)
+    func testRetiredKeysAreIgnoredAndDropped() throws {
+        let data = Data(#"{"bindAddress":"127.0.0.1","port":38990,"publicEndpoint":"","startAutomatically":true,"showInDock":true,"appearance":"dark","services":[]}"#.utf8)
         let configuration = try JSONDecoder().decode(WitnessConfiguration.self, from: data)
         XCTAssertTrue(configuration.showInDock)
         XCTAssertTrue(configuration.isValid)
@@ -105,12 +132,11 @@ final class WitnessConfigurationTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(WitnessConfiguration.self, from: Data("{}".utf8)))
     }
 
-    func testRemovingPrimaryAndAdditionalServicesSurvivesRestartAndAllowsAnEmptyCatalog() throws {
-        var configuration = WitnessConfiguration()
+    func testRemovingServicesSurvivesRestartAndAllowsAnEmptyCatalog() throws {
         let worker = GuardedService(name: "Worker", clusterID: "worker")
-        configuration.additionalServices = [worker]
+        var configuration = configured(bot, worker)
         configuration.showInDock = true
-        try configuration.removeGuardedService(id: "swiftbot")
+        try configuration.removeGuardedService(id: bot.id)
         XCTAssertEqual(configuration.guardedServices, [worker])
         XCTAssertTrue(configuration.isValid)
         let restored = try JSONDecoder().decode(WitnessConfiguration.self, from: JSONEncoder().encode(configuration))
@@ -119,71 +145,43 @@ final class WitnessConfigurationTests: XCTestCase {
         try configuration.removeGuardedService(id: worker.id)
         XCTAssertTrue(configuration.guardedServices.isEmpty)
         XCTAssertTrue(configuration.isValid)
-        let empty = try JSONDecoder().decode(WitnessConfiguration.self, from: JSONEncoder().encode(configuration))
-        XCTAssertTrue(empty.guardedServices.isEmpty)
         XCTAssertThrowsError(try configuration.removeGuardedService(id: "missing"))
     }
 
-    func testNewServiceCanReuseRemovedGroupWithoutResurrectingPrimaryCredential() throws {
-        var configuration = WitnessConfiguration()
-        try configuration.removeGuardedService(id: "swiftbot")
-        let replacement = GuardedService(name: "Replacement", clusterID: configuration.clusterID, kind: .swiftBot)
-        configuration.additionalServices = [replacement]
+    func testNewServiceCanReuseARemovedGroupWithADistinctCredential() throws {
+        var configuration = configured(bot)
+        try configuration.removeGuardedService(id: bot.id)
+        let replacement = GuardedService(name: "Replacement", clusterID: bot.clusterID, kind: .swiftBot)
+        configuration.services = [replacement]
         XCTAssertTrue(configuration.isValid)
-        XCTAssertNotEqual(replacement.keychainAccount, "authority-bearer-token")
-        configuration.additionalServices[0].id = "swiftbot"
-        XCTAssertFalse(configuration.isValid)
-    }
-
-    func testSavedBotNamesRoundTripByStableNodeID() throws {
-        var configuration = WitnessConfiguration()
-        configuration.nodeDisplayNames = ["primary-id": "Primary Mac", "backup-id": "Failover Mac"]
-        XCTAssertTrue(configuration.isValid)
-        let restored = try JSONDecoder().decode(WitnessConfiguration.self, from: JSONEncoder().encode(configuration))
-        XCTAssertEqual(restored.nodeDisplayNames, configuration.nodeDisplayNames)
-        XCTAssertEqual(restored.clusterID, configuration.clusterID)
-        XCTAssertEqual(restored.tunnel, configuration.tunnel)
-    }
-
-    func testLegacySettingsBecomeSwiftBotServiceWithoutChangingIdentity() throws {
-        let data = Data(#"{"clusterID":"existing","bindAddress":"127.0.0.1","port":38990,"publicEndpoint":"","startAutomatically":false,"nodeDisplayNames":{"server":"Primary Mac"}}"#.utf8)
-        let configuration = try JSONDecoder().decode(WitnessConfiguration.self, from: data)
-        let service = try XCTUnwrap(configuration.guardedServices.first)
-        XCTAssertEqual(service.name, "SwiftBot")
-        XCTAssertEqual(service.clusterID, "existing")
-        XCTAssertEqual(service.keychainAccount, "authority-bearer-token")
-        XCTAssertEqual(service.nodeDisplayNames["server"], "Primary Mac")
-        XCTAssertTrue(configuration.additionalServices.isEmpty)
+        XCTAssertNotEqual(replacement.keychainAccount, bot.keychainAccount)
     }
 
     func testServiceCatalogAndScopedNamesRoundTripWithoutCredentials() throws {
-        var configuration = WitnessConfiguration()
-        configuration.nodeDisplayNames = ["server": "SwiftBot Mac"]
-        configuration.additionalServices = [GuardedService(name: "Worker", clusterID: "worker", nodeDisplayNames: ["server": "Worker Mac"])]
+        var named = bot
+        named.nodeDisplayNames = ["server": "SwiftBot Mac"]
+        let configuration = configured(named, GuardedService(name: "Worker", clusterID: "worker", nodeDisplayNames: ["server": "Worker Mac"]))
         XCTAssertTrue(configuration.isValid)
         let data = try JSONEncoder().encode(configuration)
         let decoded = try JSONDecoder().decode(WitnessConfiguration.self, from: data)
         XCTAssertEqual(configuration, decoded)
         XCTAssertNotEqual(decoded.guardedServices[0].keychainAccount, decoded.guardedServices[1].keychainAccount)
+        XCTAssertEqual(decoded.guardedServices[0].nodeDisplayNames["server"], "SwiftBot Mac")
         XCTAssertEqual(decoded.guardedServices[1].nodeDisplayNames["server"], "Worker Mac")
-        XCTAssertNil(String(decoding: data, as: UTF8.self).range(of: "bearer-token"))
+        XCTAssertNil(String(decoding: data, as: UTF8.self).range(of: "token"))
     }
 
     func testDuplicateOwnershipGroupsAndMalformedServicesAreRejected() {
-        var configuration = WitnessConfiguration()
-        configuration.additionalServices = [GuardedService(name: "Worker", clusterID: configuration.clusterID)]
-        XCTAssertFalse(configuration.isValid)
-        configuration.additionalServices = [GuardedService(id: "swiftbot", name: "Worker", clusterID: "worker")]
-        XCTAssertFalse(configuration.isValid)
-        configuration.additionalServices = [GuardedService(name: "Worker\nName", clusterID: "worker")]
-        XCTAssertFalse(configuration.isValid)
-        configuration.additionalServices = [GuardedService(name: "Worker", clusterID: "worker\t")]
-        XCTAssertFalse(configuration.isValid)
+        XCTAssertFalse(configured(bot, GuardedService(name: "Worker", clusterID: bot.clusterID)).isValid)
+        XCTAssertFalse(configured(bot, GuardedService(id: bot.id, name: "Worker", clusterID: "worker")).isValid)
+        XCTAssertFalse(configured(GuardedService(id: "swiftbot", name: "Worker", clusterID: "worker")).isValid)
+        XCTAssertFalse(configured(GuardedService(name: "Worker\nName", clusterID: "worker")).isValid)
+        XCTAssertFalse(configured(GuardedService(name: "Worker", clusterID: "worker\t")).isValid)
     }
 
     func testManagedTunnelRequiresMatchingLoopbackEndpointAndCompleteMetadata() {
         var configuration = WitnessConfiguration()
-        configuration.tunnel.hostname = "witness.example.com"
+        configuration.tunnel.hostname = "ruru.example.com"
         XCTAssertFalse(configuration.isValid)
         configuration.tunnel.tunnelID = UUID().uuidString.lowercased()
         configuration.tunnel.accountID = "account"
@@ -195,33 +193,30 @@ final class WitnessConfigurationTests: XCTestCase {
         configuration.publicEndpoint = "https://bot.example.com"
         XCTAssertFalse(configuration.isValid)
     }
-}
 
-extension WitnessConfigurationTests {
     func testApprovedWebsitePersistsWithoutChangingOwnershipOrOtherServices() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("RuruEnrollment-\(UUID())")
         defer { try? FileManager.default.removeItem(at: folder) }
-        var configuration = WitnessConfiguration()
         let other = GuardedService(name: "Other", clusterID: "other")
-        configuration.additionalServices = [other]
-        try configuration.setPreferredPrimary("owner", for: "swiftbot")
+        var configuration = configured(bot, other)
+        try configuration.setPreferredPrimary("owner", for: bot.id)
         try configuration.setCoordinationPolicy(.init(enabled: true, allowedOrigins: ["https://other.example.com"]), for: other.id)
         let before = configuration
-        try configuration.approveCoordinationOrigin("https://john.example.com", for: "swiftbot")
-        try configuration.approveCoordinationOrigin("https://max.example.com", for: "swiftbot")
-        try configuration.approveCoordinationOrigin("https://max.example.com", for: "swiftbot")
+        try configuration.approveCoordinationOrigin("https://john.example.com", for: bot.id)
+        try configuration.approveCoordinationOrigin("https://max.example.com", for: bot.id)
+        try configuration.approveCoordinationOrigin("https://max.example.com", for: bot.id)
         try WitnessStorage.save(configuration, in: folder)
         let restored = try WitnessStorage.load(from: folder)
-        XCTAssertEqual(restored.coordinationPolicy(for: "swiftbot"), .init(enabled: true,
+        XCTAssertEqual(restored.coordinationPolicy(for: bot.id), .init(enabled: true,
             allowedOrigins: ["https://john.example.com", "https://max.example.com"]))
         XCTAssertEqual(restored.coordinationPolicy(for: other.id), before.coordinationPolicy(for: other.id))
         XCTAssertEqual(restored.servicePrimaryPreferences, before.servicePrimaryPreferences)
-        XCTAssertEqual(restored.clusterID, before.clusterID)
+        XCTAssertEqual(restored.services, before.services)
         XCTAssertEqual(restored.tunnel, before.tunnel)
-        for index in 2..<8 { try configuration.approveCoordinationOrigin("https://node-\(index).example.com", for: "swiftbot") }
+        for index in 2..<8 { try configuration.approveCoordinationOrigin("https://node-\(index).example.com", for: bot.id) }
         let full = configuration
-        XCTAssertThrowsError(try configuration.approveCoordinationOrigin("https://overflow.example.com", for: "swiftbot"))
-        XCTAssertThrowsError(try configuration.approveCoordinationOrigin("http://node.example.com", for: "swiftbot"))
+        XCTAssertThrowsError(try configuration.approveCoordinationOrigin("https://overflow.example.com", for: bot.id))
+        XCTAssertThrowsError(try configuration.approveCoordinationOrigin("http://node.example.com", for: bot.id))
         XCTAssertThrowsError(try configuration.approveCoordinationOrigin("https://node.example.com", for: "missing"))
         XCTAssertEqual(configuration, full)
     }

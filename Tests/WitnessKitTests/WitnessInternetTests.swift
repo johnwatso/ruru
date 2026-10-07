@@ -58,7 +58,7 @@ final class WitnessInternetTests: XCTestCase {
         XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer test-api-secret" })
         let created = try XCTUnwrap(requests.first { $0.httpMethod == "POST" && $0.url!.path.hasSuffix("cfd_tunnel") })
         XCTAssertEqual(MockCloudflare.body(created)["name"] as? String, settings.name)
-        XCTAssertTrue(settings.name.hasPrefix("swiftmesh-witness-"))
+        XCTAssertTrue(settings.name.hasPrefix("ruru-"))
         let configured = try XCTUnwrap(requests.first { $0.httpMethod == "PUT" })
         let config = try XCTUnwrap(MockCloudflare.body(configured)["config"] as? [String: Any])
         let ingress = try XCTUnwrap(config["ingress"] as? [[String: Any]])

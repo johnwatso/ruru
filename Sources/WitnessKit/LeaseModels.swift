@@ -98,7 +98,7 @@ enum WitnessError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .database(let message): "Ownership database: \(message)"
-        case .alreadyRunning: "Another witness process is using this ownership database."
+        case .alreadyRunning: "Another Ruru process is using this ownership database."
         case .invalidConfiguration: "The listener address, port, cluster ID, or bearer token is invalid."
         case .stopped: "The listener was stopped before it became ready."
         case .listenerUnavailable: "The listener could not start. Check its port and network address."

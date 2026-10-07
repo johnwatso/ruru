@@ -25,6 +25,11 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var lastSnapshotDate: Date?
     @Published private(set) var snapshotError: String?
     private var snapshotTask: Task<Void, Never>?
+    @Published private(set) var discordConfigured = false
+    @Published private(set) var alertDeliveryError: String?
+    private var alertMonitor = RuruAlertMonitor()
+    private let alertDelivery = RuruAlertDelivery()
+    private var discordWebhook: URL?
 
     @Published private(set) var internetStatus = WitnessInternetStatus()
     @Published private(set) var internetBusy = false
@@ -44,6 +49,8 @@ final class WitnessAppModel: ObservableObject {
          ProcessInfo.processInfo.arguments.contains("--preview-screenshots")) {
         self.preview = preview
         if preview {
+            // Display-only service; previews never touch storage or Keychain.
+            configuration.services = [Self.previewService]
             if ProcessInfo.processInfo.arguments.contains("--preview-screenshots") {
                 loadScreenshotPreview()
                 return
@@ -51,11 +58,11 @@ final class WitnessAppModel: ObservableObject {
             if ProcessInfo.processInfo.arguments.contains("--preview-primary-preference") {
                 // Static, ephemeral UI fixtures. No store, listener or credentials.
                 snapshot = WitnessSnapshot(recoverySeconds: 0,
-                    leases: [LeaseStatus(clusterID: configuration.clusterID, ownerNodeID: "backup-mac", term: 7,
+                    leases: [LeaseStatus(clusterID: previewCluster, ownerNodeID: "backup-mac", term: 7,
                                          remainingSeconds: 26, ownerNodeName: "Backup Mac")],
-                    events: [WitnessEvent(clusterID: configuration.clusterID, id: 2, time: Date(), action: "Acquired",
+                    events: [WitnessEvent(clusterID: previewCluster, id: 2, time: Date(), action: "Acquired",
                                           nodeID: "backup-mac", term: 7, nodeName: "Backup Mac"),
-                             WitnessEvent(clusterID: configuration.clusterID, id: 1, time: Date(), action: "Acquired",
+                             WitnessEvent(clusterID: previewCluster, id: 1, time: Date(), action: "Acquired",
                                           nodeID: "home-mac", term: 6, nodeName: "Home Mac")])
             }
             if ProcessInfo.processInfo.arguments.contains("--preview-legacy-storage") {
@@ -67,6 +74,9 @@ final class WitnessAppModel: ObservableObject {
         }
         do {
             configuration = try WitnessStorage.load()
+            discordWebhook = (try? WitnessKeychain.read(RuruDiscordWebhook.keychainAccount)).flatMap { $0 }
+                .flatMap(RuruDiscordWebhook.validated)
+            discordConfigured = discordWebhook != nil
             try WitnessStorage.checkAuthorityPresent()
             store = try LeaseStore(databaseURL: WitnessStorage.databaseURL)
             try WitnessStorage.recordAuthorityCreated()
@@ -84,6 +94,10 @@ final class WitnessAppModel: ObservableObject {
         }
     }
 
+    private static let previewService = GuardedService(id: "00000000-0000-4000-8000-000000000001", name: "SwiftBot",
+                                                       clusterID: "swiftbot", kind: .swiftBot)
+    private var previewCluster: String { Self.previewService.clusterID }
+
     private func loadScreenshotPreview() {
         // Display-only fixtures: never initialize storage, credentials, a listener,
         // a connector or polling. The lease remains stable while taking screenshots.
@@ -92,20 +106,20 @@ final class WitnessAppModel: ObservableObject {
         configuration.tunnel.enabled = true
         configuration.tunnel.tunnelID = "00000000-0000-4000-8000-000000000001"
         configuration.tunnel.accountID = "screenshot-preview"
-        configuration.servicePrimaryPreferences["swiftbot"] = .init(preferredPrimaryNodeID: "home-mac", revision: 1)
-        configuration.serviceCoordinationPolicies["swiftbot"] = .init(enabled: true, allowedOrigins: ["https://videos.ruruapp.dev"])
+        configuration.servicePrimaryPreferences[Self.previewService.id] = .init(preferredPrimaryNodeID: "home-mac", revision: 1)
+        configuration.serviceCoordinationPolicies[Self.previewService.id] = .init(enabled: true, allowedOrigins: ["https://videos.ruruapp.dev"])
         let buildService = GuardedService(id: "00000000-0000-4000-8000-000000000002", name: "Build Server", clusterID: "build-server")
-        configuration.additionalServices = [buildService]
+        configuration.services.append(buildService)
         configuration.serviceCoordinationPolicies[buildService.id] = .init(enabled: true, allowedOrigins: ["https://builds.ruruapp.dev"])
         coordinationLocations = [
-            .init(clusterID: configuration.clusterID, nodeID: "home-mac", nodeName: "Home Mac",
+            .init(clusterID: previewCluster, nodeID: "home-mac", nodeName: "Home Mac",
                 resource: .init(namespace: "recordings", resourceID: "session-42", title: "Community catch-up", url: "https://videos.ruruapp.dev/recordings/session-42"), ageSeconds: 12, fresh: true),
-            .init(clusterID: configuration.clusterID, nodeID: "backup-mac", nodeName: "Backup Mac",
+            .init(clusterID: previewCluster, nodeID: "backup-mac", nodeName: "Backup Mac",
                 resource: .init(namespace: "recordings", resourceID: "session-42", title: "Community catch-up", url: "https://videos.ruruapp.dev/backup/session-42"), ageSeconds: 145, fresh: false),
             .init(clusterID: buildService.clusterID, nodeID: "build-mac", nodeName: "Build Mac",
                 resource: .init(namespace: "artifacts", resourceID: "nightly-macos", title: "Nightly macOS build", url: "https://builds.ruruapp.dev/artifacts/nightly-macos"), ageSeconds: 24, fresh: true)
         ]
-        coordinationEnrollments = [.init(id: UUID(), clusterID: configuration.clusterID, nodeID: "new-backup-mac",
+        coordinationEnrollments = [.init(id: UUID(), clusterID: previewCluster, nodeID: "new-backup-mac",
             nodeName: "New Backup Mac", origin: "https://backup.swiftbot.example", ageSeconds: 20)]
         state = .running
         listenerPort = UInt16(configuration.port)
@@ -114,19 +128,30 @@ final class WitnessAppModel: ObservableObject {
                                               detail: "Connected to Cloudflare.")
         let now = Date()
         snapshot = WitnessSnapshot(recoverySeconds: 0,
-            leases: [LeaseStatus(clusterID: configuration.clusterID, ownerNodeID: "home-mac", term: 42,
+            leases: [LeaseStatus(clusterID: previewCluster, ownerNodeID: "home-mac", term: 42,
                                  remainingSeconds: 26, ownerNodeName: "Home Mac")],
-            events: [WitnessEvent(clusterID: configuration.clusterID, id: 4, time: now.addingTimeInterval(-180),
+            events: [WitnessEvent(clusterID: previewCluster, id: 4, time: now.addingTimeInterval(-180),
                                   action: "Acquired", nodeID: "home-mac", term: 42, nodeName: "Home Mac"),
-                     WitnessEvent(clusterID: configuration.clusterID, id: 3, time: now.addingTimeInterval(-900),
+                     WitnessEvent(clusterID: previewCluster, id: 3, time: now.addingTimeInterval(-900),
                                   action: "Acquired", nodeID: "backup-mac", term: 41, nodeName: "Backup Mac"),
-                     WitnessEvent(clusterID: configuration.clusterID, id: 2, time: now.addingTimeInterval(-7_200),
+                     WitnessEvent(clusterID: previewCluster, id: 2, time: now.addingTimeInterval(-7_200),
                                   action: "Acquired", nodeID: "home-mac", term: 40, nodeName: "Home Mac"),
-                     WitnessEvent(clusterID: configuration.clusterID, id: 1, time: now.addingTimeInterval(-18_240),
+                     WitnessEvent(clusterID: previewCluster, id: 1, time: now.addingTimeInterval(-18_240),
                                   action: "Acquired", nodeID: "backup-mac", term: 39, nodeName: "Backup Mac")])
+        // Simulate the owner renewing every five seconds, so the lease ring
+        // shows its normal refill cycle instead of draining to "late".
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                guard let self, let current = self.snapshot else { return }
+                self.snapshot = WitnessSnapshot(recoverySeconds: 0, leases: current.leases.map {
+                    LeaseStatus(clusterID: $0.clusterID, ownerNodeID: $0.ownerNodeID, term: $0.term,
+                                remainingSeconds: 30, ownerNodeName: $0.ownerNodeName)
+                }, events: current.events)
+            }
+        }
     }
 
-    var currentLease: LeaseStatus? { lease(for: configuration.clusterID) }
     func lease(for clusterID: String) -> LeaseStatus? { snapshot?.leases.first { $0.clusterID == clusterID } }
     func service(for clusterID: String) -> GuardedService? { configuration.guardedServices.first { $0.clusterID == clusterID } }
     func serviceName(for clusterID: String) -> String { service(for: clusterID)?.name ?? clusterID }
@@ -148,16 +173,12 @@ final class WitnessAppModel: ObservableObject {
     var activeServiceCount: Int {
         configuration.guardedServices.filter { (lease(for: $0.clusterID)?.remainingSeconds ?? 0) > 0 }.count
     }
-    var ownerText: String {
-        guard let lease = currentLease, lease.remainingSeconds > 0 else { return "No active owner" }
-        return nodeDisplayName(for: lease.ownerNodeID, reportedName: lease.ownerNodeName)
-    }
     func nodeDisplayName(for nodeID: String, reportedName: String?, clusterID: String? = nil) -> String {
-        let service = service(for: clusterID ?? configuration.clusterID)
+        let service = clusterID.flatMap(service(for:))
         return service?.nodeDisplayNames[nodeID] ?? WitnessNodeName.normalized(reportedName) ?? "Unnamed server"
     }
 
-    func saveNodeDisplayName(_ name: String, for nodeID: String, clusterID: String? = nil) throws {
+    func saveNodeDisplayName(_ name: String, for nodeID: String, clusterID: String) throws {
         guard !busy, !internetBusy, !savingConfiguration, !shuttingDown else { throw WitnessStorage.ConfigurationError.invalid }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !nodeID.isEmpty, nodeID.utf8.count <= 128,
@@ -165,12 +186,10 @@ final class WitnessAppModel: ObservableObject {
             throw WitnessStorage.ConfigurationError.invalidNodeName
         }
         var draft = configuration
-        let cluster = clusterID ?? configuration.clusterID
-        if service(for: cluster)?.id == "swiftbot" {
-            draft.nodeDisplayNames[nodeID] = trimmed.isEmpty ? nil : trimmed
-        } else if let index = draft.additionalServices.firstIndex(where: { $0.clusterID == cluster }) {
-            draft.additionalServices[index].nodeDisplayNames[nodeID] = trimmed.isEmpty ? nil : trimmed
-        } else { throw WitnessStorage.ConfigurationError.invalid }
+        guard let index = draft.services.firstIndex(where: { $0.clusterID == clusterID }) else {
+            throw WitnessStorage.ConfigurationError.invalid
+        }
+        draft.services[index].nodeDisplayNames[nodeID] = trimmed.isEmpty ? nil : trimmed
         guard draft.isValid else { throw WitnessStorage.ConfigurationError.invalidNodeName }
         if !preview { try WitnessStorage.save(draft) }
         // A cosmetic rename must never restart the listener or change a lease.
@@ -228,17 +247,11 @@ final class WitnessAppModel: ObservableObject {
     }
 
     func saveConfiguration(_ draft: WitnessConfiguration) async throws {
+        // Saves app-wide settings only; services have their own operations.
         var draft = draft
-        draft.nodeDisplayNames = configuration.nodeDisplayNames
-        draft.primaryServiceName = configuration.primaryServiceName
-        draft.primaryServiceRemoved = configuration.primaryServiceRemoved
-        draft.additionalServices = configuration.additionalServices
+        draft.services = configuration.services
         draft.servicePrimaryPreferences = configuration.servicePrimaryPreferences
         draft.serviceCoordinationPolicies = configuration.serviceCoordinationPolicies
-        if draft.clusterID != configuration.clusterID, !configuration.primaryServiceRemoved {
-            try draft.setPreferredPrimary(nil, for: "swiftbot")
-            draft.serviceCoordinationPolicies.removeValue(forKey: "swiftbot")
-        }
         guard draft.isValid else { throw WitnessStorage.ConfigurationError.invalid }
         guard !busy, !internetBusy, !savingConfiguration else { throw WitnessStorage.ConfigurationError.invalid }
         savingConfiguration = true
@@ -253,15 +266,10 @@ final class WitnessAppModel: ObservableObject {
             return
         }
         let wasRunning = state == .running
-        let listenerChanged = draft.clusterID != configuration.clusterID || draft.bindAddress != configuration.bindAddress || draft.port != configuration.port
+        let listenerChanged = draft.bindAddress != configuration.bindAddress || draft.port != configuration.port
         // Save before changing the listener, so a disk error keeps the old service.
         try WitnessStorage.save(draft)
         if wasRunning && listenerChanged { await stop() }
-        if !configuration.primaryServiceRemoved, draft.clusterID != configuration.clusterID {
-            let credential = serviceCredentials[configuration.clusterID]
-            serviceCredentials.removeValue(forKey: configuration.clusterID)
-            serviceCredentials[draft.clusterID] = credential
-        }
         configuration = draft
         applyDockVisibility()
         if wasRunning && listenerChanged { await start() }
@@ -392,16 +400,19 @@ final class WitnessAppModel: ObservableObject {
             guard let token = tokens[service.clusterID] else { throw WitnessStorage.ConfigurationError.invalid }
             return WitnessServiceCredential(clusterID: service.clusterID, token: token,
                                             primaryPreference: configuration.primaryPreference(for: service.id),
-                                            coordinationPolicy: configuration.coordinationPolicy(for: service.id))
+                                            coordinationPolicy: configuration.coordinationPolicy(for: service.id),
+                                            leaseSeconds: Double(service.leaseSeconds))
         }
     }
 
-    func addGuardedService(name: String, clusterID: String, kind: GuardedService.Kind) async throws {
+    func addGuardedService(name: String, clusterID: String, kind: GuardedService.Kind,
+                           leaseSeconds: Int = GuardedService.defaultLeaseSeconds) async throws {
         guard !busy, !internetBusy, !savingConfiguration, !shuttingDown else { throw WitnessStorage.ConfigurationError.invalid }
         var saved = configuration
         let service = GuardedService(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                                     clusterID: clusterID.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind)
-        saved.additionalServices.append(service)
+                                     clusterID: clusterID.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind,
+                                     leaseSeconds: leaseSeconds)
+        saved.services.append(service)
         guard saved.isValid else { throw WitnessStorage.ConfigurationError.invalid }
         busy = true
         defer { busy = false }
@@ -457,20 +468,16 @@ final class WitnessAppModel: ObservableObject {
         // expires normally; old tokens cannot acquire or renew through the router.
     }
 
-    func replaceLegacyStorage(newClusterID: String) async throws {
+    func replaceLegacyStorage() async throws {
         guard legacyStorageNeedsReplacement, store == nil, server == nil,
               !busy, !internetBusy, !savingConfiguration, !shuttingDown else { throw WitnessStorage.ConfigurationError.invalid }
         var saved = configuration
-        let cluster = newClusterID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cluster.isEmpty, !configuration.guardedServices.contains(where: { $0.clusterID == cluster }),
-              cluster != configuration.clusterID else { throw WitnessStorage.ConfigurationError.invalid }
-        saved.clusterID = cluster
-        saved.nodeDisplayNames = [:]
         saved.servicePrimaryPreferences = [:]
         saved.serviceCoordinationPolicies = [:]
-        for index in saved.additionalServices.indices {
-            saved.additionalServices[index].clusterID = "service-" + UUID().uuidString.lowercased()
-            saved.additionalServices[index].nodeDisplayNames = [:]
+        // Every service gets a fresh ownership group, so no old term is reused.
+        for index in saved.services.indices {
+            saved.services[index].clusterID = "service-" + UUID().uuidString.lowercased()
+            saved.services[index].nodeDisplayNames = [:]
         }
         saved.startAutomatically = false
         guard saved.isValid else { throw WitnessStorage.ConfigurationError.invalid }
@@ -642,17 +649,21 @@ final class WitnessAppModel: ObservableObject {
         }
     }
 
-    func renameService(id: String, name: String) throws {
-        guard !busy, !internetBusy, !savingConfiguration else { throw WitnessStorage.ConfigurationError.invalid }
+    /// Renames a service or changes its lease length. Neither interrupts the
+    /// current owner: a new length applies from the owner's next renewal.
+    func updateService(id: String, name: String, leaseSeconds: Int) async throws {
+        guard !busy, !internetBusy, !savingConfiguration, !shuttingDown else { throw WitnessStorage.ConfigurationError.invalid }
         var saved = configuration
-        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if id == "swiftbot" { saved.primaryServiceName = name }
-        else if let index = saved.additionalServices.firstIndex(where: { $0.id == id }) {
-            saved.additionalServices[index].name = name
-        } else { throw WitnessStorage.ConfigurationError.invalid }
+        guard let index = saved.services.firstIndex(where: { $0.id == id }) else { throw WitnessStorage.ConfigurationError.invalid }
+        saved.services[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        saved.services[index].leaseSeconds = leaseSeconds
         guard saved.isValid else { throw WitnessStorage.ConfigurationError.invalid }
+        let access = server == nil || preview ? nil : try accessCredentials(configuration: saved)
+        busy = true
+        defer { busy = false }
         if !preview { try WitnessStorage.save(saved) }
         configuration = saved
+        if let access { try await server?.configureServices(access) }
     }
 
     func setPreferredPrimary(_ nodeID: String?, for serviceID: String) async throws {
@@ -726,17 +737,17 @@ final class WitnessAppModel: ObservableObject {
 
     func hasCredential(for clusterID: String) -> Bool { serviceCredentials[clusterID]?.isEmpty == false }
 
-    func copyToken(clusterID: String? = nil) { copy(serviceCredentials[clusterID ?? configuration.clusterID] ?? "") }
+    func copyToken(clusterID: String) { copy(serviceCredentials[clusterID] ?? "") }
     func copy(_ text: String) {
         guard !text.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    func copyConnectionDetails(clusterID: String? = nil) {
+    func copyConnectionDetails(clusterID: String) {
         guard !configuration.publicEndpoint.isEmpty,
-              let token = serviceCredentials[clusterID ?? configuration.clusterID] else { return }
-        let details = ["endpoint": configuration.publicEndpoint, "clusterID": clusterID ?? configuration.clusterID, "token": token]
+              let token = serviceCredentials[clusterID] else { return }
+        let details = ["endpoint": configuration.publicEndpoint, "clusterID": clusterID, "token": token]
         guard let data = try? JSONEncoder().encode(details), let text = String(data: data, encoding: .utf8) else { return }
         copy(text)
     }
@@ -765,5 +776,64 @@ final class WitnessAppModel: ObservableObject {
             await server?.stop()
             server = nil
         }
+        await evaluateAlerts()
+    }
+
+    // MARK: Alerts
+
+    private func evaluateAlerts() async {
+        guard !preview, !shuttingDown else { return }
+        let leases = snapshot?.leases ?? []
+        let observation = RuruAlertMonitor.Observation(
+            serviceRunning: state == .running, recovering: isRecovering,
+            serviceFailure: state == .failed ? (error ?? "The service is unavailable.") : nil,
+            tunnelError: internetStatus.state == .error ? internetStatus.detail : nil,
+            snapshotError: snapshotError,
+            owners: Dictionary(leases.filter { $0.remainingSeconds > 0 && !$0.ownerNodeID.isEmpty }.map {
+                ($0.clusterID, nodeDisplayName(for: $0.ownerNodeID, reportedName: $0.ownerNodeName, clusterID: $0.clusterID))
+            }, uniquingKeysWith: { first, _ in first }),
+            services: Dictionary(configuration.services.map { ($0.clusterID, $0.name) }, uniquingKeysWith: { first, _ in first }),
+            releases: Set((snapshot?.events ?? []).filter { $0.action == "Released" }.map { "\($0.clusterID)|\($0.id)" }))
+        let alerts = alertMonitor.observe(observation, at: Date())
+        guard !alerts.isEmpty else { return }
+        if let failure = await alertDelivery.deliver(alerts, preferences: configuration.alerts, webhook: discordWebhook) {
+            alertDeliveryError = failure
+        }
+    }
+
+    /// Saves a Discord webhook to Keychain and turns Discord alerts on.
+    func setDiscordWebhook(_ text: String) async throws {
+        guard !preview else { throw WitnessStorage.ConfigurationError.invalid }
+        guard let url = RuruDiscordWebhook.validated(text) else {
+            throw RuruBackup.Failure("Paste a Discord webhook URL, such as https://discord.com/api/webhooks/….")
+        }
+        try WitnessKeychain.save(url.absoluteString, account: RuruDiscordWebhook.keychainAccount)
+        discordWebhook = url
+        discordConfigured = true
+        alertDeliveryError = nil
+        var draft = configuration
+        draft.alerts.discord = true
+        try await saveConfiguration(draft)
+    }
+
+    func removeDiscordWebhook() async throws {
+        guard !preview else { return }
+        try WitnessKeychain.delete(RuruDiscordWebhook.keychainAccount)
+        discordWebhook = nil
+        discordConfigured = false
+        alertDeliveryError = nil
+        var draft = configuration
+        draft.alerts.discord = false
+        try await saveConfiguration(draft)
+    }
+
+    /// Sends one test alert to every configured destination.
+    func sendTestAlert() async {
+        guard !preview else { return }
+        let alert = RuruAlert(kind: .test, key: "test", title: "Ruru alerts are working",
+                              detail: "You'll be told here when a service goes down or fails over.")
+        var preferences = configuration.alerts
+        preferences.discord = discordWebhook != nil
+        alertDeliveryError = await alertDelivery.deliver([alert], preferences: preferences, webhook: discordWebhook)
     }
 }

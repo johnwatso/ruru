@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Ruru supports macOS 15 Sequoia; build and test on it.
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen
+
+      - name: Test
+        run: >
+          xcodebuild -project Ruru.xcodeproj -scheme Ruru
+          -derivedDataPath build/DerivedData
+          -destination 'platform=macOS'
+          test
+
+      - name: Test RuruClient package
+        run: swift test --package-path Clients/RuruClient
+
+      - name: Build universal Release
+        run: >
+          xcodebuild -project Ruru.xcodeproj -scheme Ruru -configuration Release
+          -derivedDataPath build/DerivedData
+          -destination 'generic/platform=macOS'
+          build
+
+      - name: Verify Intel and Apple silicon slices
+        run: |
+          app=build/DerivedData/Build/Products/Release/Ruru.app
+          for binary in "$app/Contents/MacOS/Ruru" "$app/Contents/Frameworks/WitnessKit.framework/WitnessKit"; do
+            archs=$(lipo -archs "$binary")
+            echo "$binary: $archs"
+            [[ " $archs " == *" x86_64 "* && " $archs " == *" arm64 "* ]] || { echo "Missing an architecture"; exit 1; }
+            vtool -show-build "$binary" | grep -q "minos 15.0" || { echo "Wrong deployment target"; exit 1; }
+          done

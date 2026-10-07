@@ -38,11 +38,13 @@
 ## Highlights
 
 - See your services, their current owners, and connection status in one place
-- Manage separate SwiftBot groups and other compatible apps
+- Guard any number of services, from SwiftBot to your own apps, each with its own lease length
 - Inspect resource locations reported by servers in an opt-in catalogue
 - Choose a Preferred Primary for clients that support it
 - Search ownership history using readable server names
 - Set up Internet Access through built-in Cloudflare support
+- Get alerts in macOS notifications or Discord when a service goes down or fails over
+- Integrate any app with the RuruClient Swift package or the documented HTTP protocol
 - Keep the service running in the menu bar when the window closes
 
 ## Installation
@@ -57,7 +59,7 @@ Ruru exists to make a complicated feature easy to manage. Keeping multiple serve
 
 It runs on a separate Mac and gives one server at a time permission to act for each service. If a server cannot reach Ruru, it stops acting when that permission expires. The app brings setup, status, and ownership history together in one place.
 
-The name comes from the ruru, New Zealand's native owl. The app is a small guardian: it watches ownership and keeps the decision in one place.
+Ruru is the Māori name for New Zealand's native owl, also known as the morepork. In Māori tradition the ruru is regarded as a spiritual guardian, which is where the app takes its name: it watches over ownership and keeps the decision in one place.
 
 ## Acknowledgements
 

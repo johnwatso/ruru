@@ -69,8 +69,8 @@ struct WitnessGuardedServiceIcon: View {
     var size: CGFloat = 42
 
     var body: some View {
-        if service.kind == .swiftBot {
-            Image("SwiftBotLogo").resizable().interpolation(.high).scaledToFit()
+        if let asset = service.brandAsset {
+            Image(asset).resizable().interpolation(.high).scaledToFit()
                 .frame(width: size, height: size).accessibilityHidden(true)
         } else {
             ConsoleIconTile(symbol: service.symbol, active: active, size: size)
@@ -94,6 +94,36 @@ private struct WitnessGuardedServiceDetails: View {
     private var nodes: [String] { model.knownNodes(for: service.clusterID) }
     private var events: [WitnessEvent] { model.events(for: service.clusterID) }
 
+    /// A quiet, optional setting: most services never need one.
+    private var preferredPrimaryRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: preference.preferredPrimaryNodeID == nil ? "star" : "star.fill")
+                .foregroundStyle(.secondary).accessibilityHidden(true)
+            Text("Preferred Primary").foregroundStyle(.secondary)
+            Text(preference.preferredPrimaryNodeID.map {
+                model.nodeDisplayName(for: $0, reportedName: model.reportedName(for: $0, clusterID: service.clusterID),
+                                      clusterID: service.clusterID)
+            } ?? "None")
+            Spacer(minLength: 8)
+            Menu("Change") {
+                Button("Choose…") { choosingPrimary = true }
+                if preference.preferredPrimaryNodeID != nil {
+                    Button("Clear Preference") {
+                        Task {
+                            do { try await model.setPreferredPrimary(nil, for: service.id); preferenceError = nil }
+                            catch { preferenceError = error.localizedDescription }
+                        }
+                    }
+                }
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            .disabled(model.busy || model.internetBusy)
+        }
+        .font(.callout)
+        .padding(.horizontal, 4)
+        .help("Compatible clients use this for a coordinated handover. It never transfers ownership, confirms a server is online, or blocks failover.")
+    }
+
     var body: some View {
         Button("Guarding", systemImage: "chevron.left", action: onBack).buttonStyle(.borderless)
         HStack(spacing: 16) {
@@ -103,7 +133,7 @@ private struct WitnessGuardedServiceDetails: View {
                     Button("Remove…", systemImage: "trash", role: .destructive) { confirmingRemoval = true }
                         .buttonStyle(.bordered).buttonBorderShape(.capsule)
                         .disabled(model.busy || model.internetBusy)
-                    Button("Rename", systemImage: "pencil") { renaming = true }.buttonStyle(.bordered).buttonBorderShape(.capsule)
+                    Button("Edit", systemImage: "pencil") { renaming = true }.buttonStyle(.bordered).buttonBorderShape(.capsule)
                     Button("Connection Details", systemImage: "link") { connecting = true }
                         .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                 }
@@ -121,47 +151,16 @@ private struct WitnessGuardedServiceDetails: View {
                         Text(model.guardOwner(for: service.clusterID)).font(.title2.weight(.semibold)).textSelection(.enabled)
                     }
                 }
-                HStack(spacing: 32) {
-                    value("Ownership term", String(lease?.term ?? 0))
-                    value("Lease remaining", "\(Int(ceil(lease?.remainingSeconds ?? 0))) seconds")
-                }
+                WitnessLeaseCode(lease: lease, leaseSeconds: Double(service.leaseSeconds), recovering: model.isRecovering)
                 if (lease?.remainingSeconds ?? 0) > 0 {
-                    ProgressView(value: min(30, lease?.remainingSeconds ?? 0), total: 30)
+                    Text("The term is the fencing token servers attach to their work; it only ever increases. The ring shows how long the current grant lasts without another renewal, and refills each time the owner renews.")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text("Connect this service’s servers using its connection details. Any number of participants can compete; one holds ownership at a time.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }
         })
-        ConsoleSection("Preferred Primary") {
-            HStack(spacing: 14) {
-                ConsoleIconTile(symbol: "star", active: preference.preferredPrimaryNodeID != nil, size: 46)
-                VStack(alignment: .leading, spacing: 5) {
-                    if let node = preference.preferredPrimaryNodeID {
-                        Text(model.nodeDisplayName(for: node, reportedName: model.reportedName(for: node, clusterID: service.clusterID), clusterID: service.clusterID))
-                            .font(.headline).textSelection(.enabled).id(node + "-name")
-                        Text(node).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled).id(node + "-id")
-                    } else {
-                        Text("No preference").font(.headline)
-                        Text("Clients use their normal ownership selection.").font(.callout).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer(minLength: 12)
-                Button(preference.preferredPrimaryNodeID == nil ? "Choose Primary…" : "Change…") { choosingPrimary = true }
-                    .buttonStyle(.bordered).disabled(model.busy || model.internetBusy)
-            }
-            if preference.preferredPrimaryNodeID != nil {
-                Button("Clear Preference") {
-                    Task {
-                        do { try await model.setPreferredPrimary(nil, for: service.id); preferenceError = nil }
-                        catch { preferenceError = error.localizedDescription }
-                    }
-                }.buttonStyle(.borderless).disabled(model.busy || model.internetBusy)
-            }
-            if let preferenceError { ConsoleIssue(title: "Preference could not be saved", detail: preferenceError) }
-            Text("Compatible clients use this preference for a coordinated handover. Saving it does not transfer ownership or confirm that a server is online. Failover remains available when the preferred Primary is unavailable.")
-                .font(.callout).foregroundStyle(.secondary)
-        }
         ConsoleSection(title: "Known Servers", accessory: { Text("\(nodes.count) observed") }, content: {
             if nodes.isEmpty {
                 ConsoleEmptyState(symbol: "server.rack", title: "No servers observed yet", detail: "Servers appear after successfully participating in this service’s ownership.")
@@ -191,6 +190,8 @@ private struct WitnessGuardedServiceDetails: View {
                     }
                 }.consoleRowGroup()
             }
+            preferredPrimaryRow
+            if let preferenceError { ConsoleIssue(title: "Preference could not be saved", detail: preferenceError) }
             Text("Known servers come from retained ownership history. This list does not indicate standby health or uptime.")
                 .font(.caption).foregroundStyle(.secondary)
         })
@@ -208,7 +209,7 @@ private struct WitnessGuardedServiceDetails: View {
         }
         .sheet(isPresented: $connecting) { ConnectionDetailsSheet(clusterID: service.clusterID).environmentObject(model) }
         .sheet(isPresented: $choosingPrimary) { WitnessPreferredPrimarySheet(service: service).environmentObject(model) }
-        .sheet(isPresented: $renaming) { WitnessRenameServiceSheet(service: service).environmentObject(model) }
+        .sheet(isPresented: $renaming) { WitnessEditServiceSheet(service: service).environmentObject(model) }
         .confirmationDialog("Remove \(service.name)?", isPresented: $confirmingRemoval, titleVisibility: .visible) {
             Button("Remove Service", role: .destructive) {
                 Task {
@@ -229,12 +230,6 @@ private struct WitnessGuardedServiceDetails: View {
             }
         }
     }
-    private func value(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.callout).foregroundStyle(.secondary)
-            Text(value).font(.title2.weight(.semibold)).monospacedDigit()
-        }
-    }
 }
 
 struct WitnessAddServiceSheet: View {
@@ -245,26 +240,29 @@ struct WitnessAddServiceSheet: View {
     let subtitle: String
     let symbol: String
 
-    init(subtitle: String = "Give another app its own ownership group.", symbol: String = "checkmark.shield") {
+    init(subtitle: String = "Give an app its own ownership group.", symbol: String = "checkmark.shield") {
         self.subtitle = subtitle
         self.symbol = symbol
     }
 
     @State private var kind = GuardedService.Kind.custom
+    @State private var leaseSeconds = GuardedService.defaultLeaseSeconds
     @State private var saving = false
     @State private var error: String?
     private var valid: Bool {
         let service = GuardedService(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                                    clusterID: clusterID.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind)
+                                    clusterID: clusterID.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind,
+                                    leaseSeconds: leaseSeconds)
         return service.isValid && !model.configuration.guardedServices.contains { $0.clusterID == service.clusterID }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             WitnessSheetHeader(title: "Add Service", subtitle: subtitle, symbol: symbol)
             VStack(alignment: .leading, spacing: 16) {
-                TextField("Service name", text: $name, prompt: Text("e.g. SwiftBot Production or Backup Worker"))
+                TextField("Service name", text: $name, prompt: Text("e.g. Production Bot or Media Server"))
                 Picker("Application", selection: $kind) { ForEach(GuardedService.Kind.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 TextField("Cluster ID", text: $clusterID, prompt: Text("A unique ID used by this service’s servers"))
+                WitnessLeaseLengthPicker(seconds: $leaseSeconds)
                 Text("Use the same cluster ID on every participant in this service. Connection details will include a separate bearer token.")
                     .font(.callout).foregroundStyle(.secondary)
                 if let error { ConsoleIssue(title: "Service could not be added", detail: error) }
@@ -275,7 +273,7 @@ struct WitnessAddServiceSheet: View {
                 Button(saving ? "Adding…" : "Add Service") {
                     saving = true
                     Task {
-                        do { try await model.addGuardedService(name: name, clusterID: clusterID, kind: kind); dismiss() }
+                        do { try await model.addGuardedService(name: name, clusterID: clusterID, kind: kind, leaseSeconds: leaseSeconds); dismiss() }
                         catch { self.error = error.localizedDescription; saving = false }
                     }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!valid || saving || model.busy)
@@ -284,28 +282,53 @@ struct WitnessAddServiceSheet: View {
     }
 }
 
-private struct WitnessRenameServiceSheet: View {
+/// Lease lengths offered in the UI; all lie within GuardedService.leaseSecondsRange.
+struct WitnessLeaseLengthPicker: View {
+    @Binding var seconds: Int
+    private static let choices = [10, 15, 30, 60, 120, 300]
+    var body: some View {
+        Picker("Lease length", selection: $seconds) {
+            ForEach(Self.choices.contains(seconds) ? Self.choices : (Self.choices + [seconds]).sorted(), id: \.self) { value in
+                Text(value < 60 ? "\(value) seconds" : value == 60 ? "1 minute" : "\(value / 60) minutes").tag(value)
+            }
+        }
+    }
+}
+
+private struct WitnessEditServiceSheet: View {
     @EnvironmentObject private var model: WitnessAppModel
     @Environment(\.dismiss) private var dismiss
     let service: GuardedService
     @State private var name: String
+    @State private var leaseSeconds: Int
+    @State private var saving = false
     @State private var error: String?
-    init(service: GuardedService) { self.service = service; _name = State(initialValue: service.name) }
+    init(service: GuardedService) {
+        self.service = service
+        _name = State(initialValue: service.name)
+        _leaseSeconds = State(initialValue: service.leaseSeconds)
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Rename Service").font(.title2.weight(.semibold))
+            Text("Edit Service").font(.title2.weight(.semibold))
             TextField("Service name", text: $name).textFieldStyle(.roundedBorder)
+            WitnessLeaseLengthPicker(seconds: $leaseSeconds)
+            Text("Shorter leases fail over faster; longer leases need fewer renewals. A new length applies from the owner’s next renewal, and after a restart Ruru waits for the longest lease it granted.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let error { Text(error).foregroundStyle(.red) }
             HStack {
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(saving)
                 Spacer()
                 Button("Save") {
-                    do { try model.renameService(id: service.id, name: name); dismiss() }
-                    catch { self.error = error.localizedDescription }
+                    saving = true
+                    Task {
+                        do { try await model.updateService(id: service.id, name: name, leaseSeconds: leaseSeconds); dismiss() }
+                        catch { self.error = error.localizedDescription; saving = false }
+                    }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-                    .disabled(WitnessNodeName.normalized(name) == nil || name.utf8.count > 128)
+                    .disabled(WitnessNodeName.normalized(name) == nil || name.utf8.count > 128 || saving || model.busy)
             }
-        }.padding(24).frame(width: 420)
+        }.padding(24).frame(width: 460).interactiveDismissDisabled(saving)
     }
 }
 
@@ -323,5 +346,107 @@ extension WitnessAppModel {
     func guardHealth(for clusterID: String) -> WitnessHealth {
         if state != .running || isRecovering { return serviceHealth }
         return (lease(for: clusterID)?.remainingSeconds ?? 0) > 0 ? .healthy : .inactive
+    }
+}
+
+/// The lease shown like a one-time code: the ownership term in grouped digits
+/// with a countdown ring for the current grant. Ruru polls once a second; the
+/// ring interpolates between polls so it drains smoothly.
+struct WitnessLeaseCode: View {
+    let lease: LeaseStatus?
+    let leaseSeconds: Double
+    var recovering = false
+    @State private var anchor = (remaining: 0.0, at: Date.distantPast)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var owned: Bool { (lease?.remainingSeconds ?? 0) > 0 }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ownership term").font(.callout).foregroundStyle(.secondary)
+                Text(Self.grouped(lease?.term ?? 0))
+                    .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(owned ? .primary : .secondary)
+                    .contentTransition(.numericText(value: Double(lease?.term ?? 0)))
+                    .animation(reduceMotion ? nil : .snappy, value: lease?.term)
+                    .textSelection(.enabled)
+                    .accessibilityLabel("Ownership term \(lease?.term ?? 0)")
+            }
+            Spacer(minLength: 12)
+            TimelineView(.periodic(from: .now, by: reduceMotion ? 1 : 1.0 / 30)) { context in
+                let remaining = max(0, anchor.remaining - context.date.timeIntervalSince(anchor.at))
+                HStack(spacing: 10) {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(caption(remaining)).font(.callout.weight(.medium)).foregroundStyle(tint(remaining))
+                        Text("\(Int(leaseSeconds)) s lease").font(.caption).foregroundStyle(.secondary)
+                    }
+                    WitnessLeaseRing(fraction: owned ? remaining / leaseSeconds : 0, seconds: owned ? remaining : nil,
+                                     tint: tint(remaining))
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(owned ? "\(Int(ceil(remaining))) seconds left in this grant" : caption(remaining))
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .consoleRowGroup()
+        .onAppear(perform: resetAnchor)
+        .onChange(of: lease?.remainingSeconds) { resetAnchor() }
+    }
+
+    private func resetAnchor() { anchor = (lease?.remainingSeconds ?? 0, Date()) }
+
+    private func caption(_ remaining: Double) -> String {
+        if recovering { return "Recovering" }
+        guard owned else { return "No owner" }
+        if remaining < leaseSeconds / 3 { return "Renewal late" }
+        return "Renewing"
+    }
+
+    /// Green while renewals keep up; orange once a third is left (clients renew
+    /// by then); red in the last few seconds before ownership lapses.
+    private func tint(_ remaining: Double) -> Color {
+        guard owned, !recovering else { return .secondary }
+        if remaining <= min(5, leaseSeconds / 6) { return .red }
+        if remaining < leaseSeconds / 3 { return .orange }
+        return .green
+    }
+
+    /// OTP-style digit groups of three: 1000042 → "1 000 042".
+    static func grouped(_ term: Int64) -> String {
+        let digits = Array(String(term))
+        var groups: [String] = []
+        var end = digits.count
+        while end > 0 {
+            let start = max(0, end - 3)
+            groups.insert(String(digits[start..<end]), at: 0)
+            end = start
+        }
+        return groups.joined(separator: " ")
+    }
+}
+
+/// A Passwords-style countdown ring with the seconds remaining inside.
+struct WitnessLeaseRing: View {
+    let fraction: Double
+    let seconds: Double?
+    let tint: Color
+    var size: CGFloat = 40
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(.primary.opacity(0.1), lineWidth: 3.5)
+            Circle()
+                .trim(from: 0, to: min(1, max(0, fraction)))
+                .stroke(tint, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            if let seconds {
+                Text("\(Int(ceil(seconds)))")
+                    .font(.system(size: size * 0.32, weight: .semibold, design: .rounded)).monospacedDigit()
+                    .foregroundStyle(tint)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }

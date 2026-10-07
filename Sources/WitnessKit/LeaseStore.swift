@@ -3,7 +3,12 @@ import Foundation
 
 /// A serialized, durable authority. All live deadlines use one monotonic epoch.
 public actor LeaseStore {
+    /// Default grant length. Each service may choose its own within `leaseDurationRange`.
     public static let leaseDuration: Double = 30
+    public static let leaseDurationRange: ClosedRange<Double> = 10...300
+    /// Per-service history kept on disk, and the newest shown per service.
+    static let eventsKeptPerService = 256
+    static let eventsShownPerService = 64
     private let database: DuckDBDatabase
     private let instanceLock: DatabaseInstanceLock
     private let legacyLock: DatabaseInstanceLock
@@ -27,21 +32,24 @@ public actor LeaseStore {
             let elapsed = origin.duration(to: ContinuousClock.now).components
             return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
         }
-        let hadOwner = try database.open { connection in
-            let leases = try connection.query("SELECT cluster, owner, term, expires FROM leases")
-            var owned = false
+        let quarantine = try database.open { connection in
+            // Databases created before per-service lease lengths granted 30 seconds.
+            try database.execute(connection, "ALTER TABLE leases ADD COLUMN IF NOT EXISTS duration DOUBLE DEFAULT 30")
+            let leases = try connection.query("SELECT cluster, owner, term, expires, duration FROM leases")
+            var longest: Double = 0
             for row in 0..<leases.rowCount {
                 let term = try leases.integer(2, row: row), expiry = try leases.number(3, row: row)
-                guard LeaseDatabaseSetup.validTerm(term), expiry >= 0 else { throw Self.damagedLease() }
+                let duration = try leases.number(4, row: row)
+                guard LeaseDatabaseSetup.validTerm(term), expiry >= 0, duration > 0 else { throw Self.damagedLease() }
                 // Released leases store expiry 0. A non-zero expiry is a live or
-                // restored lease (restores are ownerless), so both quarantine.
-                if expiry > 0 { owned = true }
+                // restored lease (restores are ownerless); wait out the longest.
+                if expiry > 0 { longest = max(longest, duration) }
             }
             // Missing tables also fail startup. Ordinary startup never creates
             // empty replacements for missing durable state.
             _ = try connection.query("SELECT id, time, action, cluster, node, term FROM events LIMIT 0")
             _ = try connection.query("SELECT cluster, node, name FROM node_names LIMIT 0")
-            return owned
+            return longest
         }
         self.database = database
         self.instanceLock = instanceLock
@@ -49,11 +57,12 @@ public actor LeaseStore {
         self.clock = monotonic
         // Never clear the durable expiry on restart: a repeated crash must wait
         // the full lease again. Prior-process leases are never marked current.
-        recoveringUntil = hadOwner ? monotonic() + Self.leaseDuration : 0
+        recoveringUntil = quarantine > 0 ? monotonic() + quarantine : 0
     }
 
-    public func apply(_ action: LeaseAction, request: LeaseRequest) -> LeaseReply {
-        guard !request.clusterID.isEmpty, request.clusterID.utf8.count <= 128,
+    public func apply(_ action: LeaseAction, request: LeaseRequest,
+                      leaseDuration duration: Double = LeaseStore.leaseDuration) -> LeaseReply {
+        guard Self.leaseDurationRange.contains(duration), !request.clusterID.isEmpty, request.clusterID.utf8.count <= 128,
               !request.nodeID.isEmpty, request.nodeID.utf8.count <= 128,
               request.term >= 0, request.term < (1 << 62) else {
             return .error("invalid_request", status: 400)
@@ -83,10 +92,10 @@ public actor LeaseStore {
                             }
                             let term = max(previous?.term ?? 0, request.term) + 1
                             try writeLease(connection, clusterID: request.clusterID, owner: request.nodeID,
-                                           term: term, expiry: now + Self.leaseDuration)
+                                           term: term, expiry: now + duration, duration: duration)
                             try log(connection, action: "Acquired", request: request, term: term)
                             reply = try .grant(LeaseGrant(ownerNodeID: request.nodeID, term: term,
-                                                        expiresInSeconds: Self.leaseDuration))
+                                                        expiresInSeconds: duration))
                         }
                     case .renew, .release:
                         guard live, let previous, previous.owner == request.nodeID, previous.term == request.term else {
@@ -94,14 +103,16 @@ public actor LeaseStore {
                             return .error("ownership_expired_or_changed", status: 409)
                         }
                         if action == .release {
-                            try writeLease(connection, clusterID: request.clusterID, owner: "", term: request.term, expiry: 0)
+                            try writeLease(connection, clusterID: request.clusterID, owner: "", term: request.term,
+                                           expiry: 0, duration: duration)
                             try log(connection, action: "Released", request: request, term: request.term)
                             reply = .released
                         } else {
+                            // A changed service length takes effect from this renewal.
                             try writeLease(connection, clusterID: request.clusterID, owner: request.nodeID,
-                                           term: request.term, expiry: now + Self.leaseDuration)
+                                           term: request.term, expiry: now + duration, duration: duration)
                             reply = try .grant(LeaseGrant(ownerNodeID: request.nodeID, term: request.term,
-                                                        expiresInSeconds: Self.leaseDuration))
+                                                        expiresInSeconds: duration))
                         }
                     }
                     try writeNodeName(connection, request: request)
@@ -130,7 +141,8 @@ public actor LeaseStore {
                     remainingSeconds: currentClusters.contains(cluster) ? max(0, expiry - now) : 0,
                     ownerNodeName: WitnessNodeName.normalized(result[4].cast(to: String.self)[row])))
             }
-            let history = try connection.query("SELECT e.id, e.time, e.action, e.node, e.term, n.name, e.cluster FROM events e LEFT JOIN node_names n ON n.cluster=e.cluster AND n.node=e.node ORDER BY e.id DESC LIMIT 256")
+            // The newest events per service, so a busy service cannot hide others.
+            let history = try connection.query("SELECT e.id, e.time, e.action, e.node, e.term, n.name, e.cluster FROM (SELECT *, row_number() OVER (PARTITION BY cluster ORDER BY id DESC) AS position FROM events) e LEFT JOIN node_names n ON n.cluster=e.cluster AND n.node=e.node WHERE e.position <= \(Self.eventsShownPerService) ORDER BY e.id DESC")
             var events: [WitnessEvent] = []
             for row in 0..<history.rowCount {
                 events.append(WitnessEvent(clusterID: try history.string(6, row: row), id: try history.integer(0, row: row),
@@ -139,6 +151,19 @@ public actor LeaseStore {
                     term: try history.integer(4, row: row), nodeName: WitnessNodeName.normalized(history[5].cast(to: String.self)[row])))
             }
             return WitnessSnapshot(recoverySeconds: max(0, recoveringUntil - now), leases: leases, events: events)
+        }
+    }
+
+    /// One service's current lease and the authority's recovery state, for
+    /// `GET /v1/service`. Ownership from a previous process is never reported live.
+    public func status(for clusterID: String) throws -> (lease: LeaseStatus?, recoverySeconds: Double) {
+        let now = clock()
+        return try database.open { connection in
+            let recovery = max(0, recoveringUntil - now)
+            guard let stored = try readLease(connection, clusterID: clusterID) else { return (nil, recovery) }
+            let live = stored.epochIsCurrent && stored.expiry > now && !stored.owner.isEmpty
+            return (LeaseStatus(clusterID: clusterID, ownerNodeID: live ? stored.owner : "", term: stored.term,
+                                remainingSeconds: live ? stored.expiry - now : 0), recovery)
         }
     }
 
@@ -223,10 +248,11 @@ public actor LeaseStore {
         .database("The stored ownership term or expiry is damaged; no fresh authority will be created.")
     }
 
-    private func writeLease(_ connection: Connection, clusterID: String, owner: String, term: Int64, expiry: Double) throws {
-        _ = try database.query(connection, "INSERT INTO leases VALUES (?, ?, ?, ?) ON CONFLICT (cluster) DO UPDATE SET owner=excluded.owner, term=excluded.term, expires=excluded.expires") {
+    private func writeLease(_ connection: Connection, clusterID: String, owner: String, term: Int64,
+                            expiry: Double, duration: Double) throws {
+        _ = try database.query(connection, "INSERT INTO leases (cluster, owner, term, expires, duration) VALUES (?, ?, ?, ?, ?) ON CONFLICT (cluster) DO UPDATE SET owner=excluded.owner, term=excluded.term, expires=excluded.expires, duration=excluded.duration") {
             try $0.bind(clusterID, at: 1); try $0.bind(owner, at: 2)
-            try $0.bind(term, at: 3); try $0.bind(expiry, at: 4)
+            try $0.bind(term, at: 3); try $0.bind(expiry, at: 4); try $0.bind(duration, at: 5)
         }
     }
 
@@ -235,7 +261,9 @@ public actor LeaseStore {
             try $0.bind(Date().timeIntervalSince1970, at: 1); try $0.bind(action, at: 2)
             try $0.bind(request.clusterID, at: 3); try $0.bind(request.nodeID, at: 4); try $0.bind(term, at: 5)
         }
-        try database.execute(connection, "DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 256)")
+        _ = try database.query(connection, "DELETE FROM events WHERE cluster=? AND id NOT IN (SELECT id FROM events WHERE cluster=? ORDER BY id DESC LIMIT \(Self.eventsKeptPerService))") {
+            try $0.bind(request.clusterID, at: 1); try $0.bind(request.clusterID, at: 2)
+        }
     }
 
     private func writeNodeName(_ connection: Connection, request: LeaseRequest) throws {

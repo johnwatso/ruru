@@ -1,23 +1,59 @@
-# Integrating another app
+# Integrating an app
 
-Ruru primarily supports SwiftBot and also admits other applications that use
-its ownership protocol. This is lease guarding, rather than passive uptime
-monitoring or automatic service discovery.
+Ruru coordinates exclusive ownership for any app that runs on more than one
+server: one owner per service at a time, with terms that only go up. SwiftBot
+was the first app to use it and has a built-in template (its icon and pairing
+instructions), but every service is configured the same way and nothing in the
+protocol is SwiftBot-specific.
+
+This is lease guarding, not passive uptime monitoring or service discovery.
 
 ## Register a service
 
-In **Guarding → Add Service**, choose an application kind, service name and a
-unique cluster ID. Open that service’s **Connection Details** and configure all
-its participating servers with the endpoint, cluster ID and bearer token.
-The token authorizes only this service. A separate service can have an owner at
-the same time; its ownership term is independent. Up to 32 services share one
-authority listener, persistent database and optional HTTPS tunnel.
+In **Guarding → Add Service**, choose a template (SwiftBot or Other app), a
+name, a unique cluster ID and a lease length (10 seconds to 5 minutes; 30
+seconds by default). A fresh Ruru starts with no services. Open the service's
+**Connection Details** and give every participating server the endpoint,
+cluster ID and bearer token. The token authorizes only that service. Up to 32
+services share one authority, database and optional HTTPS tunnel, each with an
+independent owner and term.
 
-SwiftBot uses **SwiftMesh → Recovery and Pairing**. Existing SwiftBot pairing,
-cluster identity and credentials are preserved. “Other app” is a generic lease
-integration: it does not imply a built-in adapter for any named application.
+SwiftBot uses **SwiftMesh → Recovery and Pairing**. "Other app" is a generic
+lease integration; it does not imply an adapter for any named application.
 
-## Client contract
+## Use RuruClient (Swift)
+
+[`Clients/RuruClient`](../Clients/RuruClient) is a small Swift package
+(macOS 13+, iOS 16+) that implements the client rules below. Add it as a local
+or git package dependency.
+
+```swift
+import RuruClient
+
+let client = RuruLeaseClient(configuration: .init(
+    endpoint: URL(string: "https://ruru.example.com")!,
+    clusterID: "media-server", nodeID: stableNodeID, nodeName: "Studio Mac",
+    token: tokenFromKeychain))
+
+let ownership = Task {
+    await client.maintain { state in
+        switch state {
+        case .owner(let lease): await worker.start(fencedBy: lease.term, until: lease.deadline)
+        case .standby, .unavailable: await worker.stop()
+        }
+    }
+}
+// Cancelling `ownership` releases the lease so another server takes over at once.
+```
+
+`maintain` renews at a third of the lease, measures deadlines from when each
+request was sent, reports `.unavailable` no later than the local deadline if
+renewals fail, and releases on cancellation. `acquire`, `renew`, `release` and
+`describe` are available for apps that run their own loop. For other languages,
+see the [OpenAPI description](openapi.yaml) and the
+[Python example](../Clients/examples/ruru_lease.py).
+
+## Protocol
 
 Send JSON over HTTPS with `Authorization: Bearer <service token>`:
 
@@ -25,65 +61,111 @@ Send JSON over HTTPS with `Authorization: Bearer <service token>`:
 {"clusterID":"backup-worker","nodeID":"server-a","nodeName":"Worker Mac","term":0}
 ```
 
-- `POST /v1/lease/acquire` obtains permission if there is no live owner. Success
-  returns `ownerNodeID`, `term` and `expiresInSeconds`. Competing servers receive
-  409; they must not perform the guarded work.
-- `POST /v1/lease/renew` uses the current owner’s stable node ID and granted term.
-  Expired leases cannot be revived. A successful renewal extends permission;
-  409 means ownership expired or changed.
-- `POST /v1/lease/release` uses that same node ID and term. Success returns
+- `POST /v1/lease/acquire` grants ownership if there is no live owner, or
+  confirms it for the current owner. Success returns `ownerNodeID`, `term` and
+  `expiresInSeconds` (the service's lease length). Send the highest term you
+  have seen; Ruru never grants a lower one. 409 `ownership_held` means another
+  server owns it: do not perform the guarded work.
+- `POST /v1/lease/renew` uses the owner's stable node ID and granted term.
+  Expired leases are never revived; 409 means ownership expired or changed.
+- `POST /v1/lease/release` hands ownership back immediately. Success returns
   `{"released":true}`. Release never decreases the term.
+- `GET /v1/service` describes the caller's service: `clusterID`, `leaseSeconds`,
+  `recoverySeconds`, versioned `capabilities` (`lease`, `primaryPreference`,
+  `coordination`) and the current `lease` (owner, term, remaining seconds).
+  Feature-detect from `capabilities` rather than assuming a version. It is also
+  a safe status endpoint for monitoring tools, scoped to one service's token.
+- 503 `authority_recovering` means Ruru restarted (or was restored) and is
+  waiting out every lease it could have granted. Retry after a short delay.
+- 401 means a missing or wrong token; 403 means the token belongs to another
+  service, or the cluster isn't configured.
 
-`nodeName` is optional cosmetic metadata. Nodes use stable IDs across restarts.
-Routine renewals are not written to the activity log. There is no two-server
-limit: any number of participants can compete, with one owner per service.
+`nodeName` is optional display metadata. Node IDs must be stable across
+restarts and never derived from start order. Routine renewals are not logged.
+Any number of servers can compete; there is one owner per service.
 
-Leases last 30 seconds. Renew well before expiry; SwiftBot renews every five
-seconds. Set an earlier **local monotonic deadline**, accounting conservatively
-for request latency and a safety margin. Stop guarded output by that deadline
-unless renewal succeeds. On failure, recovery (503), or loss of the authority,
-never infer ownership from another server being unreachable. See [storage and
-fencing limits](STORAGE.md), especially the absence of exactly-once external
-effects and the full restart quarantine.
+## Fencing: the rule that keeps leases safe
 
-For resources that can enforce ownership terms, see [fencing validation and
-design references](LEASE_REFERENCES.md). The protected resource must check its
-service-scoped fence atomically with the mutation and retain it durably. A term
-alone does not prove current permission; local deadlines still apply.
+A lease alone can't stop a paused or partitioned server from finishing a write
+after its lease ended. The **term is a fencing token**:
 
-A service token used for another configured cluster is rejected with 403. An
-unknown cluster is also rejected. Missing/incorrect credentials receive 401.
-`GET /health` reports only the readiness of the authority, without exposing
-service names, server IDs or credentials.
+1. Attach the current term to every side effect the owner performs (database
+   writes, file publishes, messages to other systems).
+2. The protected system stores the highest term it has accepted and rejects
+   anything older, atomically with the change itself.
+3. Also stop work at the **local deadline** (`RuruLease.deadline`): request send
+   time plus `expiresInSeconds`, measured on a monotonic clock.
+
+Neither check is enough alone. See [fencing references](LEASE_REFERENCES.md)
+and [storage limits](STORAGE.md), including the absence of exactly-once effects.
+
+## When Ruru can't be reached
+
+Ruru is a single authority on one Mac; it is not replicated. If it is down or
+unreachable:
+
+- The current owner keeps working only until its local deadline, then stops.
+- No server gains ownership until Ruru is back. Exclusive work pauses rather
+  than risking two owners. This is deliberate.
+- Never infer ownership from another server being unreachable.
+- After Ruru restarts it waits out the longest lease it granted (503
+  `authority_recovering`), then grants again with higher terms.
+
+Choose the lease length accordingly: shorter leases fail over faster after a
+crash but need more frequent renewals and stop sooner if Ruru is briefly
+unreachable. Ruru's own alerts (Settings → Alerts) can notify you, including via
+Discord, when it or a service has a problem.
+
+## Client conformance checklist
+
+A client is correct when it:
+
+- [ ] renews at no more than half the lease length (RuruClient uses a third);
+- [ ] computes its deadline from when the request was sent, not received;
+- [ ] stops guarded work at the deadline if no renewal succeeded;
+- [ ] treats 409 on renew as immediate loss of ownership;
+- [ ] treats a grant naming another `ownerNodeID` as not owning;
+- [ ] retries 503 `authority_recovering` and transport errors with jittered backoff;
+- [ ] sends its highest seen term on acquire and fences side effects with it;
+- [ ] releases on clean shutdown, from a context that isn't already cancelled;
+- [ ] keeps the token secret and never logs it.
+
+`Tests/WitnessKitTests/ClientConformanceTests.swift` runs RuruClient against the
+real server for these cases (single owner, rising terms, hand-over on release,
+restart quarantine, wrong credentials).
 
 ## Preferred Primary
 
 Each service can store a Preferred Primary, separate from its live owner. A
 compatible client reads `POST /v1/service/policy` with its scoped bearer token
 and `{"clusterID":"..."}`. Ruru returns a versioned preferred node ID and
-revision. Reading/changing this intent never grants permission, blocks failover
-or revokes a live lease. See [Preferred Primary](PRIMARY_PREFERENCE.md) for the
-exact request/reply schema and safe handover requirements. Older clients retain
-their current selection behavior until updated.
+revision. Reading or changing this intent never grants permission, blocks
+failover or revokes a live lease. See [Preferred Primary](PRIMARY_PREFERENCE.md).
 
 ## What the console knows
 
-Known Servers comes from successful ownership history and the last stored
-owner. Past participation is not proof of current uptime, and a standby server
-that never held ownership may not appear. Activity retains the last 256
-transitions across services. Probes, alerting, standby heartbeats and service
-adapters beyond SwiftBot are not implemented yet.
-
-Capability-based coordination builds alongside lease guarding. The first resource
-catalogue contract is implemented below; routing and managed operations remain
-future work. See [Coordination](COORDINATION.md) for the architectural boundaries.
+Known Servers comes from ownership history and the last stored owner. Past
+participation is not proof of current uptime, and a standby that never held
+ownership may not appear. Ruru keeps the last 256 transitions **per service**
+(and shows the newest 64 per service), so a busy service can't hide another's
+history. Alerts report a service as down when its owner stops renewing and
+nobody takes over within 15 seconds. Probes and standby heartbeats are not
+implemented.
 
 ## Resource catalogue
 
-Clients may opt into [resource catalogue v1](COORDINATION_API.md) independently of
-lease acquisition. This reports generic recordings/artifacts and host locations,
-with configured HTTPS origins and expiring observations. Ruru does not store or
-stream resources. The first server-side slice and console are implemented;
-SwiftBot now has opt-in library reporting and a combined Recordings view with
-authenticated host-to-host playback. Ruru supplies the directory; media stays on
-SwiftBot servers. See the [SwiftBot convention](COORDINATION_API.md#swiftbot-combined-recording-libraries).
+Clients may opt into [resource catalogue v1](COORDINATION_API.md) independently
+of lease acquisition. It reports generic resources and host locations with
+configured HTTPS origins and expiring observations. Ruru does not store or
+stream resources. See [Coordination](COORDINATION.md) for the architecture and
+the [SwiftBot convention](COORDINATION_API.md#swiftbot-combined-recording-libraries)
+as one example.
+
+## Exposing Ruru publicly
+
+Internet Access publishes Ruru through a Cloudflare tunnel. The listener accepts
+32 connections at a time, each closed after 5 seconds, so a flood of requests
+could crowd out genuine renewals. Add a Cloudflare **rate limiting rule** for the
+Ruru hostname (for example, 120 requests per minute per IP, block for 1 minute)
+and keep **Bot Fight Mode** off for it so servers' requests aren't challenged.
+Size the limit to your servers: each owner renews about every lease ÷ 3 seconds.

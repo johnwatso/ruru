@@ -1,5 +1,54 @@
 # Development log and next steps
 
+## 2026-10-08 — Lease shown as a one-time code
+
+- Replaced the service detail's 30-second progress bar (which twitched between
+  full and nearly full on every renewal and ignored per-service lengths) with a
+  Passwords-style display: the term as grouped monospaced digits and a smooth
+  countdown ring with seconds inside, coloured by renewal health.
+- The screenshot preview now simulates a renewal every 5 seconds.
+- Reduced Preferred Primary from its own panel to one compact row under Known
+  Servers with a Change menu; its explanation moved to a tooltip.
+- Debug build passed; checked in the isolated preview in light and dark.
+
+## 2026-10-08 — General-purpose services, client package and alerts
+
+- **Equal services.** Removed the built-in SwiftBot service (fixed `swiftbot`
+  ID, top-level cluster ID/name/removed flags, special Keychain account,
+  `swiftmesh` default). Settings hold one `services` list; a fresh Ruru has
+  none. `kind` is a template only; SwiftBot keeps its app icon. Keychain
+  accounts are `service-<id>`. Pre-release settings without `services` are
+  rejected rather than read as empty (no migration; nothing deployed).
+- **Per-service lease length** (10–300 s, default 30), editable without
+  interrupting the owner. Each grant stores its length; restart quarantine
+  waits out the longest stored grant. Restores use 300 s because the previous
+  authority's lengths are unknown.
+- **Per-service history**: 256 events kept and 64 shown per service.
+- **`GET /v1/service`**: capabilities, lease length, recovery and current lease
+  for the caller's token only.
+- **RuruClient** Swift package (`Clients/RuruClient`) with `maintain`, fencing
+  deadlines measured from send time, and release on cancellation from an
+  uncancelled task (a real bug the conformance tests caught). OpenAPI
+  description, Python example and a conformance checklist in INTEGRATIONS.md.
+- **Alerts**: service down (no takeover within 15 s), failover, and Ruru
+  problems (listener, tunnel, snapshots), each with a resolved message. Planned
+  releases, stops and restart quarantine never alert. Delivered to macOS
+  notifications and an optional Discord webhook (official Discord hosts only,
+  stored in Keychain, no mentions, repeats suppressed for a minute). New
+  Settings → Alerts tab with Send Test.
+- **Naming**: user-facing "witness" text, the Cloudflare tunnel name
+  (`ruru-<id>`) and the auth context string now use Ruru.
+- **CI**: GitHub Actions on macOS 15 runs the suite, the package tests and a
+  universal Release build with architecture and deployment-target checks.
+- **Docs**: integration guide rewritten for any app, including behaviour when
+  Ruru is unreachable and a Cloudflare rate-limiting recommendation.
+- Validation: full Xcode suite passed (121 tests, zero failures), plus
+  4 RuruClient package tests; local universal Release build verified x86_64 +
+  arm64 at macOS 15.0. `CoordinationTests.testSlowCatalogueConnectionsLeaveRoomForLeaseRequests`
+  failed once under full-suite load and passed alone three times (timing-
+  sensitive; unchanged code). Not exercised: real notification delivery, a real
+  Discord post, CI on GitHub's runners, and the Intel Mac mini.
+
 ## 2026-10-08 — Backups, snapshots and safe restore
 
 - Moved the live lease database into `Application Support/Ruru/Authority/`,

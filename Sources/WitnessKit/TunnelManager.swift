@@ -80,7 +80,7 @@ actor TunnelManager {
     private func startProcess(_ configuration: TunnelRuntimeConfiguration, ticket: UInt64) async {
         guard ticket == generation, desired == configuration, process == nil else { return }
         guard !configuration.tunnelToken.isEmpty else {
-            await publish(.error, detail: "The witness tunnel token is missing. Reconnect in Internet Access.")
+            await publish(.error, detail: "Ruru’s tunnel token is missing. Reconnect in Internet Access.")
             return
         }
         await publish(.enabling, detail: "Connecting to Cloudflare…")
