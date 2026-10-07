@@ -10,6 +10,9 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var configuration = WitnessConfiguration()
     @Published var selectedPage: WitnessPage? = .overview
     @Published private(set) var state: ServiceState = .stopped
+    @Published private(set) var coordinationLocations: [CoordinationLocation] = []
+    @Published private(set) var coordinationEnrollments: [CoordinationEnrollment] = []
+    private let catalogue = CoordinationCatalogue()
     @Published private(set) var snapshot: WitnessSnapshot?
     @Published private(set) var error: String?
     @Published private(set) var busy = false
@@ -19,6 +22,9 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var serviceStartedAt: ContinuousClock.Instant?
     @Published private(set) var legacyStorageNeedsReplacement = false
     @Published private(set) var storageArchivePath: String?
+    @Published private(set) var lastSnapshotDate: Date?
+    @Published private(set) var snapshotError: String?
+    private var snapshotTask: Task<Void, Never>?
 
     @Published private(set) var internetStatus = WitnessInternetStatus()
     @Published private(set) var internetBusy = false
@@ -61,7 +67,10 @@ final class WitnessAppModel: ObservableObject {
         }
         do {
             configuration = try WitnessStorage.load()
-            store = try LeaseStore(databaseURL: WitnessStorage.directory.appendingPathComponent("leases.duckdb"))
+            try WitnessStorage.checkAuthorityPresent()
+            store = try LeaseStore(databaseURL: WitnessStorage.databaseURL)
+            try WitnessStorage.recordAuthorityCreated()
+            beginSnapshots()
             for service in configuration.guardedServices {
                 serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
             }
@@ -84,6 +93,20 @@ final class WitnessAppModel: ObservableObject {
         configuration.tunnel.tunnelID = "00000000-0000-4000-8000-000000000001"
         configuration.tunnel.accountID = "screenshot-preview"
         configuration.servicePrimaryPreferences["swiftbot"] = .init(preferredPrimaryNodeID: "home-mac", revision: 1)
+        configuration.serviceCoordinationPolicies["swiftbot"] = .init(enabled: true, allowedOrigins: ["https://videos.ruruapp.dev"])
+        let buildService = GuardedService(id: "00000000-0000-4000-8000-000000000002", name: "Build Server", clusterID: "build-server")
+        configuration.additionalServices = [buildService]
+        configuration.serviceCoordinationPolicies[buildService.id] = .init(enabled: true, allowedOrigins: ["https://builds.ruruapp.dev"])
+        coordinationLocations = [
+            .init(clusterID: configuration.clusterID, nodeID: "home-mac", nodeName: "Home Mac",
+                resource: .init(namespace: "recordings", resourceID: "session-42", title: "Community catch-up", url: "https://videos.ruruapp.dev/recordings/session-42"), ageSeconds: 12, fresh: true),
+            .init(clusterID: configuration.clusterID, nodeID: "backup-mac", nodeName: "Backup Mac",
+                resource: .init(namespace: "recordings", resourceID: "session-42", title: "Community catch-up", url: "https://videos.ruruapp.dev/backup/session-42"), ageSeconds: 145, fresh: false),
+            .init(clusterID: buildService.clusterID, nodeID: "build-mac", nodeName: "Build Mac",
+                resource: .init(namespace: "artifacts", resourceID: "nightly-macos", title: "Nightly macOS build", url: "https://builds.ruruapp.dev/artifacts/nightly-macos"), ageSeconds: 24, fresh: true)
+        ]
+        coordinationEnrollments = [.init(id: UUID(), clusterID: configuration.clusterID, nodeID: "new-backup-mac",
+            nodeName: "New Backup Mac", origin: "https://backup.swiftbot.example", ageSeconds: 20)]
         state = .running
         listenerPort = UInt16(configuration.port)
         serviceStartedAt = .now.advanced(by: .seconds(-18_240))
@@ -173,7 +196,7 @@ final class WitnessAppModel: ObservableObject {
             for service in configuration.guardedServices where serviceCredentials[service.clusterID] == nil {
                 serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
             }
-            let server = try WitnessHTTPServer(store: store, services: accessCredentials())
+            let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue)
             self.server = server
             listenerPort = try await server.start(bindAddress: configuration.bindAddress, port: UInt16(configuration.port))
             state = .running
@@ -211,8 +234,10 @@ final class WitnessAppModel: ObservableObject {
         draft.primaryServiceRemoved = configuration.primaryServiceRemoved
         draft.additionalServices = configuration.additionalServices
         draft.servicePrimaryPreferences = configuration.servicePrimaryPreferences
+        draft.serviceCoordinationPolicies = configuration.serviceCoordinationPolicies
         if draft.clusterID != configuration.clusterID, !configuration.primaryServiceRemoved {
             try draft.setPreferredPrimary(nil, for: "swiftbot")
+            draft.serviceCoordinationPolicies.removeValue(forKey: "swiftbot")
         }
         guard draft.isValid else { throw WitnessStorage.ConfigurationError.invalid }
         guard !busy, !internetBusy, !savingConfiguration else { throw WitnessStorage.ConfigurationError.invalid }
@@ -330,6 +355,7 @@ final class WitnessAppModel: ObservableObject {
     func shutdown() async {
         shuttingDown = true
         pollTask?.cancel()
+        snapshotTask?.cancel()
         await internetAccess.stop()
         await server?.stop()
     }
@@ -365,7 +391,8 @@ final class WitnessAppModel: ObservableObject {
         return try configuration.guardedServices.map { service in
             guard let token = tokens[service.clusterID] else { throw WitnessStorage.ConfigurationError.invalid }
             return WitnessServiceCredential(clusterID: service.clusterID, token: token,
-                                            primaryPreference: configuration.primaryPreference(for: service.id))
+                                            primaryPreference: configuration.primaryPreference(for: service.id),
+                                            coordinationPolicy: configuration.coordinationPolicy(for: service.id))
         }
     }
 
@@ -423,6 +450,9 @@ final class WitnessAppModel: ObservableObject {
         }
         serviceCredentials = tokens
         configuration = saved
+        coordinationLocations.removeAll { $0.clusterID == service.clusterID }
+        coordinationEnrollments.removeAll { $0.clusterID == service.clusterID }
+        if !preview, let access = try? accessCredentials() { try await catalogue.configureServices(access) }
         // Durable leases and terms remain in DuckDB. Already granted permission
         // expires normally; old tokens cannot acquire or renew through the router.
     }
@@ -437,6 +467,7 @@ final class WitnessAppModel: ObservableObject {
         saved.clusterID = cluster
         saved.nodeDisplayNames = [:]
         saved.servicePrimaryPreferences = [:]
+        saved.serviceCoordinationPolicies = [:]
         for index in saved.additionalServices.indices {
             saved.additionalServices[index].clusterID = "service-" + UUID().uuidString.lowercased()
             saved.additionalServices[index].nodeDisplayNames = [:]
@@ -455,7 +486,7 @@ final class WitnessAppModel: ObservableObject {
         }
         var tokens: [String: String] = [:]
         do {
-            let url = WitnessStorage.directory.appendingPathComponent("leases.duckdb")
+            let url = WitnessStorage.databaseURL
             let archive = try LegacyAuthorityReplacement.archiveAndReplace(databaseURL: url) {
                 for service in saved.guardedServices {
                     let token = try WitnessKeychain.randomToken()
@@ -469,6 +500,8 @@ final class WitnessAppModel: ObservableObject {
             storageArchivePath = archive.path
             legacyStorageNeedsReplacement = false
             store = try LeaseStore(databaseURL: url)
+            try WitnessStorage.recordAuthorityCreated()
+            beginSnapshots()
             state = .stopped
             error = nil
             beginPolling()
@@ -477,6 +510,126 @@ final class WitnessAppModel: ObservableObject {
             self.error = error.localizedDescription
             throw error
         }
+    }
+
+    // MARK: Backup
+
+    struct BackupContents {
+        let url: URL
+        let createdAt: Date?
+        let configuration: WitnessConfiguration?
+        let leases: LeaseSnapshot?
+    }
+
+    var backupAvailable: Bool { !preview }
+
+    /// Daily snapshot while the authority is open; the newest 14 are kept.
+    private func beginSnapshots() {
+        snapshotTask?.cancel()
+        lastSnapshotDate = WitnessStorage.latestSnapshotDate()
+        snapshotTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if self.lastSnapshotDate.map({ Date().timeIntervalSince($0) >= 86_400 }) ?? true {
+                    await self.takeSnapshot()
+                }
+                do { try await Task.sleep(for: .seconds(3_600)) } catch { return }
+            }
+        }
+    }
+
+    func takeSnapshot() async {
+        guard !preview, let store else { return }
+        do {
+            let snapshot = try await store.makeSnapshot()
+            try WitnessStorage.writeSnapshot(snapshot)
+            lastSnapshotDate = snapshot.createdAt
+            snapshotError = nil
+        } catch { snapshotError = error.localizedDescription }
+    }
+
+    /// Settings plus current terms and history. Never includes credentials.
+    func exportBackup(to url: URL) async throws {
+        guard !preview else { throw WitnessStorage.ConfigurationError.invalid }
+        var leases = try await store?.makeSnapshot()
+        if leases == nil, let latest = WitnessStorage.snapshotFiles().last {
+            leases = try LeaseSnapshot.decode(Data(contentsOf: latest))
+        }
+        try RuruBackup(configuration: configuration, leases: leases).encoded().write(to: url, options: .atomic)
+    }
+
+    func readBackup(at url: URL) throws -> BackupContents {
+        let contents = try RuruBackup.read(Data(contentsOf: url))
+        let created = (try? LeaseSnapshot.decoder.decode(RuruBackup.self, from: Data(contentsOf: url)))?.createdAt
+            ?? contents.leases?.createdAt
+        return BackupContents(url: url, createdAt: created, configuration: contents.configuration, leases: contents.leases)
+    }
+
+    /// Explicit disaster restore. Stops the service, archives the current
+    /// database and rebuilds it with every term raised by LeaseRestore.termMargin,
+    /// then leaves the authority stopped and quarantined for a full lease.
+    func restoreBackup(_ backup: BackupContents, includeSettings: Bool) async throws {
+        guard !preview, !internetBusy, !savingConfiguration, !shuttingDown else { throw WitnessStorage.ConfigurationError.invalid }
+        guard !legacyStorageNeedsReplacement else {
+            throw RuruBackup.Failure("Set Up DuckDB before restoring a backup.")
+        }
+        let imported = try includeSettings
+            ? backup.configuration.map { try RuruBackup.importedConfiguration($0, current: configuration) } : nil
+        guard imported != nil || backup.leases != nil else { return }
+        if server != nil || state == .running { await stop() }
+        guard !busy else { throw WitnessStorage.ConfigurationError.invalid }
+        busy = true
+        defer { busy = false }
+        pollTask?.cancel()
+        snapshotTask?.cancel()
+        do {
+            if let leases = backup.leases {
+                let known = try await store?.checkpointedTerms()
+                store = nil
+                snapshot = nil
+                var attempts = 0
+                while true {
+                    do {
+                        try LeaseRestore.restore(databaseURL: WitnessStorage.databaseURL, snapshot: leases, knownTerms: known)
+                        break
+                    } catch LeaseRestoreError.authorityInUse where attempts < 20 {
+                        // The released store closes once in-flight reads finish.
+                        attempts += 1
+                        try await Task.sleep(for: .milliseconds(100))
+                    }
+                }
+            }
+            if let imported {
+                try WitnessStorage.save(imported)
+                configuration = imported
+                applyDockVisibility()
+                serviceCredentials = [:]
+                for service in imported.guardedServices {
+                    serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
+                }
+            }
+        } catch {
+            reopenAfterRestore()
+            throw error
+        }
+        reopenAfterRestore()
+        if let error { throw RuruBackup.Failure(error) }
+    }
+
+    private func reopenAfterRestore() {
+        do {
+            if store == nil {
+                store = try LeaseStore(databaseURL: WitnessStorage.databaseURL)
+                try WitnessStorage.recordAuthorityCreated()
+            }
+            state = .stopped
+            error = nil
+            beginSnapshots()
+        } catch {
+            state = .failed
+            self.error = error.localizedDescription
+        }
+        beginPolling()
     }
 
     private func beginPolling() {
@@ -528,6 +681,49 @@ final class WitnessAppModel: ObservableObject {
         }
     }
 
+    func setCoordinationPolicy(_ policy: CoordinationPolicy, for serviceID: String) async throws {
+        guard !busy, !internetBusy, !savingConfiguration, !shuttingDown else { throw WitnessStorage.ConfigurationError.invalid }
+        var saved = configuration
+        try saved.setCoordinationPolicy(policy, for: serviceID)
+        let access = preview ? nil : try? accessCredentials(configuration: saved)
+        guard server == nil || access != nil else { throw WitnessStorage.ConfigurationError.invalid }
+        busy = true
+        defer { busy = false }
+        if !preview { try WitnessStorage.save(saved) }
+        configuration = saved
+        // Publish catalogue intent independently of the lease router/listener.
+        // Metadata policy changes cannot interrupt existing ownership requests.
+        if let access { try await catalogue.configureServices(access) }
+        if !policy.enabled, let cluster = configuration.guardedServices.first(where: { $0.id == serviceID })?.clusterID {
+            coordinationLocations.removeAll { $0.clusterID == cluster }
+        }
+        if !preview { coordinationLocations = await catalogue.snapshot() }
+        if !preview { coordinationEnrollments = await catalogue.pendingEnrollments() }
+    }
+
+    func approveCoordinationEnrollment(id: UUID, serviceID: String) async throws {
+        let requests = preview ? coordinationEnrollments : await catalogue.pendingEnrollments()
+        guard let request = requests.first(where: { $0.id == id }),
+              configuration.guardedServices.contains(where: { $0.id == serviceID && $0.clusterID == request.clusterID }) else {
+            throw EnrollmentError.expired
+        }
+        var saved = configuration
+        try saved.approveCoordinationOrigin(request.origin, for: serviceID)
+        // Reuse the checkpoint-before-publication path; no remote policy writes.
+        try await setCoordinationPolicy(saved.coordinationPolicy(for: serviceID), for: serviceID)
+        if preview { coordinationEnrollments.removeAll { $0.origin == request.origin && $0.clusterID == request.clusterID } }
+    }
+
+    func rejectCoordinationEnrollment(id: UUID) async {
+        if !preview { await catalogue.rejectEnrollment(id: id) }
+        coordinationEnrollments.removeAll { $0.id == id }
+    }
+
+    private enum EnrollmentError: LocalizedError {
+        case expired
+        var errorDescription: String? { "This request has expired or been withdrawn. Wait for the server to request access again." }
+    }
+
     func hasCredential(for clusterID: String) -> Bool { serviceCredentials[clusterID]?.isEmpty == false }
 
     func copyToken(clusterID: String? = nil) { copy(serviceCredentials[clusterID ?? configuration.clusterID] ?? "") }
@@ -546,6 +742,10 @@ final class WitnessAppModel: ObservableObject {
     }
 
     private func refresh() async {
+        coordinationEnrollments = await catalogue.pendingEnrollments()
+        coordinationLocations = await catalogue.snapshot().filter { location in
+            configuration.guardedServices.contains { $0.clusterID == location.clusterID && configuration.coordinationPolicy(for: $0.id).enabled }
+        }
         do {
             snapshot = try await store?.snapshot()
             if let failure = await server?.failure() {

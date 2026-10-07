@@ -189,7 +189,7 @@ actor TunnelManager {
             let online = path.status == .satisfied
             Task { await self?.pathChanged(signature, online: online) }
         }
-        monitor.start(queue: DispatchQueue(label: "com.swiftmesh.witness.tunnel-network"))
+        monitor.start(queue: DispatchQueue(label: "dev.ruruapp.ruru.tunnel-network"))
     }
 
     private func stopMonitor() { monitor?.cancel(); monitor = nil; lastPath = nil }

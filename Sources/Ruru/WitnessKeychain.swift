@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 enum WitnessKeychain {
-    private static let service = "com.swiftmesh.witness"
+    private static let service = "dev.ruruapp.ruru"
     private static let account = "authority-bearer-token"
 
     static func read(_ account: String) throws -> String? {

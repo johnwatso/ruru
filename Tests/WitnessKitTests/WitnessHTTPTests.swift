@@ -129,7 +129,7 @@ final class WitnessHTTPTests: XCTestCase {
     private let token = String(repeating: "test-authority-", count: 4)
 
     private func store(clock: (@Sendable () -> Double)? = nil) throws -> LeaseStore {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SwiftMeshWitnessHTTPTests-\(UUID().uuidString)")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("RuruHTTPTests-\(UUID().uuidString)")
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
         return try LeaseStore(databaseURL: folder.appendingPathComponent("leases.duckdb"), clock: clock)
     }

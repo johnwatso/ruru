@@ -8,7 +8,7 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
 ## Layout and surfaces
 
 - Use `NavigationSplitView` with a SwiftMiner-style 200pt sidebar: Overview,
-  Guarding, Internet Access, Activity and Settings. Navigation starts directly
+  Guarding, Coordination, Internet Access and Activity. Navigation starts directly
   below the window controls, without an app branding or section header. Match
   SwiftMiner's 14pt row typography, 8pt outer gutters, 2pt row gaps, sidebar
   material and animated 11pt rounded selection. Keep the sidebar free of a
@@ -39,13 +39,36 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
 - Separate public HTTPS from the local HTTP listener.
 - Credentials are edited in modal drafts. Show Copy Token rather than revealing
   the witness token. Cloudflare tokens remain in Keychain.
-- Settings commit on Save; Revert discards the draft. Navigation never saves.
+- Settings preferences apply immediately, as macOS settings windows do. Console
+  sheets (connection, credentials, policies) still commit on Save.
 - Activity search and header remain visible above the scrolling event list.
 - Stop/Pause explain their operational effect using native confirmation dialogs.
 - Closing the window preserves the menu bar service and tunnel.
-- Settings → Appearance offers Show in Dock, off by default; it applies on Save.
-- Settings → Software Updates mirrors SwiftMiner's channel and update-check
-  controls with Sequoia-native styling. Preferences apply on Save. Missing
+- Settings is a separate native preferences window, matching SwiftMiner’s compact
+  top icon tabs: General, Updates and Backup. General groups app presence and startup
+  controls; connection controls live under Internet Access → Connection Settings.
+  Each tab is a native grouped `Form` (`.formStyle(.grouped)`, available on
+  Sequoia) sized to its content in a 540pt-wide window: plain section headers,
+  leading labels with secondary descriptions, trailing controls and footnotes
+  as section footers. Do not use console cards, icon tiles or large titles here.
+  There is no Save/Revert bar. A failed save shows an inline warning and restores
+  the saved value. The app menu’s Settings command (⌘,), menu bar
+  Settings and Overview actions open the same window without changing console
+  navigation. Closing either window leaves the menu bar service running.
+- Settings → Backup shows the last automatic snapshot (Show in Finder, Snapshot
+  Now), Export… and Restore…. Restore opens a sheet summarising the file, an
+  optional Restore settings switch, and two required acknowledgements (other
+  authorities stopped; servers may need to re-acquire) before a Restore button.
+  Footnotes explain the Time Machine exclusion, raised terms and that no
+  credentials are exported.
+- About is the standard About panel (icon, name, version/build and a Release
+  Notes link), opened from the app menu and the menu bar menu, not a Settings tab.
+- Settings → General's “Show Ruru in” picker offers Dock + Menu Bar or Menu Bar
+  (default), following Otter's App Presence control, with a description that
+  follows the selection. There is no Dock-only mode, because the menu bar
+  service must remain. Ruru always follows the system appearance.
+- Settings → Updates mirrors SwiftMiner's channel and update-check
+  controls with Sequoia-native styling. Preferences apply immediately. Missing
   publishing configuration shows a plain unavailable message and disabled
   controls. No build-setting names appear in the product flow. Installing an
   update may interrupt authority service; explain that restart quarantine applies.
@@ -89,6 +112,29 @@ target is online. Explain compatible-client handover and continued failover.
 Service details include Remove with a confirmation describing lost renewal,
 normal lease expiry and retained terms/history. All services can be removed,
 including SwiftBot; an empty list explains how to add another service. A SQLite
-startup block exposes Set Up DuckDB in Overview, Guarding and Settings. Its modal
+startup block exposes Set Up DuckDB in Overview, Guarding and Connection Settings. Its modal
 requires explicit offline/unpaired acknowledgements, explains the local archive
 and fresh pairing details, and leaves the authority stopped after setup.
+
+## Coordination
+
+Use the shared header, sections, inset rows and native sheets. Start with a
+separate card for each app/service, using its name and app icon, and open a scoped
+detail page with a back action. Keep that service’s features, settings, connection
+details and resources together. Add Service is available here as well as Guarding;
+both use the same identity and credentials. Avoid a global resource view with a
+service picker. Include Remove in each service detail header, with a confirmation
+that explains removal from both Coordination and Guarding, cleared observations,
+revoked reports/lease renewal and normal ownership expiry. Preserve hosted files
+and durable ownership history. Show removal failures on the detail page and
+return to the app/service list after success. Edit catalogue opt-in/allowed HTTPS
+origins in a Save/Cancel draft. Show pending website counts on service cards and
+a Website requests section above the catalogue in the service detail. Each row
+shows the reported server name and exact HTTPS origin, with Reject and Approve
+actions. Use Enable & Approve when reporting is off; show the existing origin
+limit before allowing approval. Requests alone do not change permissions.
+Show application-neutral resource names, namespaces, reporting servers, URLs and
+fresh/stale report badges. Copy URL is explicit; reports do not prove reachability
+or ownership. Search narrows the first 100 visible locations. Empty states explain
+client reporting and service opt-in. Recordings and artifacts are examples, not
+special cases in the shared UI. Keep credentials in the existing service sheet.

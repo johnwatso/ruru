@@ -15,3 +15,4 @@ xcuserdata/
 *.initialized
 *.dSYM/
 *.xcresult/
+/.artifacts/

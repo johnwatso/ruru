@@ -496,7 +496,7 @@ struct CloudflareDNSProvider: Sendable {
         request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("SwiftMeshWitness/0.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("Ruru/0.2", forHTTPHeaderField: "User-Agent")
         return request
     }
 

@@ -63,7 +63,7 @@ struct WitnessGuardedServicesSummary: View {
     }
 }
 
-private struct WitnessGuardedServiceIcon: View {
+struct WitnessGuardedServiceIcon: View {
     let service: GuardedService
     var active = true
     var size: CGFloat = 42
@@ -237,11 +237,19 @@ private struct WitnessGuardedServiceDetails: View {
     }
 }
 
-private struct WitnessAddServiceSheet: View {
+struct WitnessAddServiceSheet: View {
     @EnvironmentObject private var model: WitnessAppModel
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var clusterID = ""
+    let subtitle: String
+    let symbol: String
+
+    init(subtitle: String = "Give another app its own ownership group.", symbol: String = "checkmark.shield") {
+        self.subtitle = subtitle
+        self.symbol = symbol
+    }
+
     @State private var kind = GuardedService.Kind.custom
     @State private var saving = false
     @State private var error: String?
@@ -252,7 +260,7 @@ private struct WitnessAddServiceSheet: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
-            WitnessSheetHeader(title: "Add Service", subtitle: "Give another app its own ownership group.", symbol: "checkmark.shield")
+            WitnessSheetHeader(title: "Add Service", subtitle: subtitle, symbol: symbol)
             VStack(alignment: .leading, spacing: 16) {
                 TextField("Service name", text: $name, prompt: Text("e.g. SwiftBot Production or Backup Worker"))
                 Picker("Application", selection: $kind) { ForEach(GuardedService.Kind.allCases, id: \.self) { Text($0.rawValue).tag($0) } }

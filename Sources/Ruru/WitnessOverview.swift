@@ -4,6 +4,7 @@ import SwiftUI
 /// Ruru's local adaptation of SwiftBot's current console Overview.
 struct WitnessOverview: View {
     @EnvironmentObject private var model: WitnessAppModel
+    @Environment(\.openSettings) private var openSettings
     let onNavigate: (WitnessPage) -> Void
     let onStop: () -> Void
     @State private var showingStorageSetup = false
@@ -45,6 +46,11 @@ struct WitnessOverview: View {
         .sheet(isPresented: $showingStorageSetup) { WitnessLegacyStorageSetupSheet().environmentObject(model) }
     }
 
+    private func showSettings() {
+        NSApplication.shared.activate()
+        openSettings()
+    }
+
     private var header: some View {
         ConsolePageHeader(title: "Overview", subtitle: headline) {
             HStack(spacing: 12) {
@@ -56,7 +62,7 @@ struct WitnessOverview: View {
                     Button("Show Data Folder in Finder", systemImage: "folder") {
                         NSWorkspace.shared.activateFileViewerSelecting([WitnessStorage.directory])
                     }
-                    Button("Settings", systemImage: "gearshape") { onNavigate(.settings) }
+                    Button("Settings", systemImage: "gearshape") { showSettings() }
                 } label: { Label("More", systemImage: "wrench.and.screwdriver").labelStyle(.iconOnly) }
                 .menuStyle(.button).menuIndicator(.hidden).fixedSize()
                 .help("More").accessibilityLabel("More")
@@ -89,7 +95,7 @@ struct WitnessOverview: View {
                         WitnessOverviewIssue(title: "Authority unavailable", detail: error, health: .error,
                                              reviewTitle: model.legacyStorageNeedsReplacement ? "Set Up DuckDB…" : "Review") {
                             if model.legacyStorageNeedsReplacement { showingStorageSetup = true }
-                            else { onNavigate(.settings) }
+                            else { onNavigate(.internet) }
                         }
                     }
                     if model.isRecovering {
@@ -170,7 +176,7 @@ struct WitnessOverview: View {
 
     private var authorityCard: some View {
         WitnessServiceCard(title: "Authority", symbol: "checkmark.shield", status: model.statusText,
-                           detail: model.localURL, health: model.serviceHealth) { onNavigate(.settings) }
+                           detail: model.localURL, health: model.serviceHealth) { onNavigate(.internet) }
     }
     private var guardingCard: some View {
         WitnessServiceCard(title: "Guarding", symbol: "server.rack", status: "\(model.configuration.guardedServices.count) \(model.configuration.guardedServices.count == 1 ? "service" : "services")",

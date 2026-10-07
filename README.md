@@ -39,6 +39,7 @@
 
 - See your services, their current owners, and connection status in one place
 - Manage separate SwiftBot groups and other compatible apps
+- Inspect resource locations reported by servers in an opt-in catalogue
 - Choose a Preferred Primary for clients that support it
 - Search ownership history using readable server names
 - Set up Internet Access through built-in Cloudflare support

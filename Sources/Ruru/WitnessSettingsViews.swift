@@ -1,186 +1,300 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import WitnessKit
 
-struct WitnessSettingsPage: View {
+struct WitnessSettingsView: View {
     @EnvironmentObject private var model: WitnessAppModel
     @EnvironmentObject private var updater: AppUpdater
+    /// Mirrors the saved preferences; each edit is applied immediately.
     @State var configuration: WitnessConfiguration
+    private enum Pane: String, CaseIterable, Identifiable {
+        case general = "General", updates = "Updates", backup = "Backup"
+        var id: Self { self }
+        var symbol: String {
+            switch self {
+            case .general: "gearshape"
+            case .updates: "arrow.clockwise.circle"
+            case .backup: "externaldrive"
+            }
+        }
+    }
+    @State private var pane: Pane = .general
     @State private var launchAtLogin = false
-    @State private var saving = false
     @State private var error: String?
-    @State private var feedback: String?
+    @State private var pendingSave: Task<Void, Never>?
     @State private var updateChannel: AppUpdater.UpdateChannel = .stable
     @State private var automaticChecks = false
     @State private var automaticDownloads = false
-    private var changed: Bool {
-        configuration != model.configuration || launchAtLogin != model.launchAtLogin ||
-        updateChannel != updater.selectedChannel || automaticChecks != updater.automaticallyChecksForUpdates ||
-        automaticDownloads != updater.automaticallyDownloadsUpdates
-    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                ConsolePageHeader(title: "Settings", subtitle: "Preferences for this witness Mac.") {
-                    HStack(spacing: 10) {
-                        Button("Revert", action: reset).buttonStyle(.bordered).buttonBorderShape(.capsule)
-                            .disabled(!changed || saving)
-                        Button(saving ? "Saving…" : "Save Changes") { Task { await save() } }
-                            .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
-                            .disabled(!changed || !configuration.isValid || saving || model.busy || model.internetBusy)
-                            .keyboardShortcut("s", modifiers: .command)
-                    }
-                }
-                if let error { ConsoleIssue(title: "Settings could not be saved", detail: error) }
-                ConsoleSection("Appearance") {
-                    ConsoleSettingRow(title: "Show in Dock", subtitle: "Show Ruru’s app icon in the Dock as well as the menu bar.") {
-                        Toggle("Show in Dock", isOn: $configuration.showInDock).toggleStyle(.switch).labelsHidden()
-                    }.consoleRowGroup()
-                }
-                if model.legacyStorageNeedsReplacement {
-                    ConsoleSection("Storage") { WitnessLegacyStorageNotice() }
-                }
-                if let archive = model.storageArchivePath {
-                    ConsoleSection("Storage") {
-                        Text("Old SQLite storage was archived. Re-pair every remaining service using its new connection details.")
-                            .font(.callout).foregroundStyle(.secondary)
-                        Text(archive).font(.caption).textSelection(.enabled)
-                    }
-                }
-                ConsoleSection("Startup") {
-                    VStack(spacing: 0) {
-                        ConsoleSettingRow(title: "Start the service automatically", subtitle: "Start the ownership listener when this app opens.") {
-                            Toggle("Start the service automatically", isOn: $configuration.startAutomatically)
-                                .toggleStyle(.switch).labelsHidden()
-                        }
-                        Divider().padding(.leading, 16)
-                        ConsoleSettingRow(title: "Launch at login", subtitle: "Keep the witness available after signing in to this Mac.") {
-                            Toggle("Launch at login", isOn: $launchAtLogin).toggleStyle(.switch).labelsHidden()
-                        }
-                    }.consoleRowGroup()
-                    if model.loginNeedsApproval {
-                        ConsoleIssue(title: "Login item needs approval", detail: "Approve Ruru in System Settings → General → Login Items.")
-                    }
-                }
-                ConsoleSection("Connection") {
-                    VStack(spacing: 0) {
-                        if !model.configuration.primaryServiceRemoved {
-                            ConsoleSettingRow(title: "Cluster ID", subtitle: "The original SwiftBot service’s ownership group. Additional services are managed in Guarding.") {
-                                TextField("Cluster ID", text: $configuration.clusterID)
-                                    .textFieldStyle(.roundedBorder).frame(width: 220)
-                            }
-                            Divider().padding(.leading, 16)
-                        }
-                        ConsoleSettingRow(title: "Local listener", subtitle: "Cloudflare uses the listener on this Mac.") {
-                            Picker("Local listener", selection: $configuration.bindAddress) {
-                                Text("This Mac only").tag("127.0.0.1")
-                                Text("All IPv4 interfaces").tag("0.0.0.0")
-                                Text("This Mac only (IPv6)").tag("::1")
-                            }.labelsHidden().frame(width: 220).disabled(configuration.tunnel.isConfigured)
-                        }
-                        Divider().padding(.leading, 16)
-                        ConsoleSettingRow(title: "Port") {
-                            TextField("Port", value: $configuration.port, format: .number.grouping(.never))
-                                .textFieldStyle(.roundedBorder).frame(width: 100)
-                                .disabled(configuration.tunnel.isConfigured)
-                        }
-                        Divider().padding(.leading, 16)
-                        ConsoleSettingRow(title: "Public HTTPS endpoint") {
-                            TextField("Public HTTPS endpoint", text: $configuration.publicEndpoint, prompt: Text("https://witness.example.com"))
-                                .textFieldStyle(.roundedBorder).frame(width: 280)
-                                .disabled(configuration.tunnel.isConfigured)
-                        }
-                    }.consoleRowGroup()
-                    Text(configuration.tunnel.isConfigured
-                        ? "Internet Access manages the public endpoint and local listener."
-                        : "Use Internet Access to create a Cloudflare tunnel, or enter an existing HTTPS endpoint.")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-                ConsoleSection("Software Updates") {
-                    VStack(spacing: 0) {
-                        ConsoleSettingRow(title: "Update channel", subtitle: "Stable releases are recommended for an ownership authority.") {
-                            Picker("Update channel", selection: $updateChannel) {
-                                ForEach(AppUpdater.UpdateChannel.allCases) { channel in
-                                    Text(channel.label).tag(channel)
-                                }
-                            }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
-                        }
-                        Divider().padding(.leading, 16)
-                        ConsoleSettingRow(title: "Prompt for available updates", subtitle: "Check in the background and show an update prompt when needed.") {
-                            Toggle("Prompt for available updates", isOn: $automaticChecks).toggleStyle(.switch).labelsHidden()
-                        }
-                        Divider().padding(.leading, 16)
-                        ConsoleSettingRow(title: "Download updates automatically", subtitle: "Download eligible updates in the background and install when Ruru quits.") {
-                            Toggle("Download updates automatically", isOn: $automaticDownloads).toggleStyle(.switch).labelsHidden()
-                                .disabled(!automaticChecks)
-                        }
-                    }.consoleRowGroup().disabled(!updater.canCheckForUpdates)
-                    HStack {
-                        Button("Check for Updates…") { updater.checkForUpdates() }.buttonStyle(.bordered)
-                            .disabled(!updater.canCheckForUpdates)
-                        Spacer()
-                        Link("GitHub Releases", destination: URL(string: "https://github.com/johnwatso/ruru/releases")!)
-                    }
-                    if let lastCheck = updater.lastCheckDate {
-                        Text("Last checked " + lastCheck.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if updateChannel == .beta {
-                        Text("Beta releases may contain unfinished changes.").font(.callout).foregroundStyle(.secondary)
-                    }
-                    if updater.isPreview {
-                        Text("Update checks are disabled in this preview.").font(.callout).foregroundStyle(.secondary)
-                    } else if !updater.isConfigured {
-                        Text("Updates will be available once release publishing is configured.").font(.callout).foregroundStyle(.secondary)
-                    }
-                    if let error = updater.error { ConsoleIssue(title: "Updates unavailable", detail: error) }
-                    Text("Installing an update can briefly interrupt ownership service. Restart quarantine still applies.")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-                ConsoleSection("About") {
-                    VStack(spacing: 0) {
-                        ConsoleValueRow(title: "Application", value: "Ruru")
-                        Divider().padding(.leading, 16)
-                        ConsoleValueRow(title: "Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2.0")
-                        Divider().padding(.leading, 16)
-                        ConsoleValueRow(title: "Build", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—")
-                    }.consoleRowGroup()
-                }
-                if let feedback { Label(feedback, systemImage: "checkmark.circle").font(.callout).foregroundStyle(.secondary) }
-                Text("Changes apply when you save. Closing the window leaves the witness running in the menu bar.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }.padding(.horizontal, 36).padding(.top, 32).padding(.bottom, 40)
-                .frame(maxWidth: 1120, alignment: .leading).frame(maxWidth: .infinity)
-                .disabled(saving)
+        TabView(selection: $pane) {
+            ForEach(Pane.allCases) { pane in
+                paneContent(for: pane)
+                    .tabItem { Label(pane.rawValue, systemImage: pane.symbol) }
+                    .tag(pane)
+            }
+        }.frame(width: 540)
+            .onAppear { model.refreshLoginStatus(); reset() }
+            .onChange(of: configuration.showInDock) { applyPreferences() }
+            .onChange(of: configuration.startAutomatically) { applyPreferences() }
+            .onChange(of: launchAtLogin) { _, value in applyLaunchAtLogin(value) }
+            .onChange(of: model.launchAtLogin) { _, value in launchAtLogin = value }
+            .onChange(of: updateChannel) { applyUpdatePreferences() }
+            .onChange(of: automaticChecks) { applyUpdatePreferences() }
+            .onChange(of: automaticDownloads) { applyUpdatePreferences() }
+            .onChange(of: updater.automaticallyChecksForUpdates) { _, value in automaticChecks = value }
+            .onChange(of: updater.automaticallyDownloadsUpdates) { _, value in automaticDownloads = value }
+    }
+
+    @ViewBuilder private func paneContent(for pane: Pane) -> some View {
+        Form {
+            switch pane {
+            case .general: generalSettings
+            case .updates: updateSettings
+            case .backup: WitnessBackupSettings()
+            }
         }
-        .onAppear { model.refreshLoginStatus(); launchAtLogin = model.launchAtLogin; resetUpdateDraft() }
-        .onChange(of: updater.automaticallyChecksForUpdates) { _, value in automaticChecks = value }
-        .onChange(of: updater.automaticallyDownloadsUpdates) { _, value in automaticDownloads = value }
+        .formStyle(.grouped)
+        .scrollDisabled(true)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private var generalSettings: some View {
+        Section {
+            Picker(selection: $configuration.showInDock) {
+                Label("Dock + Menu Bar", systemImage: "menubar.dock.rectangle").tag(true)
+                Label("Menu Bar", systemImage: "menubar.rectangle").tag(false)
+            } label: {
+                Text("Show Ruru in")
+                Text(configuration.showInDock
+                     ? "Keep Ruru easy to reach from both the Dock and the menu bar."
+                     : "Keep Ruru out of the Dock and control it from the menu bar.")
+            }
+        } footer: {
+            Text("Ruru keeps running in the menu bar when its window is closed.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+        Section {
+            Toggle(isOn: $configuration.startAutomatically) {
+                Text("Start service when Ruru opens")
+                Text("Begins listening for ownership requests at launch.")
+            }
+            Toggle(isOn: $launchAtLogin) {
+                Text("Open at login")
+                Text("Keeps the authority available after you sign in to this Mac.")
+            }
+            if model.loginNeedsApproval {
+                warning("Approve Ruru in System Settings → General → Login Items.")
+            }
+        } header: {
+            Text("Startup")
+        }
+        if let error {
+            Section { warning("Settings could not be saved: " + error) }
+        }
+    }
+
+    @ViewBuilder private var updateSettings: some View {
+        Section {
+            Picker(selection: $updateChannel) {
+                ForEach(AppUpdater.UpdateChannel.allCases) { channel in
+                    Text(channel.label).tag(channel)
+                }
+            } label: {
+                Text("Update channel")
+                Text(updateChannel == .beta
+                     ? "Beta releases may contain unfinished changes."
+                     : "Stable is recommended for an ownership authority.")
+            }
+            Toggle(isOn: $automaticChecks) {
+                Text("Automatically check for updates")
+                Text("Shows a prompt when a new version is available.")
+            }
+            Toggle(isOn: $automaticDownloads) {
+                Text("Automatically download updates")
+                Text("Installs downloaded updates when Ruru quits.")
+            }.disabled(!automaticChecks)
+        } footer: {
+            updateFooter
+        }.disabled(!updater.canCheckForUpdates)
+        Section {
+            LabeledContent {
+                Button("Check Now") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
+            } label: {
+                Text("Last checked")
+                Text(updater.lastCheckDate?.formatted(date: .abbreviated, time: .shortened) ?? "Never")
+            }
+            if let error = updater.error { warning(error) }
+        } footer: {
+            Text("Installing an update can briefly interrupt ownership service. Restart quarantine still applies.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var updateFooter: some View {
+        if updater.isPreview {
+            Text("Update checks are disabled in this preview.").font(.footnote).foregroundStyle(.secondary)
+        } else if !updater.isConfigured {
+            Text("Updates will be available once release publishing is configured.").font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    private func warning(_ text: String) -> some View {
+        Label {
+            Text(text).textSelection(.enabled)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        }
     }
 
     private func reset() {
         configuration = model.configuration
         launchAtLogin = model.launchAtLogin
-        resetUpdateDraft()
-        error = nil; feedback = nil
-    }
-    private func resetUpdateDraft() {
         updateChannel = updater.selectedChannel
         automaticChecks = updater.automaticallyChecksForUpdates
         automaticDownloads = updater.automaticallyDownloadsUpdates
     }
+
+    /// Saves are serialised and always write the latest values, so quick
+    /// successive edits cannot race the model's single-save guard.
+    private func applyPreferences() {
+        let previous = pendingSave
+        pendingSave = Task {
+            await previous?.value
+            let saved = model.configuration
+            guard configuration.showInDock != saved.showInDock ||
+                  configuration.startAutomatically != saved.startAutomatically else { return }
+            // Save only application preferences, preserving connection edits made
+            // in the console while this window is open.
+            var draft = saved
+            draft.showInDock = configuration.showInDock
+            draft.startAutomatically = configuration.startAutomatically
+            do {
+                try await model.saveConfiguration(draft)
+                error = nil
+            } catch {
+                self.error = error.localizedDescription
+                configuration.showInDock = model.configuration.showInDock
+                configuration.startAutomatically = model.configuration.startAutomatically
+            }
+        }
+    }
+
+    private func applyLaunchAtLogin(_ enabled: Bool) {
+        guard enabled != model.launchAtLogin, !updater.isPreview else { return }
+        Task {
+            await model.setLaunchAtLogin(enabled)
+            // Registration can fail or need approval; show the real state.
+            launchAtLogin = model.launchAtLogin
+        }
+    }
+
+    private func applyUpdatePreferences() {
+        updater.apply(channel: updateChannel, automaticChecks: automaticChecks,
+                      automaticDownloads: automaticDownloads)
+    }
+}
+
+/// Operational connection controls live with Internet Access, outside Preferences.
+struct WitnessConnectionSettingsSheet: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    @Environment(\.dismiss) private var dismiss
+    @State var configuration: WitnessConfiguration
+    @State private var saving = false
+    @State private var error: String?
+
+    private var changed: Bool {
+        configuration.clusterID != model.configuration.clusterID ||
+        configuration.bindAddress != model.configuration.bindAddress ||
+        configuration.port != model.configuration.port ||
+        configuration.publicEndpoint != model.configuration.publicEndpoint
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            WitnessSheetHeader(title: "Connection Settings", subtitle: "Configure this authority’s listener and HTTPS endpoint.", symbol: "network")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    connectionSettings
+                    if let error { ConsoleIssue(title: "Connection could not be saved", detail: error) }
+                }.padding(.horizontal, 24).padding(.bottom, 24)
+            }
+            Divider()
+            HStack {
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Spacer()
+                Button(saving ? "Saving…" : "Save Connection") { Task { await save() } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!changed || !configuration.isValid || saving || model.busy || model.internetBusy)
+            }.padding(20)
+        }.frame(width: 700, height: 600).background(WitnessGlassBackground()).disabled(saving)
+    }
+
+    @ViewBuilder private var connectionSettings: some View {
+        ConsoleSection("Connection") {
+            VStack(spacing: 0) {
+                if !model.configuration.primaryServiceRemoved {
+                    ConsoleSettingRow(title: "Cluster ID", subtitle: "The original SwiftBot service’s ownership group. Additional services are managed in Guarding.") {
+                        TextField("Cluster ID", text: $configuration.clusterID)
+                            .textFieldStyle(.roundedBorder).frame(width: 220)
+                    }
+                    Divider().padding(.leading, 16)
+                }
+                ConsoleSettingRow(title: "Local listener", subtitle: "Cloudflare uses the listener on this Mac.") {
+                    Picker("Local listener", selection: $configuration.bindAddress) {
+                        Text("This Mac only").tag("127.0.0.1")
+                        Text("All IPv4 interfaces").tag("0.0.0.0")
+                        Text("This Mac only (IPv6)").tag("::1")
+                    }.labelsHidden().frame(width: 220).disabled(configuration.tunnel.isConfigured)
+                }
+                Divider().padding(.leading, 16)
+                ConsoleSettingRow(title: "Port") {
+                    TextField("Port", value: $configuration.port, format: .number.grouping(.never))
+                        .textFieldStyle(.roundedBorder).frame(width: 100)
+                        .disabled(configuration.tunnel.isConfigured)
+                }
+                Divider().padding(.leading, 16)
+                ConsoleSettingRow(title: "Public HTTPS endpoint") {
+                    TextField("Public HTTPS endpoint", text: $configuration.publicEndpoint, prompt: Text("https://witness.example.com"))
+                        .textFieldStyle(.roundedBorder).frame(width: 280)
+                        .disabled(configuration.tunnel.isConfigured)
+                }
+            }.consoleRowGroup()
+            Text(configuration.tunnel.isConfigured
+                ? "Internet Access manages the public endpoint and local listener."
+                : "Use Internet Access to create a Cloudflare tunnel, or enter an existing HTTPS endpoint.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+        if model.legacyStorageNeedsReplacement {
+            ConsoleSection("Storage") { WitnessLegacyStorageNotice() }
+        }
+        if let archive = model.storageArchivePath {
+            ConsoleSection("Storage") {
+                Text("Old SQLite storage was archived. Re-pair every remaining service using its new connection details.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Text(archive).font(.caption).textSelection(.enabled)
+            }
+        }
+    }
+
     private func save() async {
-        saving = true; error = nil; feedback = nil
+        saving = true
+        error = nil
         defer { saving = false }
         do {
-            try await model.saveConfiguration(configuration)
-            if launchAtLogin != model.launchAtLogin { await model.setLaunchAtLogin(launchAtLogin) }
-            updater.apply(channel: updateChannel, automaticChecks: automaticChecks,
-                          automaticDownloads: automaticDownloads)
-            configuration = model.configuration
-            launchAtLogin = model.launchAtLogin
-            resetUpdateDraft()
-            feedback = "Settings saved."
+            guard configuration.tunnel == model.configuration.tunnel else {
+                throw WitnessStorage.ConfigurationError.invalid
+            }
+            // Preserve General preferences saved in the separate Settings window.
+            var saved = model.configuration
+            saved.clusterID = configuration.clusterID
+            saved.bindAddress = configuration.bindAddress
+            saved.port = configuration.port
+            saved.publicEndpoint = configuration.publicEndpoint
+            try await model.saveConfiguration(saved)
+            dismiss()
         } catch { self.error = error.localizedDescription }
     }
 }
@@ -319,5 +433,171 @@ struct WitnessInternetSheet: View {
                 dismiss()
             } catch { self.error = error.localizedDescription }
         }
+    }
+}
+
+/// Snapshots, export and disaster restore. Lease state is never restored as-is:
+/// every term is raised and the authority stays quarantined for a full lease.
+private struct WitnessBackupSettings: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    @State private var message: String?
+    @State private var failure: String?
+    @State private var pending: WitnessAppModel.BackupContents?
+    @State private var working = false
+
+    var body: some View {
+        Section {
+            LabeledContent {
+                HStack {
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting(
+                            [WitnessStorage.snapshotFiles().last ?? WitnessStorage.snapshotsDirectory])
+                    }.disabled(model.lastSnapshotDate == nil)
+                    Button("Snapshot Now") { Task { await model.takeSnapshot() } }
+                        .disabled(!model.backupAvailable || model.busy)
+                }
+            } label: {
+                Text("Last snapshot")
+                Text(model.lastSnapshotDate?.formatted(date: .abbreviated, time: .shortened) ?? "None yet")
+            }
+            if let error = model.snapshotError { warning(error) }
+        } header: {
+            Text("Automatic Snapshots")
+        } footer: {
+            footnote("Ruru saves ownership terms and history once a day and keeps the last \(WitnessStorage.snapshotsKept). Snapshots and settings are included in Time Machine; the live ownership database is not, because restoring an older copy could reissue terms.")
+        }
+        Section {
+            LabeledContent {
+                Button("Export…", action: export)
+            } label: {
+                Text("Backup file")
+                Text("Services, names, policies, settings, and current terms.")
+            }
+            LabeledContent {
+                Button("Restore…", action: chooseRestore)
+            } label: {
+                Text("Restore from backup")
+                Text("Rebuilds ownership from a backup or snapshot with raised terms.")
+            }
+            if let message { Label(message, systemImage: "checkmark.circle").foregroundStyle(.secondary) }
+            if let failure { warning(failure) }
+        } header: {
+            Text("Backup and Restore")
+        } footer: {
+            footnote("Bearer tokens and Cloudflare credentials are never exported. After restoring on a new Mac, pair each server again and set up Internet Access.")
+        }
+        .disabled(!model.backupAvailable || working || model.busy)
+        .sheet(item: Binding(get: { pending.map(PendingRestore.init) }, set: { pending = $0?.contents })) { item in
+            WitnessRestoreSheet(contents: item.contents) { includeSettings in
+                pending = nil
+                Task { await restore(item.contents, includeSettings: includeSettings) }
+            }.environmentObject(model)
+        }
+    }
+
+    private struct PendingRestore: Identifiable {
+        let contents: WitnessAppModel.BackupContents
+        var id: URL { contents.url }
+    }
+
+    private func export() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "Ruru Backup \(Date().formatted(.iso8601.year().month().day())).json"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        working = true; message = nil; failure = nil
+        Task {
+            defer { working = false }
+            do {
+                try await model.exportBackup(to: url)
+                message = "Backup exported."
+            } catch { failure = error.localizedDescription }
+        }
+    }
+
+    private func chooseRestore() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.directoryURL = WitnessStorage.snapshotsDirectory
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        message = nil; failure = nil
+        do { pending = try model.readBackup(at: url) }
+        catch { failure = error.localizedDescription }
+    }
+
+    private func restore(_ contents: WitnessAppModel.BackupContents, includeSettings: Bool) async {
+        working = true
+        defer { working = false }
+        do {
+            try await model.restoreBackup(contents, includeSettings: includeSettings)
+            message = "Restored. Ruru is stopped and will wait 30 seconds after starting before granting ownership."
+        } catch { failure = error.localizedDescription }
+    }
+
+    private func footnote(_ text: String) -> some View {
+        Text(text).font(.footnote).foregroundStyle(.secondary)
+    }
+
+    private func warning(_ text: String) -> some View {
+        Label {
+            Text(text).textSelection(.enabled)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        }
+    }
+}
+
+private struct WitnessRestoreSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let contents: WitnessAppModel.BackupContents
+    let restore: (Bool) -> Void
+    @State private var includeSettings = true
+    @State private var previousStopped = false
+    @State private var understood = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    LabeledContent("Created", value: contents.createdAt?.formatted(date: .abbreviated, time: .shortened) ?? "Unknown")
+                    if let leases = contents.leases {
+                        LabeledContent("Ownership", value: "\(leases.leases.count) services · highest term \(leases.highestTerm)")
+                    } else {
+                        LabeledContent("Ownership", value: "Not included")
+                    }
+                    if let configuration = contents.configuration {
+                        Toggle(isOn: $includeSettings) {
+                            Text("Restore settings")
+                            Text("Replaces services, names, policies, and preferences with the backup’s \(configuration.guardedServices.count) services. Internet Access stays as it is.")
+                        }
+                    }
+                } header: {
+                    Text("Restore \(contents.url.lastPathComponent)")
+                } footer: {
+                    if contents.leases != nil {
+                        Text("Ruru stops the service, archives the current ownership database, and rebuilds it from this backup with every term raised by \(LeaseRestore.termMargin.formatted()). No server can be granted a term it has already seen. Ownership is not restored; after you start Ruru, it waits a full lease before granting.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if contents.leases != nil {
+                    Section {
+                        Toggle("Any other Ruru authority for these services is stopped", isOn: $previousStopped)
+                        Toggle("Servers may need to acquire ownership again", isOn: $understood)
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            .scrollDisabled(true)
+            .fixedSize(horizontal: false, vertical: true)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Restore") { restore(contents.configuration != nil && includeSettings) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(contents.leases != nil && !(previousStopped && understood)
+                              || contents.leases == nil && !(contents.configuration != nil && includeSettings))
+            }.padding(16)
+        }.frame(width: 500)
     }
 }

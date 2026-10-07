@@ -3,6 +3,27 @@ import XCTest
 import WitnessKit
 
 final class WitnessConfigurationTests: XCTestCase {
+    func testCoordinationPolicyPersistsAndRemovedServiceDoesNotTransferOptIn() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("RuruCoordinationPolicy-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var configuration = WitnessConfiguration()
+        XCTAssertFalse(configuration.coordinationPolicy(for: "swiftbot").enabled)
+        let policy = CoordinationPolicy(enabled: true, allowedOrigins: ["https://media.example.com"])
+        try configuration.setCoordinationPolicy(policy, for: "swiftbot")
+        try WitnessStorage.save(configuration, in: folder)
+        let restored = try WitnessStorage.load(from: folder)
+        XCTAssertEqual(restored.coordinationPolicy(for: "swiftbot"), policy)
+        XCTAssertThrowsError(try configuration.setCoordinationPolicy(policy, for: "missing"))
+        XCTAssertThrowsError(try configuration.setCoordinationPolicy(.init(enabled: true, allowedOrigins: ["https://media.example.com/path"]), for: "swiftbot"))
+        try configuration.removeGuardedService(id: "swiftbot")
+        XCTAssertTrue(configuration.serviceCoordinationPolicies.isEmpty)
+        let replacement = GuardedService(name: "Replacement", clusterID: configuration.clusterID)
+        configuration.additionalServices = [replacement]
+        XCTAssertFalse(configuration.coordinationPolicy(for: replacement.id).enabled)
+        configuration.serviceCoordinationPolicies["missing"] = policy
+        XCTAssertFalse(configuration.isValid)
+    }
+
     func testPrimaryPreferencePersistsPerServiceAndClearingAdvancesRevision() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("RuruPrimaryPreference-\(UUID())")
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -36,6 +57,7 @@ final class WitnessConfigurationTests: XCTestCase {
         try configuration.setPreferredPrimary("node-a", for: "swiftbot")
         try configuration.removeGuardedService(id: "swiftbot")
         XCTAssertTrue(configuration.servicePrimaryPreferences.isEmpty)
+        XCTAssertTrue(configuration.serviceCoordinationPolicies.isEmpty)
         let replacement = GuardedService(name: "Replacement", clusterID: configuration.clusterID)
         configuration.additionalServices = [replacement]
         XCTAssertNil(configuration.primaryPreference(for: replacement.id).preferredPrimaryNodeID)
@@ -67,6 +89,16 @@ final class WitnessConfigurationTests: XCTestCase {
         XCTAssertTrue(configuration.servicePrimaryPreferences.isEmpty)
         let restored = try JSONDecoder().decode(WitnessConfiguration.self, from: JSONEncoder().encode(configuration))
         XCTAssertEqual(restored.tunnel.instanceID, configuration.tunnel.instanceID)
+    }
+
+    func testRetiredAppearancePreferenceIsIgnoredAndDropped() throws {
+        let data = Data(#"{"clusterID":"my-cluster","bindAddress":"127.0.0.1","port":38990,"publicEndpoint":"","startAutomatically":true,"showInDock":true,"appearance":"dark"}"#.utf8)
+        let configuration = try JSONDecoder().decode(WitnessConfiguration.self, from: data)
+        XCTAssertTrue(configuration.showInDock)
+        XCTAssertTrue(configuration.isValid)
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(configuration)) as? [String: Any]
+        XCTAssertNil(encoded?["appearance"])
+        XCTAssertEqual(encoded?["showInDock"] as? Bool, true)
     }
 
     func testMissingRequiredSettingsAreNotSilentlyReplaced() {
@@ -162,5 +194,35 @@ final class WitnessConfigurationTests: XCTestCase {
         configuration.bindAddress = "127.0.0.1"
         configuration.publicEndpoint = "https://bot.example.com"
         XCTAssertFalse(configuration.isValid)
+    }
+}
+
+extension WitnessConfigurationTests {
+    func testApprovedWebsitePersistsWithoutChangingOwnershipOrOtherServices() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("RuruEnrollment-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var configuration = WitnessConfiguration()
+        let other = GuardedService(name: "Other", clusterID: "other")
+        configuration.additionalServices = [other]
+        try configuration.setPreferredPrimary("owner", for: "swiftbot")
+        try configuration.setCoordinationPolicy(.init(enabled: true, allowedOrigins: ["https://other.example.com"]), for: other.id)
+        let before = configuration
+        try configuration.approveCoordinationOrigin("https://john.example.com", for: "swiftbot")
+        try configuration.approveCoordinationOrigin("https://max.example.com", for: "swiftbot")
+        try configuration.approveCoordinationOrigin("https://max.example.com", for: "swiftbot")
+        try WitnessStorage.save(configuration, in: folder)
+        let restored = try WitnessStorage.load(from: folder)
+        XCTAssertEqual(restored.coordinationPolicy(for: "swiftbot"), .init(enabled: true,
+            allowedOrigins: ["https://john.example.com", "https://max.example.com"]))
+        XCTAssertEqual(restored.coordinationPolicy(for: other.id), before.coordinationPolicy(for: other.id))
+        XCTAssertEqual(restored.servicePrimaryPreferences, before.servicePrimaryPreferences)
+        XCTAssertEqual(restored.clusterID, before.clusterID)
+        XCTAssertEqual(restored.tunnel, before.tunnel)
+        for index in 2..<8 { try configuration.approveCoordinationOrigin("https://node-\(index).example.com", for: "swiftbot") }
+        let full = configuration
+        XCTAssertThrowsError(try configuration.approveCoordinationOrigin("https://overflow.example.com", for: "swiftbot"))
+        XCTAssertThrowsError(try configuration.approveCoordinationOrigin("http://node.example.com", for: "swiftbot"))
+        XCTAssertThrowsError(try configuration.approveCoordinationOrigin("https://node.example.com", for: "missing"))
+        XCTAssertEqual(configuration, full)
     }
 }

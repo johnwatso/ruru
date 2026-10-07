@@ -15,11 +15,19 @@ struct RuruApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) { }
+            CommandGroup(replacing: .appInfo) {
+                Button("About Ruru") { RuruAboutPanel.show() }
+            }
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { updater.checkForUpdates() }
                     .disabled(!updater.canCheckForUpdates)
             }
         }
+        Settings {
+            WitnessSettingsView(configuration: model.configuration)
+                .environmentObject(model).environmentObject(updater)
+        }
+        .windowResizability(.contentSize)
         MenuBarExtra("Ruru", systemImage: "checkmark.shield") {
             WitnessMenu().environmentObject(model).environmentObject(updater).onAppear {
                 delegate.model = model
@@ -34,6 +42,7 @@ struct RuruApp: App {
 final class WitnessAppDelegate: NSObject, NSApplicationDelegate {
     weak var model: WitnessAppModel?
     var openMainWindow: (() -> Void)?
+
     private var terminating = false
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -92,6 +101,7 @@ private struct WitnessMenu: View {
     @EnvironmentObject private var model: WitnessAppModel
     @EnvironmentObject private var updater: AppUpdater
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Text("Ruru: \(model.statusText)")
@@ -108,8 +118,30 @@ private struct WitnessMenu: View {
             }
         }.disabled(model.busy || model.internetBusy)
         Divider()
+        // Without a Dock icon there is no app menu, so About lives here too.
+        Button("About Ruru") { RuruAboutPanel.show() }
+        Button("Settings…") {
+            NSApplication.shared.activate()
+            openSettings()
+        }
         Button("Check for Updates…") { updater.checkForUpdates() }
             .disabled(!updater.canCheckForUpdates)
         Button("Quit Ruru") { NSApplication.shared.terminate(nil) }
+    }
+}
+
+/// The standard About panel, with a link to release notes in its credits.
+@MainActor
+enum RuruAboutPanel {
+    static func show() {
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
+        let credits = NSAttributedString(string: "Release Notes", attributes: [
+            .link: URL(string: "https://github.com/johnwatso/ruru/releases")!,
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            .paragraphStyle: style
+        ])
+        NSApplication.shared.activate()
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [.credits: credits])
     }
 }

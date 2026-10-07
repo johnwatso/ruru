@@ -63,24 +63,21 @@ public struct WitnessServiceCredential: Sendable {
     public let clusterID: String
     public let token: String
     public let primaryPreference: WitnessPrimaryPreference
-    public init(clusterID: String, token: String, primaryPreference: WitnessPrimaryPreference = .init()) {
+    public let coordinationPolicy: CoordinationPolicy
+    public init(clusterID: String, token: String, primaryPreference: WitnessPrimaryPreference = .init(), coordinationPolicy: CoordinationPolicy = .init()) {
         self.clusterID = clusterID
         self.token = token
         self.primaryPreference = primaryPreference
+        self.coordinationPolicy = coordinationPolicy
     }
 }
 
-struct WitnessRouter: Sendable {
-    let store: LeaseStore
+struct WitnessAuthorization: Sendable {
     private let codes: [String: Data]
-    private let policies: [String: WitnessServicePolicy]
     private static let authContext = Data("SwiftMesh-witness-auth-v1".utf8)
+    init() { codes = [:] }
 
-    init(store: LeaseStore, clusterID: String, token: String) throws {
-        try self.init(store: store, services: [WitnessServiceCredential(clusterID: clusterID, token: token)])
-    }
-
-    init(store: LeaseStore, services: [WitnessServiceCredential]) throws {
+    init(services: [WitnessServiceCredential]) throws {
         guard services.count <= 32,
               Set(services.map(\.clusterID)).count == services.count,
               Set(services.map(\.token)).count == services.count else { throw WitnessError.invalidConfiguration }
@@ -90,18 +87,48 @@ struct WitnessRouter: Sendable {
                   !service.clusterID.contains(where: { $0.isNewline }),
                   service.token.utf8.count >= 32, service.token.utf8.count <= 512,
                   !service.token.contains(where: \.isWhitespace),
-                  service.primaryPreference.isValid else { throw WitnessError.invalidConfiguration }
+                  service.primaryPreference.isValid, service.coordinationPolicy.isValid else { throw WitnessError.invalidConfiguration }
             let key = SymmetricKey(data: Data(service.token.utf8))
             codes[service.clusterID] = Data(HMAC<SHA256>.authenticationCode(for: Self.authContext, using: key))
         }
-        self.store = store
         self.codes = codes
+    }
+    func cluster(for header: String?) -> String? {
+        guard let header, header.hasPrefix("Bearer "), header.utf8.count <= 519 else { return nil }
+        let suppliedKey = SymmetricKey(data: Data(header.dropFirst(7).utf8))
+        var matched: String?
+        for (cluster, code) in codes {
+            if HMAC<SHA256>.isValidAuthenticationCode(code, authenticating: Self.authContext, using: suppliedKey) {
+                matched = cluster
+            }
+        }
+        return matched
+    }
+}
+
+struct WitnessRouter: Sendable {
+    let store: LeaseStore
+    private let authorization: WitnessAuthorization
+    let services: [WitnessServiceCredential]
+    let catalogue: CoordinationCatalogue
+    private let policies: [String: WitnessServicePolicy]
+
+    init(store: LeaseStore, clusterID: String, token: String) throws {
+        try self.init(store: store, services: [WitnessServiceCredential(clusterID: clusterID, token: token)])
+    }
+
+    init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil) throws {
+        authorization = try WitnessAuthorization(services: services)
+        self.services = services
+        self.store = store
+        self.catalogue = try catalogue ?? CoordinationCatalogue(services: services)
         policies = Dictionary(uniqueKeysWithValues: services.map {
             ($0.clusterID, WitnessServicePolicy(clusterID: $0.clusterID, preference: $0.primaryPreference))
         })
     }
 
     func route(_ request: HTTPRequest) async -> LeaseReply {
+        if request.path.hasPrefix("/v1/coordination/") { return await catalogue.route(request) }
         if request.method == "GET", request.path == "/health" || request.path.hasPrefix("/health?") {
             do {
                 let snapshot = try await store.snapshot()
@@ -111,7 +138,7 @@ struct WitnessRouter: Sendable {
             } catch { return .error("authority_unavailable", status: 503) }
         }
         if request.method == "POST", request.path == "/v1/service/policy" {
-            guard let allowedCluster = authorizedCluster(request.headers["authorization"]) else {
+            guard let allowedCluster = authorization.cluster(for: request.headers["authorization"]) else {
                 return .error("unauthorized", status: 401)
             }
             guard !request.body.isEmpty, request.body.count <= HTTPParser.maxBodyBytes,
@@ -127,27 +154,15 @@ struct WitnessRouter: Sendable {
               let action = LeaseAction(rawValue: String(request.path.dropFirst("/v1/lease/".count))) else {
             return .error("not_found", status: 404)
         }
-        guard let allowedCluster = authorizedCluster(request.headers["authorization"]) else {
+        guard let allowedCluster = authorization.cluster(for: request.headers["authorization"]) else {
             return .error("unauthorized", status: 401)
         }
         guard !request.body.isEmpty, request.body.count <= HTTPParser.maxBodyBytes,
               let payload = try? JSONDecoder().decode(LeaseRequest.self, from: request.body) else {
             return .error("invalid_request", status: 400)
         }
-        guard codes[payload.clusterID] != nil else { return .error("unknown_cluster", status: 403) }
+        guard policies[payload.clusterID] != nil else { return .error("unknown_cluster", status: 403) }
         guard payload.clusterID == allowedCluster else { return .error("forbidden_cluster", status: 403) }
         return await store.apply(action, request: payload)
-    }
-
-    private func authorizedCluster(_ header: String?) -> String? {
-        guard let header, header.hasPrefix("Bearer "), header.utf8.count <= 519 else { return nil }
-        let suppliedKey = SymmetricKey(data: Data(header.dropFirst(7).utf8))
-        var matched: String?
-        for (cluster, code) in codes {
-            if HMAC<SHA256>.isValidAuthenticationCode(code, authenticating: Self.authContext, using: suppliedKey) {
-                matched = cluster
-            }
-        }
-        return matched
     }
 }

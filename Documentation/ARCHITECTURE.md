@@ -15,6 +15,27 @@ the status window. Listener pause/restart preserves the same authority epoch and
 leases. Process restart creates a new monotonic epoch, waits 30 seconds if the
 durable database records outstanding ownership, and refuses earlier-epoch renewals.
 
+## Coordinator direction
+
+Ruru's intended direction is a general service coordinator, with lease guarding
+as its first implemented capability. Future development should preserve room
+for application-neutral discovery, resource catalogues, routing, policy and work
+coordination. SwiftBot recordings are an initial use case for this direction.
+The extension boundaries and adoption stages are recorded in
+[Coordination](COORDINATION.md). The first opt-in resource catalogue is implemented
+in a separate in-memory Swift actor; authenticated discovery, reports and paged
+reads are documented in [the v1 contract](COORDINATION_API.md). Operator policy
+persists by stable service metadata ID. Observations expire monotonically and
+start empty after process restart. No lease database schema or commit path is
+changed. SwiftBot now has an opt-in client that reports recording-library endpoints
+and combines their contents in its own Recordings view, independently of bot
+leadership. All media stays on SwiftBot hosts; Ruru carries only the directory.
+Paired clients can propose their own HTTPS origin through the generic enrollment
+route. Bounded ephemeral requests appear under their service; only local operator
+approval checkpoints and publishes an enabled allowlist. SwiftBot offers this
+sharing choice during failover pairing using the existing Ruru credentials.
+Managed work, replication and coordinator routing decisions remain future work.
+
 ## Wire compatibility
 
 Routes are `/v1/lease/acquire`, `/v1/lease/renew`, `/v1/lease/release`.
@@ -38,8 +59,10 @@ existing external HTTPS route can also be used.
 The TCP listener accepts at most 32 concurrent requests, at most 8 KiB of headers
 and 4 KiB of body, with a five-second read/response deadline. Duplicate headers,
 ambiguous lengths, chunked requests, and pipelining are rejected. One request is
-served per connection. Startup has a bounded timeout; failures are visible in the
-native status window.
+served per connection. At most four classified coordination connections are
+admitted within the existing 32-connection budget; overflow returns 429. Requests
+without a complete line still share the total admission budget. Startup has a
+bounded timeout; failures are visible in the native status window.
 
 ## Durability and fencing
 
@@ -101,12 +124,12 @@ Activity use the same label; the full node ID is available in Bot Details.
 Deployment target 15.0 applies to the app, framework, and test target. Release is
 universal (Intel and Apple silicon). All UI uses APIs available on Sequoia; no
 macOS 26-only materials, AI, video processing, or bundled web framework is used.
-The UI refreshes once per second; the service only performs lease requests and
-small DuckDB transactions. Resource usage has not been benchmarked on the Mac mini.
+The UI refreshes once per second; lease requests use small DuckDB transactions.
+Resource reporting uses bounded batches and a separate actor with no I/O. Resource usage has not been benchmarked on the Mac mini.
 
 The initial app uses a logged-in user session and optional `SMAppService.mainApp`
-login registration. **Show in Dock** defaults off and changes activation policy
-on Save without restarting the listener. The menu bar remains available; the
+login registration. **Show Ruru in** defaults to Menu Bar and changes activation policy
+immediately without restarting the listener. The menu bar remains available; the
 Dock icon reopens the window. Closing it does not stop the service. A standalone
 pre-login daemon or crash-restarting helper can be added later if required; the
 UI-free WitnessKit boundary leaves that possible without changing lease semantics.
@@ -180,10 +203,22 @@ build/source dependency on either app or a UI framework.
 
 Overview summarizes the authority and all guarded services. Guarding lists
 configured services and opens each service’s owner/term/countdown, known servers,
-connection details and scoped activity. Internet Access owns Cloudflare setup, public/local transport and
+connection details and scoped activity. Coordination starts with app/service
+cards; each opens its own feature settings, connection details, resource locations
+and fresh/stale reports. Service creation is shared with Guarding. Internet Access
+owns Cloudflare setup, public/local transport and
 pause/resume. Activity keeps its search/header above a scrolling ownership
-history. Settings edits a separate draft and commits only on Save. Connection
-and API credentials stay in sheets. Navigation identity follows the selected
+history. Settings is a separate SwiftUI Settings window with SwiftMiner-style top
+icon tabs for General and Updates. General groups app presence and startup;
+Internet Access owns the connection settings sheet. Preferences share the lifetime
+app model/updater and apply each change immediately; saves are serialised and
+failures restore the saved value. Each window saves only its own fields, preserving concurrent preference/connection edits. Settings → Backup
+owns snapshots, export and the explicit restore described in STORAGE.md. Ruru follows the
+system appearance; an `appearance` key saved by earlier builds is ignored and
+dropped on the next save. The app menu (⌘,) and menu bar open the same
+preferences window without changing console navigation. About Ruru (app menu
+and menu bar) opens the standard About panel. Connection and API
+credentials stay in sheets. Navigation identity follows the selected
 page, while service lifetime remains owned by the app model.
 
 All UI uses macOS 15 APIs; macOS 26-only glass effects/buttons are not used. The

@@ -33,8 +33,9 @@ public actor LeaseStore {
             for row in 0..<leases.rowCount {
                 let term = try leases.integer(2, row: row), expiry = try leases.number(3, row: row)
                 guard LeaseDatabaseSetup.validTerm(term), expiry >= 0 else { throw Self.damagedLease() }
-                let owner = try leases.string(1, row: row)
-                if !owner.isEmpty && expiry > 0 { owned = true }
+                // Released leases store expiry 0. A non-zero expiry is a live or
+                // restored lease (restores are ownerless), so both quarantine.
+                if expiry > 0 { owned = true }
             }
             // Missing tables also fail startup. Ordinary startup never creates
             // empty replacements for missing durable state.
@@ -138,6 +139,53 @@ public actor LeaseStore {
                     term: try history.integer(4, row: row), nodeName: WitnessNodeName.normalized(history[5].cast(to: String.self)[row])))
             }
             return WitnessSnapshot(recoverySeconds: max(0, recoveringUntil - now), leases: leases, events: events)
+        }
+    }
+
+    /// A consistent, secret-free copy of terms, history and reported names.
+    public func makeSnapshot() throws -> LeaseSnapshot {
+        try database.open { connection in
+            let leaseRows = try connection.query("SELECT cluster, owner, term, expires FROM leases ORDER BY cluster")
+            var leases: [LeaseSnapshot.Lease] = []
+            for row in 0..<leaseRows.rowCount {
+                let term = try leaseRows.integer(2, row: row)
+                try validateStoredTerm(term, expiry: try leaseRows.number(3, row: row))
+                leases.append(.init(clusterID: try leaseRows.string(0, row: row),
+                                    ownerNodeID: try leaseRows.string(1, row: row), term: term))
+            }
+            let eventRows = try connection.query("SELECT id, time, action, cluster, node, term FROM events ORDER BY id")
+            var events: [LeaseSnapshot.Event] = []
+            for row in 0..<eventRows.rowCount {
+                events.append(.init(id: try eventRows.integer(0, row: row),
+                                    time: Date(timeIntervalSince1970: try eventRows.number(1, row: row)),
+                                    action: try eventRows.string(2, row: row), clusterID: try eventRows.string(3, row: row),
+                                    nodeID: try eventRows.string(4, row: row), term: try eventRows.integer(5, row: row)))
+            }
+            let nameRows = try connection.query("SELECT cluster, node, name FROM node_names ORDER BY cluster, node")
+            var names: [LeaseSnapshot.NodeName] = []
+            for row in 0..<nameRows.rowCount {
+                names.append(.init(clusterID: try nameRows.string(0, row: row), nodeID: try nameRows.string(1, row: row),
+                                   name: try nameRows.string(2, row: row)))
+            }
+            let snapshot = LeaseSnapshot(createdAt: Date(), leases: leases, events: events, nodeNames: names)
+            try snapshot.validate()
+            return snapshot
+        }
+    }
+
+    /// Checkpoints and returns every stored term, for a restore that is about to
+    /// replace this database. Call only after the listener has stopped.
+    public func checkpointedTerms() throws -> [String: Int64] {
+        try database.open { connection in
+            try database.execute(connection, "CHECKPOINT")
+            let result = try connection.query("SELECT cluster, term FROM leases")
+            var terms: [String: Int64] = [:]
+            for row in 0..<result.rowCount {
+                let term = try result.integer(1, row: row)
+                guard LeaseDatabaseSetup.validTerm(term) else { throw Self.damagedLease() }
+                terms[try result.string(0, row: row)] = term
+            }
+            return terms
         }
     }
 

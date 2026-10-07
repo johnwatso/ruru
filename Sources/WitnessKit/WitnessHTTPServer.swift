@@ -4,8 +4,10 @@ import Network
 /// A small HTTP/1 listener for a dedicated HTTPS tunnel or reverse proxy.
 /// Connections, request size, and read duration are bounded for older Macs.
 public actor WitnessHTTPServer {
+    private var configuringServices = false
     private var router: WitnessRouter
-    private let queue = DispatchQueue(label: "com.swiftmesh.witness.http", qos: .utility)
+    public nonisolated let catalogue: CoordinationCatalogue
+    private let queue = DispatchQueue(label: "dev.ruruapp.ruru.http", qos: .utility)
     private var listener: NWListener?
     private var listenerID = UUID()
     private var startContinuation: CheckedContinuation<UInt16, any Error>?
@@ -17,24 +19,35 @@ public actor WitnessHTTPServer {
         let network: NWConnection
         var buffer = Data()
         let timeout: Task<Void, Never>
+        var coordination = false
     }
 
     public init(store: LeaseStore, clusterID: String, token: String) throws {
         router = try WitnessRouter(store: store, clusterID: clusterID, token: token)
+        catalogue = router.catalogue
     }
 
-    public init(store: LeaseStore, services: [WitnessServiceCredential]) throws {
-        router = try WitnessRouter(store: store, services: services)
+    public init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil) throws {
+        router = try WitnessRouter(store: store, services: services, catalogue: catalogue)
+        self.catalogue = router.catalogue
     }
 
     /// Changes admission only; the database, lease deadlines and listener stay alive.
-    public func configureServices(_ services: [WitnessServiceCredential]) throws {
-        router = try WitnessRouter(store: router.store, services: services)
+    public func configureServices(_ services: [WitnessServiceCredential]) async throws {
+        guard !configuringServices else { throw WitnessError.invalidConfiguration }
+        let updated = try WitnessRouter(store: router.store, services: services, catalogue: catalogue)
+        configuringServices = true
+        defer { configuringServices = false }
+        try await catalogue.configureServices(services)
+        router = updated
     }
 
     public func start(bindAddress: String = "127.0.0.1", port: UInt16 = 38990) async throws -> UInt16 {
         guard listener == nil, ["127.0.0.1", "0.0.0.0", "::1"].contains(bindAddress),
               let endpointPort = NWEndpoint.Port(rawValue: port) else { throw WitnessError.invalidConfiguration }
+        let beforePreparation = listenerID
+        try await configureServices(router.services)
+        guard listener == nil, listenerID == beforePreparation else { throw WitnessError.stopped }
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(bindAddress), port: endpointPort)
         parameters.allowLocalEndpointReuse = false
@@ -139,6 +152,16 @@ public actor WitnessHTTPServer {
             send(.error("request_too_large", status: 413), id: id)
             return
         }
+        if connections[id]?.coordination == false,
+           let end = buffer.range(of: Data("\r\n".utf8)),
+           let line = String(data: buffer[..<end.lowerBound], encoding: .utf8),
+           line.split(separator: " ").dropFirst().first?.hasPrefix("/v1/coordination/") == true {
+            guard connections.values.filter(\.coordination).count < 4 else {
+                send(.error("coordination_busy", status: 429), id: id)
+                return
+            }
+            connections[id]?.coordination = true
+        }
         switch HTTPParser.parse(buffer) {
         case .incomplete:
             if complete { close(id) } else { receive(id) }
@@ -151,7 +174,7 @@ public actor WitnessHTTPServer {
 
     private func send(_ reply: LeaseReply, id: UUID) {
         let reasons = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict",
-                       411: "Length Required", 413: "Content Too Large", 431: "Request Header Fields Too Large", 503: "Service Unavailable"]
+                       429: "Too Many Requests", 411: "Length Required", 413: "Content Too Large", 431: "Request Header Fields Too Large", 503: "Service Unavailable"]
         var bytes = Data("HTTP/1.1 \(reply.status) \(reasons[reply.status] ?? "Error")\r\nContent-Type: application/json\r\nContent-Length: \(reply.body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".utf8)
         bytes.append(reply.body)
         connections[id]?.network.send(content: bytes, completion: .contentProcessed { [weak self] _ in

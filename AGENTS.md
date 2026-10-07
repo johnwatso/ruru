@@ -3,6 +3,12 @@
 Read `Documentation/ARCHITECTURE.md` first. This is a separate native macOS app
 and lease authority, not a SwiftBot bot/worker and not a root Swift package.
 
+- Ruru's long-term direction is a general, capability-based service coordinator.
+  Read `Documentation/COORDINATION.md` before extending coordination features.
+  Keep shared identities and contracts application-neutral; add app-specific
+  behavior through focused Swift capability modules. Lease guarding is the first
+  capability, and new work must preserve its safety and resource bounds.
+
 - Support macOS 15 (Sequoia), Intel x86_64 and Apple silicon arm64. The initial
   deployment is a 2012 Intel Mac mini with OpenCore, 16 GB RAM, in Invercargill.
 - Read `Documentation/DESIGN.md` before UI changes. Match SwiftBot’s current

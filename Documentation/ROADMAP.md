@@ -1,5 +1,308 @@
 # Development log and next steps
 
+## 2026-10-08 — Backups, snapshots and safe restore
+
+- Moved the live lease database into `Application Support/Ruru/Authority/`,
+  excluded from Time Machine. A backed-up `authority-created` marker makes a
+  later missing database fail closed instead of starting at term zero.
+- Added daily secret-free lease snapshots (`Snapshots/`, newest 14), Export
+  (settings + current terms/history, no tokens or tunnel identity) and Restore
+  from an export or snapshot. Restore archives the current database and
+  rebuilds it with every term raised to `max(backup, current) + 1,000,000`,
+  ownerless, so the next open quarantines for a full lease. LeaseStore now
+  quarantines on any non-zero stored expiry (released leases store 0).
+- New Settings → Backup tab with a confirmation sheet requiring explicit
+  acknowledgements.
+- Debug build and full suite passed (106 tests, zero failures; 8 new backup
+  tests cover raised terms, quarantine, archives, a missing database, an open
+  authority, damaged/foreign files, tunnel stripping, rotation and the
+  fail-closed marker). Checked the Backup tab layout in the isolated preview,
+  where actions are disabled. Not exercised: Export/Restore panels and the
+  restore sheet in a real (non-preview) run, Time Machine itself, and
+  SwiftBot's behaviour on a +1,000,000 term jump.
+
+## 2026-10-08 — App presence picker replaces Appearance
+
+- Removed the System/Light/Dark Appearance picker; Ruru always follows the
+  system appearance. An `appearance` key saved by earlier builds is ignored and
+  dropped on the next save (new test covers decoding and re-encoding).
+- Replaced the Show in Dock switch with an Otter-style “Show Ruru in” picker:
+  Dock + Menu Bar or Menu Bar, with a selection-specific description. It still
+  stores `showInDock`, so existing choices carry over; no Dock-only mode.
+- Debug build and full suite passed (98 tests, zero failures); checked the
+  General tab in the isolated preview.
+
+## 2026-10-08 — dev.ruruapp.ruru bundle identifier
+
+- Changed bundle identifiers to `dev.ruruapp.ruru` (app), `.kit` and `.tests`;
+  internal queue labels to `dev.ruruapp.ruru.*`; Cloudflare User-Agent to
+  `Ruru/0.2`. Regenerated the project with XcodeGen.
+- At the owner's request (no deployments yet), also renamed the Keychain service
+  to `dev.ruruapp.ruru` and the data folder to `Application Support/Ruru`, with
+  no migration. Development data under `SwiftMeshWitness` and Keychain items for
+  `com.swiftmesh.witness` are left untouched and unused; delete them manually.
+- Debug build and full suite passed (98 tests, zero failures); built Info.plist
+  reports `dev.ruruapp.ruru`. Keychain access prompts on an existing install and
+  Release/universal signing were not verified.
+
+## 2026-10-08 — Instant-apply Settings and standard About panel
+
+- Settings now applies each change immediately and the Save/Revert bar is gone.
+  Preference saves run one after another and write the latest values, so quick
+  edits cannot trip the model's single-save guard; a failed save shows an inline
+  warning and restores the saved value. Launch at login reflects the real
+  registration state after each change. Update preferences apply directly.
+- Removed the About tab. About Ruru (app menu and menu bar menu, since the app
+  menu is hidden without a Dock icon) opens the standard About panel with a
+  Release Notes link.
+- Debug build and full suite passed (98 tests, zero failures). In
+  `--preview-screenshots`, choosing Dark applied instantly and the About panel
+  opened from the app menu. The menu bar About item was reviewed in code only.
+  Login registration and live Sparkle preference writes were not exercised.
+
+## 2026-10-08 — Native grouped Settings layout
+
+- Rebuilt the Settings window tabs as native grouped forms instead of nested
+  console cards: leading labels with secondary descriptions, trailing switches,
+  pickers and buttons, section footnotes, and a 540pt window that sizes to each
+  tab. Updates uses a channel menu plus a Last checked/Check Now row; About shows
+  the app icon, version and build. Save/Revert is a compact footer, hidden on
+  About unless a draft is pending. Draft and save behaviour are unchanged.
+- Debug build and the full Xcode suite passed (98 tests, zero failures). Checked
+  all three tabs in light and dark appearance with `--preview-screenshots`.
+  Sequoia/Intel rendering and a universal Release build were not re-verified
+  for this layout-only change.
+
+## 2026-10-08 — Separate native preferences window
+
+- Moved Settings out of the console sidebar into a native SwiftUI Settings scene,
+  following SwiftMiner’s compact top icon tabs. General (appearance and startup),
+  Updates and About share one draft with persistent Save/Revert controls. The
+  application menu (⌘,), menu bar and Overview actions open the preferences
+  window without changing console navigation. Operational connection controls moved
+  to Internet Access → Connection Settings in the console. Each save applies only
+  its own fields, preserving edits saved in the other window. The app model and
+  updater remain shared with the main window and lifetime menu bar service.
+- Added a saved System/Light/Dark appearance preference, defaulting to System for
+  existing configurations. Appearance and Dock visibility apply on Save without
+  restarting the listener or tunnel. Retained startup/login controls, connection
+  settings and the existing Stable/Beta and background update preferences.
+- XcodeGen, Debug and universal Release builds passed. The full Xcode suite passed
+  with 98 tests and zero failures before the final tab regrouping/connection move;
+  the final presentation was rebuilt and verified manually. New temporary-storage coverage verifies appearance
+  persistence while preserving service identities and policies; legacy decoding
+  retains System appearance. `lipo` confirmed x86_64 and arm64 in the app and
+  WitnessKit framework; both app slices target macOS 15.0. Sparkle’s read-only
+  preflight passed with the expected missing publishing public key.
+- Checked the actual native preferences window in an isolated preview: ⌘, and
+  application-menu opening/reopening, General’s combined appearance/startup
+  controls, tab drafts, Revert, Save via ⌘S, light/dark appearance and disabled
+  preview update controls. Checked the relocated Connection Settings sheet and
+  verified a saved connection edit survives saving a pending General draft.
+  Closing preferences preserved console navigation. Screenshots and build/
+  test logs are retained under `.artifacts/settings-preview` and `.artifacts`.
+  Menu-bar opening with the main window closed was reviewed in code, not verified
+  independently through the UI automation. Intel/Sequoia execution, live feeds
+  and installation remain unverified. Final builds used signing disabled after
+  Finder metadata on cached Debug bundles blocked local Xcode signing; the manual
+  preview used an ad-hoc-signed temporary copy outside Documents. No production settings, Keychain, login
+  items, storage, tunnels or release signing/publishing were changed.
+
+## 2026-10-07 — SwiftBot standby status homepage
+
+- Simplified the sibling SwiftBot standby WebUI to a separate status page for
+  all visitors, selected by runtime ownership. A small public role probe restores
+  the normal dashboard on takeover and removes it on demotion. Recording/media
+  serving and mesh synchronization remain independent of the browser surface;
+  Ruru still carries only discovery/ownership metadata.
+- SwiftBot XcodeGen/Debug build and 89 focused tests passed, including new raw
+  HTTP coverage for the status page, role changes, write denial and retained
+  media forwarding. Checked the isolated standby preview and automatic takeover/
+  demotion with a bookmarked admin page and open dialog. Screenshots retained
+  under `.artifacts/standby-webui`; setup/design guidance updated. No Ruru runtime
+  changes, real multi-Mac failover, deployment or production settings changes.
+
+## 2026-10-07 — WebUI-first SwiftBot pairing review
+
+- Redesigned the sibling SwiftBot WebUI Pair SwiftBot dialog and native Join
+  confirmation. Joining starts at WebUI → SwiftMesh → Pair SwiftBot; its local
+  recordings choice is carried to native confirmation and first-launch review.
+  The URL hint only preselects the choice, preserving local confirmation and
+  the existing pairing/lease contracts. Ruru operator approval stays explicit.
+- SwiftBot XcodeGen and latest Debug build passed, along with 87 focused tests,
+  inline JavaScript syntax and diff checks. Checked native dark/light confirmation,
+  sharing selection, paired state, first-launch review and WebUI copy/cancel in
+  isolated fixtures. Updated previews are under `.artifacts/max-pairing`.
+  No Ruru runtime changes, live John/Max pairing, deployment or production
+  credentials/settings changes. Previous universal Release validation still
+  applies to Ruru; no new Ruru build was required for this SwiftBot UI work.
+
+## 2026-10-07 — Max-side pairing preview
+
+- Added an isolated Debug screenshot scenario in the sibling SwiftBot checkout,
+  using its actual native Join confirmation and synthetic connection details.
+  Verified sharing selection, Max's own website and paired/Done state; screenshots
+  retained under `.artifacts/max-pairing`. SwiftBot XcodeGen/Debug build passed.
+- Preview actions use only in-memory fixture state. No Ruru runtime changes,
+  deployed pairing, production credentials or first-launch onboarding checks.
+
+## 2026-10-07 — Recording sharing during failover pairing
+
+- Added application-neutral authenticated origin enrollment using the existing
+  service connection. Clients can propose a website while reporting is off;
+  proposals cannot grant access. Ruru's service cards show pending counts, and
+  Website requests exposes exact-origin approval/rejection. Approval preserves
+  existing origins and checkpoints the enabled policy before publishing it.
+- Pending requests/rejection markers are ephemeral, capped at eight per service
+  and 64 total, with fixed 600-second monotonic expiry. Token rotation, service
+  removal and explicit disabling clear requests. The existing coordination
+  connection quota, request bounds and lease storage/ownership protocol remain.
+- SwiftBot offers a local sharing choice in Join confirmation and first-launch
+  pairing confirmation, including deep links. It reuses the inherited Ruru
+  connection and stable enrollment ID, requests its own website automatically,
+  then reports after approval. Failover and sharing remain separate choices;
+  Ruru never transports media. Updated both repositories' setup guidance.
+- XcodeGen and the full Debug Xcode suite passed: 97 tests, zero failures.
+  Coverage includes authentication/scope/version validation, pending/approval,
+  withdrawal, rejection/expiry, token/service revocation, per-service/global
+  capacity, leases with a full proposal queue, and persisted policy limits.
+  SwiftBot passed 101 focused tests, including real pairing with isolated
+  credentials and sharing persistence against stale settings saves. Release build
+  also passed with signing disabled; `lipo` verified x86_64 + arm64 slices in
+  the app and embedded WitnessKit framework, and the app targets macOS 15.0
+  in both slices. Execution on Intel/Sequoia remains unverified.
+- Native dark approval UI checked in a separate temporary preview bundle:
+  pending card count, exact website row, approval removes the request and adds
+  its allowed origin. Preview opens no storage, Keychain or listener. Actual
+  John/Max connectivity, SwiftBot pairing UI visuals, Intel/Sequoia execution
+  and mixed deployed versions were not exercised. Nothing was deployed;
+  production credentials, storage, DNS, tunnels and releases were untouched.
+
+## 2026-10-07 — SwiftBot combined recording libraries
+
+- Implemented the client in the sibling SwiftBot working tree. Each sharing Mac
+  reports one `swiftbot.recording-library.v1` / `library` location, using the
+  existing service-scoped v1 catalogue and stable enrollment node ID. Complete
+  recording lists come directly from peers, keeping Ruru's capacity independent
+  of file count. Ruru's shared contracts remain application-neutral.
+- SwiftBot's combined Recordings view and authenticated public media reads work
+  independently of Discord ownership. Playback follows the owning SwiftBot →
+  website SwiftBot → viewer. Ruru carries only endpoint/freshness metadata and
+  never receives recording lists, paths, thumbnails or media bytes. Browser URLs
+  cannot select the destination for mesh credentials.
+- Updated architecture, coordination, client API and integration guidance;
+  retained the original source review with an implementation follow-up. Setup
+  and limits are in SwiftBot's `Documentation/RECORDING_COORDINATION.md`.
+- Ruru XcodeGen and the full Debug Xcode suite passed: 92 tests, zero failures.
+  No Ruru runtime changes were needed for this integration. SwiftBot validation
+  is recorded in its own roadmap. No deployed John/Max setup, actual network
+  failover, Intel/Sequoia execution or new universal Release binary was checked.
+  Nothing was deployed; credentials, tunnels and release metadata were untouched.
+
+## 2026-10-07 — SwiftBot multi-node recordings review
+
+- Reviewed the clean SwiftBot checkout at `77152d8`: recording discovery,
+  public/mesh routing, playback authentication, registrations, failover roles,
+  identities and export boundaries. Recorded findings and a staged integration
+  in `SWIFTBOT_RECORDINGS_REVIEW.md` and linked it from the documentation index.
+- Identified missing public `/v1/media/*` forwarding, saved-role aggregation after
+  promotion, browser-controlled authenticated destinations, and limitations in
+  freshness, copy identity and remote exports. Ruru can supply independent
+  resource discovery; SwiftBot still owns reachable authenticated media serving.
+- Compared the proposal with the implemented bounded, ephemeral v1 catalogue.
+  Existing query-based playback URLs, rich metadata and full-library scale need
+  deliberate client/contracts work. No SwiftBot or Ruru runtime behavior changed.
+- XcodeGen and documentation diff checks passed; source review was static.
+  No builds, hosted tests, live
+  multi-Mac reproduction, credentials, production storage, tunnel changes or
+  deployments. Historical failure cause and Intel/Sequoia capacity remain
+  unverified; the review lists the required integration scenarios.
+
+## 2026-10-07 — Coordination organized by app and service
+
+- Replaced the shared catalogue page and service picker with separate app/service
+  cards. Each opens its own coordination feature settings, connection details,
+  resource reports and search, with a back action to the app/service list.
+  Service identity, admission policy and API scope remain unchanged.
+- Added Add Service directly to Coordination, reusing Guarding’s service creation
+  and credential mapping with coordination-specific presentation. Shared app
+  icons preserve the SwiftBot logo. Separate groups for the same app remain
+  independently configured service entries.
+- Separated screenshot fixtures into SwiftBot recordings and a Build Server
+  artifact service, illustrating the hierarchy without mixing resources between
+  apps. Core resource/catalogue contracts remain application-neutral; future
+  integrations can expose additional features within their own service pages.
+- Updated architecture, design and coordinator/client guidance with the app-first
+  console model. XcodeGen, Debug build and documentation diff checks passed.
+  Native dark preview verified app/service cards, both scoped detail pages,
+  per-service settings drafts and back navigation. The running authority was
+  left untouched; inspection used a separate temporary, ad-hoc-signed preview
+  bundle with no storage, Keychain, listener or updater activity.
+- This is a navigation/presentation change. No automated tests were added or
+  rerun; protocol/runtime behavior was not changed. Light/narrow layouts, a new
+  universal Release build and Intel/Sequoia execution were not validated here.
+
+## 2026-10-07 — Swift stale-owner fencing validation
+
+- Added five independently written Swift regression scenarios informed by etcd's
+  stale-owner example. Temporary DuckDB authorities and the authenticated JSON
+  router issue real Ruru grants; a test-only cooperating resource atomically
+  checks terms with its mutation. Rejected writes leave data and fence unchanged.
+- Covered delayed writes after takeover at the exact expiry boundary, stale
+  renew/release requests, same-node reacquisition, retained terms after authority
+  restart/quarantine, and independent service term scopes. A separate scenario
+  demonstrates that term comparison alone can accept expired work before the
+  successor's term reaches the resource, preserving the need for client deadlines.
+- Added `LEASE_REFERENCES.md` with source/license links, provenance, integration
+  requirements and validation limits. No upstream source, prose or assets were
+  copied/translated and no dependencies were added; the new Swift remains under
+  Ruru's MIT license. Future copied adaptations must retain upstream notices.
+- XcodeGen, the Debug build and the full Debug Xcode suite passed: 92 tests, zero failures,
+  including all five new scenarios. The test build compiled the app and framework
+  on arm64. The fixture has in-memory state; resource persistence, SwiftBot output,
+  Discord effects, actual machine pauses/network partitions and Intel/Sequoia
+  execution were not validated. No new universal Release build was performed.
+  Runtime lease behavior, schema and wire protocol remain unchanged.
+
+## 2026-10-07 — First general resource coordinator slice
+
+- Added an application-neutral, versioned resource/location catalogue alongside
+  lease guarding. Authenticated capability discovery, batches of up to eight
+  upserts/removals and revision-checked 20-location pages are scoped by service.
+  Recording and artifact examples exercise namespaces and multiple host locations
+  without application-specific fields in the core.
+- Operator opt-in defaults off. Saved policy uses stable service metadata IDs and
+  up to eight validated HTTPS origins. Removal/re-adding cannot transfer opt-in;
+  token rotation, disabling and narrower origins revoke affected observations.
+  Settings drafts preserve concurrent catalogue-policy edits. Policy changes
+  publish to the catalogue independently of the lease router/listener.
+- Observations live in a separate bounded Swift actor with no disk/network I/O.
+  ContinuousClock freshness lasts 90 seconds; locations expire after 600 seconds.
+  Empty node reports cannot revive old locations. A process restart starts empty;
+  listener restart in the same process preserves ageing. The lease schema,
+  locks, term/ownership behavior and quarantine are unchanged.
+- Added explicit per-node/service/global capacity bounds and at most four
+  classified coordination connections within the existing 32 total. Request
+  size and five-second deadlines remain unchanged. Unclassified connections
+  still share the total budget; this is not general flood protection.
+- Added the native Coordination page, service selection, Save/Cancel opt-in and
+  origin drafts, resource search, URL copy and fresh/stale states. Screenshot
+  mode includes recording/artifact fixtures. Native dark/light layouts, search,
+  invalid-origin feedback and disabling/clearing were checked in isolated
+  preview. No credentials, production storage, tunnel or login settings changed.
+- XcodeGen and the Debug build passed. The full Xcode suite passed 87 tests,
+  including new auth/version/isolation, monotonic expiry, namespace/location,
+  paging, atomic rejection, capacity, revocation, process restart and quarantine
+  cases. Loopback tests exercised 40 reports alongside 10 lease renewals and
+  four incomplete metadata connections alongside a successful lease request.
+  Tests caught and corrected a Swift exclusivity issue during origin pruning.
+- Added `COORDINATION_API.md` with client examples, limits, trust and retry rules.
+  SwiftBot reporting/playback integration is not implemented; real client
+  adoption, durable catalogues, routing, replication and managed operations
+  remain future work. Intel/Sequoia execution, target-Mac latency/resource
+  measurements, a new universal Release build and narrow-window visual checks
+  were not performed for this slice.
+
 ## 2026-10-07 — Simpler README purpose
 
 - Removed the explicit light/dark screenshot links; the README image still
@@ -15,6 +318,23 @@
 - Reviewed wording against the architecture and checked the documentation diff.
   Documentation-only change; no runtime tests, Release build or target-Mac
   validation performed.
+
+## 2026-10-07 — General coordinator direction
+
+- Recorded Ruru's intended direction as an application-neutral coordinator with
+  lease guarding as its first capability. Added `COORDINATION.md` covering shared
+  identities, versioned capability contracts, resource/location catalogues,
+  freshness, policy and eventual managed operations. SwiftBot recordings are a
+  first candidate use case, with a distinct second use case required to assess
+  the shared contract before implementation.
+- Added this direction to architecture, integration guidance, documentation
+  navigation and repository contributor instructions so future work preserves
+  lease compatibility, service isolation and bounded authority resources.
+- Broader coordination remains future, low-priority work. No runtime, schema,
+  protocol, UI or deployment change was made. Reviewed guidance against current
+  service identities, shared-token trust and listener limits; documentation
+  checks only, with no build, tests, Release or target-Mac validation required
+  for this design record.
 
 ## 2026-10-07 — Overview card alignment and sidebar cleanup
 

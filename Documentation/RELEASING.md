@@ -11,7 +11,7 @@ target-Mac resource measurements and a complete paired-bot failure drill remain 
 Ruru embeds Sparkle **2.9.5**, matching SwiftMiner, with these publishing inputs:
 
 - Xcode project/scheme: `Ruru.xcodeproj` / `Ruru`, configuration `Release`.
-- Bundle identifier: `com.swiftmesh.witness`; product: `Ruru.app`.
+- Bundle identifier: `dev.ruruapp.ruru` (formerly `com.swiftmesh.witness`); product: `Ruru.app`.
 - Stable source feed: `docs/appcast.xml`, served at
   `https://johnwatso.github.io/ruru/appcast.xml`.
 - Beta source feed: `docs/beta/appcast.xml`, served at

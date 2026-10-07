@@ -18,7 +18,7 @@ Ruru runs on a third Mac that both SwiftBot nodes can reach. It requires macOS 1
    in the preferred SwiftBot Primary's **SwiftMesh → Recovery and Pairing**.
    Both bots must use the same authority and cluster ID. A fresh SwiftBot Failover
    Join Code can carry the saved witness configuration to the Failover.
-4. In **Settings**, enable **Launch at login** and **Start the service automatically**,
+4. In **Settings → General**, enable **Launch at login** and **Start the service automatically**,
    then save the changes. macOS may require approval under System Settings
    → General → Login Items. The login option is off until you choose it.
 5. Keep the Mac and its internet connection running. Configure the Mac's power
@@ -35,8 +35,13 @@ the bots must stop output when their local permission expires. Launch at login
 requires a logged-in user session; this initial app is **not a pre-login daemon**
 and does not install a crash-restarting LaunchDaemon. See [Apple's login-item API](https://developer.apple.com/documentation/servicemanagement/smappservice/mainapp).
 
-To show the app icon in the Dock as well, enable **Settings → Appearance →
-Show in Dock** and save. Clicking that icon reopens the window. The menu bar
+Open the separate preferences window from the menu bar or **Ruru → Settings…**
+(⌘,). Overview’s More menu also opens Settings.
+Changes
+apply as soon as you make them. **About Ruru** is in the app menu and the menu bar menu.
+
+To show the app icon in the Dock as well, set **Settings → General →
+Show Ruru in** to **Dock + Menu Bar**. Clicking that icon reopens the window. The menu bar
 service remains available in both modes.
 
 ## Replace old SQLite storage
@@ -45,7 +50,7 @@ If Ruru reports **Existing SQLite authority storage was found**, choose
 **Set Up DuckDB**. Stop and unpair every participating client and stop the old
 witness before confirming the two acknowledgements. Use a new SwiftBot cluster
 ID; additional services receive fresh IDs automatically. **Archive and Set Up**
-preserves SQLite files under `~/Library/Application Support/SwiftMeshWitness/Legacy Archives/`,
+preserves SQLite files under `~/Library/Application Support/Ruru/Legacy Archives/`,
 creates DuckDB storage and rotates pairing tokens. Existing DuckDB storage is
 never overwritten. Ruru stays stopped, with automatic service startup disabled.
 
@@ -56,7 +61,7 @@ entries alone does not replace SQLite storage.
 
 ## Software updates
 
-Open **Settings → Software Updates** to choose Stable or Beta, enable background
+Open **Settings → Updates** to choose Stable or Beta, enable background
 update prompts, or opt in to automatic downloads, then save. **Check for Updates**
 is also available in the Ruru application menu and menu bar menu. Downloaded
 updates normally install when Ruru quits; a requested install/relaunch briefly
@@ -98,7 +103,7 @@ and its public health endpoint returned ready. The DuckDB revision and redesigne
 console still need validation on that Mac.
 
 For an existing externally managed HTTPS route, keep Internet Access unconfigured
-and enter its URL in Settings. If the endpoint has Cloudflare Access, its policy
+and enter its URL in **Internet Access → Connection Settings…**. If the endpoint has Cloudflare Access, its policy
 must permit authenticated machine requests rather than require an interactive
 browser sign-in.
 

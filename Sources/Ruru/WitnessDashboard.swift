@@ -2,15 +2,15 @@ import SwiftUI
 import WitnessKit
 
 enum WitnessPage: String, CaseIterable, Identifiable {
-    case overview = "Overview", guarding = "Guarding", internet = "Internet Access", activity = "Activity", settings = "Settings"
+    case overview = "Overview", guarding = "Guarding", coordination = "Coordination", internet = "Internet Access", activity = "Activity"
     var id: Self { self }
     var symbol: String {
         switch self {
         case .overview: "square.grid.2x2"
         case .guarding: "checkmark.shield"
+        case .coordination: "square.stack.3d.up"
         case .internet: "globe"
         case .activity: "clock.arrow.circlepath"
-        case .settings: "gearshape"
         }
     }
 }
@@ -52,12 +52,12 @@ struct WitnessDashboard: View {
             WitnessOverview(onNavigate: { model.selectedPage = $0 }, onStop: { confirmingStop = true })
         case .guarding:
             WitnessGuardingPage()
+        case .coordination:
+            WitnessCoordinationPage()
         case .internet:
             WitnessInternetPage(onSetup: { showInternet = true }, onConnect: { model.selectedPage = .guarding })
         case .activity:
             WitnessActivityPage()
-        case .settings:
-            WitnessSettingsPage(configuration: model.configuration)
         }
     }
 }
@@ -159,6 +159,7 @@ private struct WitnessInternetPage: View {
     let onConnect: () -> Void
     @State private var error: String?
     @State private var confirmingPause = false
+    @State private var showingConnectionSettings = false
 
     var body: some View {
         ScrollView {
@@ -209,7 +210,10 @@ private struct WitnessInternetPage: View {
                 })
                 ConsoleSection("Connection") {
                     VStack(spacing: 0) {
-                        ConsoleValueRow(title: "Local listener", value: model.localURL, monospaced: true)
+                        ConsoleSettingRow(title: "Local listener", subtitle: model.localURL) {
+                            Button("Connection Settings…") { showingConnectionSettings = true }
+                                .buttonStyle(.bordered).disabled(model.busy || model.internetBusy)
+                        }
                         Divider().padding(.leading, 16)
                         ConsoleValueRow(title: "Public transport", value: model.configuration.publicEndpoint.isEmpty ? "Not configured" : "HTTPS")
                         Divider().padding(.leading, 16)
@@ -222,6 +226,9 @@ private struct WitnessInternetPage: View {
                 }
             }.padding(.horizontal, 36).padding(.top, 32).padding(.bottom, 40)
                 .frame(maxWidth: 1120, alignment: .leading).frame(maxWidth: .infinity)
+        }
+        .sheet(isPresented: $showingConnectionSettings) {
+            WitnessConnectionSettingsSheet(configuration: model.configuration).environmentObject(model)
         }
         .confirmationDialog("Pause public access?", isPresented: $confirmingPause) {
             Button("Pause Tunnel", role: .destructive) {

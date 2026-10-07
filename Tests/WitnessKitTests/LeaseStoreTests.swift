@@ -13,7 +13,7 @@ final class TestClock: @unchecked Sendable {
 
 final class LeaseStoreTests: XCTestCase {
     private func location() throws -> URL {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("SwiftMeshWitnessTests-\(UUID().uuidString)")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("RuruTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
         return folder.appendingPathComponent("leases.duckdb")

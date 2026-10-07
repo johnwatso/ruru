@@ -37,6 +37,26 @@ struct WitnessConfiguration: Codable, Equatable {
     // inherit another service's preference, even when its cluster ID is reused.
     var servicePrimaryPreferences: [String: WitnessPrimaryPreference] = [:]
 
+    var serviceCoordinationPolicies: [String: CoordinationPolicy] = [:]
+
+    func coordinationPolicy(for serviceID: String) -> CoordinationPolicy {
+        serviceCoordinationPolicies[serviceID] ?? .init()
+    }
+
+    mutating func approveCoordinationOrigin(_ origin: String, for serviceID: String) throws {
+        var policy = coordinationPolicy(for: serviceID)
+        policy.enabled = true
+        if !policy.allowedOrigins.contains(origin) { policy.allowedOrigins.append(origin) }
+        try setCoordinationPolicy(policy, for: serviceID)
+    }
+
+    mutating func setCoordinationPolicy(_ policy: CoordinationPolicy, for serviceID: String) throws {
+        guard guardedServices.contains(where: { $0.id == serviceID }), policy.isValid else {
+            throw WitnessStorage.ConfigurationError.invalidCoordinationPolicy
+        }
+        serviceCoordinationPolicies[serviceID] = policy
+    }
+
     func primaryPreference(for serviceID: String) -> WitnessPrimaryPreference {
         servicePrimaryPreferences[serviceID] ?? .init()
     }
@@ -65,6 +85,7 @@ struct WitnessConfiguration: Codable, Equatable {
         if id == "swiftbot" { primaryServiceRemoved = true }
         else { additionalServices.removeAll { $0.id == id } }
         servicePrimaryPreferences.removeValue(forKey: id)
+        serviceCoordinationPolicies.removeValue(forKey: id)
     }
 
     static func validNames(_ names: [String: String]) -> Bool {
@@ -76,7 +97,7 @@ struct WitnessConfiguration: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case clusterID, bindAddress, port, publicEndpoint, startAutomatically, showInDock, tunnel, nodeDisplayNames, primaryServiceName, primaryServiceRemoved, additionalServices, servicePrimaryPreferences
+        case clusterID, bindAddress, port, publicEndpoint, startAutomatically, showInDock, tunnel, nodeDisplayNames, primaryServiceName, primaryServiceRemoved, additionalServices, servicePrimaryPreferences, serviceCoordinationPolicies
     }
 
     init(from decoder: Decoder) throws {
@@ -92,11 +113,14 @@ struct WitnessConfiguration: Codable, Equatable {
         primaryServiceName = try values.decodeIfPresent(String.self, forKey: .primaryServiceName) ?? "SwiftBot"
         primaryServiceRemoved = try values.decodeIfPresent(Bool.self, forKey: .primaryServiceRemoved) ?? false
         additionalServices = try values.decodeIfPresent([GuardedService].self, forKey: .additionalServices) ?? []
+        serviceCoordinationPolicies = try values.decodeIfPresent([String: CoordinationPolicy].self, forKey: .serviceCoordinationPolicies) ?? [:]
         servicePrimaryPreferences = try values.decodeIfPresent([String: WitnessPrimaryPreference].self, forKey: .servicePrimaryPreferences) ?? [:]
     }
 
     var isValid: Bool {
         let services = guardedServices
+        guard Set(serviceCoordinationPolicies.keys).isSubset(of: Set(services.map(\.id))),
+              serviceCoordinationPolicies.values.allSatisfy(\.isValid) else { return false }
         guard Set(servicePrimaryPreferences.keys).isSubset(of: Set(services.map(\.id))),
               servicePrimaryPreferences.values.allSatisfy(\.isValid) else { return false }
         guard services.count <= 32, services.allSatisfy(\.isValid), additionalServices.allSatisfy({ $0.id != "swiftbot" }),
@@ -122,7 +146,7 @@ struct WitnessConfiguration: Codable, Equatable {
 enum WitnessStorage {
     static var directory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("SwiftMeshWitness", isDirectory: true)
+            .appendingPathComponent("Ruru", isDirectory: true)
     }
 
     static func load(from directory: URL = Self.directory) throws -> WitnessConfiguration {
@@ -150,12 +174,13 @@ enum WitnessStorage {
     }
 
     enum ConfigurationError: LocalizedError {
-        case invalid, invalidNodeName, persistence, invalidPrimaryPreference
+        case invalid, invalidNodeName, persistence, invalidPrimaryPreference, invalidCoordinationPolicy
         var errorDescription: String? {
             switch self {
             case .invalid: "Check the cluster ID, listener port, and HTTPS endpoint."
             case .invalidNodeName: "Choose a short name on one line for this server."
             case .persistence: "Ruru could not durably save its settings. Check storage access and free space."
+            case .invalidCoordinationPolicy: "Choose a configured service and up to eight HTTPS origins without paths or credentials."
             case .invalidPrimaryPreference: "Choose a guarded service and a valid server node ID of up to 128 bytes."
             }
         }

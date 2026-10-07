@@ -18,18 +18,44 @@
   Logs contain node IDs and terms, never bearer credentials or bot data.
 - `GET /health` exposes only readiness, with 503 during recovery/storage failure.
 
-Non-secret settings and `leases.duckdb` live under
-`~/Library/Application Support/SwiftMeshWitness/`. The bearer token stays in
-Keychain. An initialization marker prevents a missing database from silently
-becoming a fresh authority after restart. Preserve it and the database's terms
-across updates. **Do not delete or restore
-an older ownership database while bots are paired and active.** A disaster reset
-requires stopping every participating node across all services and coordinating a new authority configuration.
+Non-secret settings live in `~/Library/Application Support/Ruru/`; the live
+`leases.duckdb`, its markers, locks and archives live in its `Authority/`
+subfolder. The bearer token stays in Keychain. An initialization marker prevents
+a missing database from silently becoming a fresh authority after restart.
+Preserve it and the database's terms across updates. **Never copy an older
+ownership database back into place**; it would reissue terms bots have seen.
 
-The rename preserves bundle identifiers, Keychain accounts, settings paths and
-existing Cloudflare tunnel identities. The repository folder is `ruru`, the Xcode project and scheme are `Ruru`,
-and the application product is `Ruru.app`. Internal persisted identities remain
-`SwiftMeshWitness` for compatibility.
+## Backups
+
+- `Authority/` is excluded from Time Machine, so a Time Machine or Migration
+  Assistant restore cannot roll back terms. `authority-created`, beside the
+  settings, is backed up: if it exists while `Authority/` has no initialized
+  database, startup fails closed and points to Restore from Backup.
+- While the authority is open, Ruru writes a daily secret-free lease snapshot
+  (terms, last owners, history and reported names) to `Snapshots/`, keeping 14.
+  Snapshots are in Time Machine. Settings → Backup can also snapshot on demand.
+- **Export** writes one JSON file: settings plus a fresh snapshot (or the newest
+  file if the database is unavailable). It omits bearer tokens, Cloudflare
+  credentials and the Cloudflare tunnel identity.
+- **Restore** accepts an export or a bare snapshot. It stops the service, reads
+  and checkpoints current terms through the live store, closes it, then takes
+  both lifetime locks. It builds `leases.restoring.duckdb` beside the live file,
+  moves the current database/WAL to `Authority/Restore Archives/<time>/` (copying
+  the marker), and renames the rebuilt file into place. Every service's term is
+  `max(backup, current) + 1,000,000`; leases are ownerless with a non-zero expiry,
+  so the next open applies the full 30-second restart quarantine. Ownership and
+  deadlines are never restored. An interruption leaves the marker without a
+  database, which fails closed; repeating the restore is safe. Settings import
+  keeps this Mac's tunnel and listener. Existing Keychain tokens are reused;
+  services without one get a new token and must be paired again.
+- Restore requires that no other authority for those services is running. Ruru
+  cannot verify that; the confirmation sheet asks for it explicitly.
+
+The bundle identifier and Keychain service are `dev.ruruapp.ruru`; data lives in
+`~/Library/Application Support/Ruru/`. Before any deployment these replaced
+`com.swiftmesh.witness` and `SwiftMeshWitness` without migration. The repository folder is `ruru`, the Xcode project and scheme are `Ruru`,
+and the application product is `Ruru.app`. The DuckDB retired-SQLite marker keeps its
+original `SwiftMeshWitness` text, because it is compared byte-for-byte.
 
 This version deliberately does **not** migrate SQLite leases, names or history.
 If old SQLite storage or its initialization marker is present, startup refuses

@@ -46,6 +46,11 @@ never infer ownership from another server being unreachable. See [storage and
 fencing limits](STORAGE.md), especially the absence of exactly-once external
 effects and the full restart quarantine.
 
+For resources that can enforce ownership terms, see [fencing validation and
+design references](LEASE_REFERENCES.md). The protected resource must check its
+service-scoped fence atomically with the mutation and retain it durably. A term
+alone does not prove current permission; local deadlines still apply.
+
 A service token used for another configured cluster is rejected with 403. An
 unknown cluster is also rejected. Missing/incorrect credentials receive 401.
 `GET /health` reports only the readiness of the authority, without exposing
@@ -68,3 +73,17 @@ owner. Past participation is not proof of current uptime, and a standby server
 that never held ownership may not appear. Activity retains the last 256
 transitions across services. Probes, alerting, standby heartbeats and service
 adapters beyond SwiftBot are not implemented yet.
+
+Capability-based coordination builds alongside lease guarding. The first resource
+catalogue contract is implemented below; routing and managed operations remain
+future work. See [Coordination](COORDINATION.md) for the architectural boundaries.
+
+## Resource catalogue
+
+Clients may opt into [resource catalogue v1](COORDINATION_API.md) independently of
+lease acquisition. This reports generic recordings/artifacts and host locations,
+with configured HTTPS origins and expiring observations. Ruru does not store or
+stream resources. The first server-side slice and console are implemented;
+SwiftBot now has opt-in library reporting and a combined Recordings view with
+authenticated host-to-host playback. Ruru supplies the directory; media stays on
+SwiftBot servers. See the [SwiftBot convention](COORDINATION_API.md#swiftbot-combined-recording-libraries).
