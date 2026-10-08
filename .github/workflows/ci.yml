@@ -33,6 +33,9 @@ jobs:
       - name: Test RuruClient package
         run: swift test --package-path Clients/RuruClient
 
+      - name: Test lease example expiry
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Clients/examples/tests -v
+
       - name: Build universal Release
         run: >
           xcodebuild -project Ruru.xcodeproj -scheme Ruru -configuration Release

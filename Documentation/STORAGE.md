@@ -11,6 +11,11 @@
   After a restart Ruru waits out the longest stored grant before granting again.
   Databases created before per-service lengths gain a `duration` column (30 s)
   on first open.
+- Reducing a service's lease length never shortens permission already granted.
+  Renewals retain the later of the outstanding deadline and the new deadline,
+  including its persisted quarantine length. The shorter setting takes effect
+  as earlier permission ages out, or after a clean release/new acquisition.
+  This remains safe if the shortened renewal's response is lost.
 - History keeps the last 256 events per service, so one busy service cannot
   evict another's.
 - Ownership terms never decrease. Grants are acknowledged only after the DuckDB

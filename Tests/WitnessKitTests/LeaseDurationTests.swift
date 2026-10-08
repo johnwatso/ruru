@@ -70,4 +70,61 @@ final class LeaseDurationTests: XCTestCase {
         XCTAssertEqual(stored.events.filter { $0.clusterID == "busy" }.count, LeaseStore.eventsKeptPerService)
         XCTAssertEqual(stored.events.filter { $0.clusterID == "quiet" }.count, 2)
     }
+
+    func testShorterRenewalCannotInvalidateAnEarlierGrantWhenItsResponseIsLost() async throws {
+        let url = try location(), clock = TestClock(0)
+        var store: LeaseStore? = try LeaseStore(databaseURL: url, clock: clock.now)
+        let first = try grant(await store!.apply(.acquire,
+            request: LeaseRequest(clusterID: "bot", nodeID: "a", term: 0), leaseDuration: 300))
+        clock.advance(5)
+        // A still trusts its 300-second grant if this response never reaches it.
+        let shorter = try grant(await store!.apply(.renew,
+            request: LeaseRequest(clusterID: "bot", nodeID: "a", term: first.term), leaseDuration: 10))
+        XCTAssertEqual(shorter.expiresInSeconds, 295)
+        clock.advance(11)
+        let blocked = await store!.apply(.acquire,
+            request: LeaseRequest(clusterID: "bot", nodeID: "b", term: 0), leaseDuration: 10)
+        XCTAssertEqual(blocked.status, 409)
+        // Restart must retain the outstanding long permission too.
+        store = nil
+        let restarted = try LeaseStore(databaseURL: url, clock: clock.now)
+        let recovery = try await restarted.snapshot().recoverySeconds
+        XCTAssertEqual(recovery, 295)
+        clock.advance(295)
+        let successor = try grant(await restarted.apply(.acquire,
+            request: LeaseRequest(clusterID: "bot", nodeID: "b", term: 0), leaseDuration: 10))
+        XCTAssertGreaterThan(successor.term, first.term)
+        XCTAssertEqual(successor.expiresInSeconds, 10)
+    }
+
+    func testShorterLengthTakesEffectAfterEarlierPermissionAgesOut() async throws {
+        let clock = TestClock(0)
+        let store = try LeaseStore(databaseURL: location(), clock: clock.now)
+        let first = try grant(await store.apply(.acquire,
+            request: LeaseRequest(clusterID: "bot", nodeID: "a", term: 0), leaseDuration: 30))
+        clock.advance(5)
+        let shortened = try grant(await store.apply(.renew,
+            request: LeaseRequest(clusterID: "bot", nodeID: "a", term: first.term), leaseDuration: 10))
+        XCTAssertEqual(shortened.expiresInSeconds, 25)
+        clock.advance(20)
+        let settled = try grant(await store.apply(.renew,
+            request: LeaseRequest(clusterID: "bot", nodeID: "a", term: first.term), leaseDuration: 10))
+        XCTAssertEqual(settled.expiresInSeconds, 10)
+        clock.advance(10)
+        let successor = try grant(await store.apply(.acquire,
+            request: LeaseRequest(clusterID: "bot", nodeID: "b", term: 0), leaseDuration: 10))
+        XCTAssertGreaterThan(successor.term, first.term)
+    }
+
+    func testDamagedStoredDurationFailsClosedOnRestart() async throws {
+        for invalid in ["5", "301", "0", "-1"] {
+            let url = try location()
+            var store: LeaseStore? = try LeaseStore(databaseURL: url)
+            _ = await store!.apply(.acquire, request: LeaseRequest(clusterID: "bot", nodeID: "a", term: 0))
+            try await store!.executeStorageSQL("UPDATE leases SET duration=\(invalid)")
+            store = nil
+            XCTAssertThrowsError(try LeaseStore(databaseURL: url))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        }
+    }
 }

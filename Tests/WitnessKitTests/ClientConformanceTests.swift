@@ -4,7 +4,7 @@ import XCTest
 @testable import WitnessKit
 
 /// Runs the published RuruClient against the real server: the behaviour every
-/// client must handle. See Documentation/CLIENTS.md for the checklist.
+/// client must handle. See Documentation/INTEGRATIONS.md for the checklist.
 final class ClientConformanceTests: XCTestCase {
     private let token = String(repeating: "conformance-", count: 4)
 

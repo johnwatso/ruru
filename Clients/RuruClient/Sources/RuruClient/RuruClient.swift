@@ -25,8 +25,8 @@ public struct RuruConfiguration: Sendable {
 public struct RuruLease: Sendable, Equatable {
     public let term: Int64
     public let ownerNodeID: String
-    /// Measured from when the request was *sent*, so it is never later than
-    /// Ruru's own deadline. Stop work at this instant if a renewal hasn't landed.
+    /// Measured from request send time, with a safety margin for clock-rate
+    /// differences and stopping work. Every side effect must check this deadline.
     public let deadline: ContinuousClock.Instant
     public let duration: Duration
 
@@ -99,7 +99,20 @@ public actor RuruLeaseClient {
 
     /// Extends `lease`. Throws `ownershipLost` if it expired or changed hands.
     public func renew(_ lease: RuruLease) async throws -> RuruLease {
-        try await self.lease(.renew, term: lease.term)
+        guard lease.isValid else { throw RuruError.ownershipLost }
+        // A transport timeout is not an ownership deadline. Interrupt a stalled
+        // request at the earlier local deadline instead of waiting ten seconds.
+        return try await withThrowingTaskGroup(of: RuruLease.self) { group in
+            group.addTask { try await self.lease(.renew, term: lease.term) }
+            group.addTask {
+                try await Task.sleep(until: lease.deadline, clock: .continuous)
+                throw RuruError.ownershipLost
+            }
+            defer { group.cancelAll() }
+            let renewed = try await group.next()!
+            guard lease.isValid else { throw RuruError.ownershipLost }
+            return renewed
+        }
     }
 
     /// Gives up ownership so another server can take over without waiting.
@@ -135,9 +148,11 @@ public actor RuruLeaseClient {
     }
 
     /// Keeps ownership for as long as the calling task runs, reporting each
-    /// change to `onChange`. Renews at a third of the lease; if renewals fail it
-    /// reports `unavailable` no later than the local deadline. Cancelling the
-    /// task releases the lease (best effort) and returns.
+    /// change to `onChange`. Renews at a third of the lease and bounds renewal
+    /// waits by the local deadline, reporting loss when permission expires. Cancelling the
+    /// task reports standby, awaits the callback to stop/drain work, then
+    /// releases the lease (best effort). Callbacks must return promptly; workers
+    /// must independently enforce `lease.deadline` on every side effect.
     public func maintain(retryInterval: Duration = .seconds(5),
                          onChange: @escaping @Sendable (RuruLeaseState) async -> Void) async {
         var state: RuruLeaseState?
@@ -156,13 +171,17 @@ public actor RuruLeaseClient {
                     current = try await renew(lease)
                     await report(.owner(current!))
                 } catch RuruError.ownershipLost {
+                    if Task.isCancelled { break }
                     current = nil
                     await report(.standby)
                 } catch {
+                    if Task.isCancelled { break }
                     // Keep trying until the local deadline, then stop being owner.
                     var outcome = RuruLeaseState.unavailable(error as? RuruError ?? .transport("\(error)"))
                     retrying: while !Task.isCancelled, lease.isValid {
-                        try? await Task.sleep(for: min(.seconds(1), lease.duration / 10))
+                        let retryAt = min(lease.deadline, ContinuousClock.now + min(.seconds(1), lease.duration / 10))
+                        try? await Task.sleep(until: retryAt, clock: .continuous)
+                        guard !Task.isCancelled, lease.isValid else { break retrying }
                         do {
                             let renewed = try await renew(lease)
                             current = renewed
@@ -173,6 +192,7 @@ public actor RuruLeaseClient {
                             break retrying
                         } catch { continue }
                     }
+                    if Task.isCancelled { break }
                     if case .owner = outcome {} else { current = nil }
                     await report(outcome)
                 }
@@ -188,6 +208,12 @@ public actor RuruLeaseClient {
                 }
                 try? await Task.sleep(for: Self.jittered(retryInterval))
             }
+        }
+        // Stop and drain output before making ownership available to a successor.
+        // Use a fresh task so the callback can complete despite cancellation.
+        if state != .standby {
+            state = .standby
+            await Task { await onChange(.standby) }.value
         }
         // URLSession aborts requests from a cancelled task, so release from a
         // fresh task; otherwise the next owner waits for the lease to expire.
@@ -221,14 +247,20 @@ public actor RuruLeaseClient {
     private func lease(_ action: Action, term: Int64) async throws -> RuruLease {
         let sent = ContinuousClock.now
         let data = try await send("/v1/lease/" + action.rawValue, body: request(term: term))
-        guard let grant = try? JSONDecoder().decode(LeaseGrant.self, from: data), grant.expiresInSeconds > 0 else {
+        guard let grant = try? JSONDecoder().decode(LeaseGrant.self, from: data),
+              grant.expiresInSeconds.isFinite, grant.expiresInSeconds > 0, grant.expiresInSeconds <= 300,
+              grant.term > 0, grant.term < (1 << 62) else {
             throw RuruError.server(status: 200, code: "invalid_response")
         }
         // A grant naming another owner is never ownership.
         guard grant.ownerNodeID == configuration.nodeID, grant.term >= highestTerm else { throw RuruError.ownershipHeld }
-        highestTerm = grant.term
+        guard action != .renew || grant.term == term else { throw RuruError.ownershipLost }
         let duration = Duration.milliseconds(Int64(grant.expiresInSeconds * 1000))
-        return RuruLease(term: grant.term, ownerNodeID: grant.ownerNodeID, deadline: sent + duration, duration: duration)
+        let margin = Duration.seconds(min(2, grant.expiresInSeconds / 10))
+        let deadline = sent + duration - margin
+        guard ContinuousClock.now < deadline, !Task.isCancelled else { throw RuruError.ownershipLost }
+        highestTerm = grant.term
+        return RuruLease(term: grant.term, ownerNodeID: grant.ownerNodeID, deadline: deadline, duration: duration)
     }
 
     private func send(_ path: String, body: Data?) async throws -> Data {

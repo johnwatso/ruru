@@ -67,12 +67,17 @@ let ownership = Task {
         }
     }
 }
-// Cancelling `ownership` releases the lease so another server takes over at once.
+// Cancelling awaits the standby callback (stop/drain), then releases the lease.
 ```
 
 `maintain` renews at a third of the lease, measures deadlines from when each
-request was sent, reports `.unavailable` no later than the local deadline if
-renewals fail, and releases on cancellation. `acquire`, `renew`, `release` and
+request was sent with a stopping margin (10%, capped at two seconds), interrupts
+stalled renewals at the local deadline, and rejects grants that arrive expired.
+On cancellation it awaits a `.standby` callback before releasing. Callbacks must
+return promptly; the worker must check the deadline independently before every
+side effect, and stop/drain before its standby callback returns. A delayed
+callback or suspended process cannot be made safe by a timer alone.
+`acquire`, `renew`, `release` and
 `describe` are available for apps that run their own loop. For other languages,
 see the [OpenAPI description](openapi.yaml) and the
 [Python example](../Clients/examples/ruru_lease.py).
@@ -87,7 +92,9 @@ Send JSON over HTTPS with `Authorization: Bearer <service token>`:
 
 - `POST /v1/lease/acquire` grants ownership if there is no live owner, or
   confirms it for the current owner. Success returns `ownerNodeID`, `term` and
-  `expiresInSeconds` (the service's lease length). Send the highest term you
+  `expiresInSeconds` (the granted remaining duration). An acquire retry does
+  not extend the lease. When a configured duration is reduced, renewals retain
+  earlier outstanding permission until it ages out. Send the highest term you
   have seen; Ruru never grants a lower one. 409 `ownership_held` means another
   server owns it: do not perform the guarded work.
 - `POST /v1/lease/renew` uses the owner's stable node ID and granted term.
@@ -118,7 +125,8 @@ after its lease ended. The **term is a fencing token**:
 2. The protected system stores the highest term it has accepted and rejects
    anything older, atomically with the change itself.
 3. Also stop work at the **local deadline** (`RuruLease.deadline`): request send
-   time plus `expiresInSeconds`, measured on a monotonic clock.
+   time plus `expiresInSeconds`, less a stopping/clock-rate margin, measured on
+   a monotonic clock. A network timeout must never postpone this check.
 
 Neither check is enough alone. See [fencing references](LEASE_REFERENCES.md)
 and [storage limits](STORAGE.md), including the absence of exactly-once effects.
@@ -146,17 +154,24 @@ A client is correct when it:
 
 - [ ] renews at no more than half the lease length (RuruClient uses a third);
 - [ ] computes its deadline from when the request was sent, not received;
+- [ ] reserves time for stopping work and modest clock-rate differences;
+- [ ] rejects expired, malformed, decreasing-term or mismatched renewal grants;
 - [ ] stops guarded work at the deadline if no renewal succeeded;
 - [ ] treats 409 on renew as immediate loss of ownership;
 - [ ] treats a grant naming another `ownerNodeID` as not owning;
 - [ ] retries 503 `authority_recovering` and transport errors with jittered backoff;
 - [ ] sends its highest seen term on acquire and fences side effects with it;
-- [ ] releases on clean shutdown, from a context that isn't already cancelled;
+- [ ] stops/drains work before release, from a context that isn't already cancelled;
 - [ ] keeps the token secret and never logs it.
 
 `Tests/WitnessKitTests/ClientConformanceTests.swift` runs RuruClient against the
 real server for these cases (single owner, rising terms, hand-over on release,
 restart quarantine, wrong credentials).
+`RuruClientSafetyTests.swift` injects stalled transport, delayed/invalid grants
+and cancellation to verify deadlines and stop-before-release ordering. The Python
+example uses a separate expiry thread so blocking HTTP cannot delay its stop
+callback; its placeholder worker still requires per-effect deadline checks and
+durable resource fencing. These clients cannot guarantee exactly-once effects.
 
 ## Preferred Primary
 

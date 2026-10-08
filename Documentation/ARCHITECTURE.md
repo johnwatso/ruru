@@ -251,6 +251,23 @@ Copied UI-test bundles can also set `RuruScreenshotPreview=true` in their plist
 to preserve this isolation when UI tools relaunch without arguments. This key
 is absent from normal generated app/Release configuration.
 
+## Deployment preference
+
+The intended SwiftBot deployment uses one Ruru authority on one server. The
+operator prefers this simpler arrangement for a basic Discord bot; additional
+Ruru servers or replicated authority infrastructure are outside the current
+scope. The selected SwiftBot service lease length is five minutes (300 seconds),
+configured through Guarding on the deployed authority, rather than changing the
+default for every service.
+
+The current Primary can continue within its last confirmed lease while Ruru is
+unreachable. It stops guarded work when that permission expires; a Standby
+cannot acquire ownership while Ruru is unavailable. A longer lease also delays
+takeover after a Primary failure. After Ruru restarts, the full longest persisted
+lease quarantine starts at launch, so even a brief authority outage can cause a
+gap before grants resume. This choice does not introduce indefinite continuation
+past expiry.
+
 ## Guarded services
 
 SwiftBot is the initial service, preserving its existing cluster ID, bearer

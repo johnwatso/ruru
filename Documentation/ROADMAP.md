@@ -1,5 +1,36 @@
 # Development log and next steps
 
+## 2026-10-09 — Single-server deployment preference
+
+- Recorded the operator's choice of one Ruru authority and a five-minute
+  SwiftBot lease. Additional Ruru servers and authority replication are outside
+  the current scope; existing expiry and restart quarantine remain required.
+- This is a documented deployment choice. The deployed Mac mini's service
+  setting has not been changed from this workspace. Existing Guarding controls
+  already support 300 seconds; no runtime or global default change was needed.
+- Validation: documentation diff checked; no executable changes in this entry.
+
+## 2026-10-09 — Failover safety review and outstanding-grant fixes
+
+- Reviewed authority exclusivity, durability, expiry, restart quarantine,
+  instance locks, restore, service admission, observation/preference separation
+  and listener/tunnel lifecycle against the existing primary design references.
+  Recorded evidence and operational limits in [the review](FAILOVER_REVIEW.md).
+- Fixed lease shortening: renewals retain earlier outstanding permission and
+  its persisted quarantine length, even if the shorter renewal reply is lost.
+  Invalid stored durations now fail startup closed.
+- Hardened RuruClient against stalled renewals, expired/damaged replies and
+  mismatched renewal terms; added a stopping margin and awaited stop/drain before
+  cancellation releases. The Python example independently expires its worker
+  during blocked HTTP, updates renewal deadlines, and has isolated CI checks.
+- Validation: final full Xcode suite/build passed with 148 tests, including the
+  cancellation-during-renewal regression; 4 Python example tests passed. Universal
+  Release passed; app and WitnessKit contain x86_64 + arm64, with macOS 15.0
+  verified on all four slices. XcodeGen and `git diff --check` passed.
+  No production settings/data or SwiftBot code changed. Real two-Mac partitions,
+  suspend/resume, power loss and Intel/Sequoia hardware remain unverified; Ruru
+  remains a single authority whose outage pauses guarded work.
+
 ## 2026-10-09 — New owner's Web UI in failover alerts
 
 - Participant presence v1 accepts an optional bounded HTTPS `webUIURL` origin,
@@ -924,3 +955,25 @@
   build 2026100523); preserved the prior console export under ignored
   `Build/Previous/2026100523-before-owner-names/`. ZIP SHA-256:
   `e34371f06187f3516fe27d740c8542aa5ea55d6373b9ee5b21c2e6134ae3ed2e`.
+
+
+## GitHub Pages website — 9 October 2026
+
+- Added a static landing page in `docs/` with the existing Ruru owl icon, actual development-preview screenshots, feature descriptions, and documentation links.
+- Added an illustrated looping failover demo covering lease expiry, standby acquisition, primary recovery, and compatible-client handback. Includes pause/resume, restart, reduced-motion behavior and page-visibility suspension. The demo does not claim physical server startup or traffic routing.
+- Added a GitHub Actions Pages workflow that publishes all of `docs/`, preserving stable and beta update-feed paths. No application code or existing feed files changed.
+- Validation: JavaScript syntax, all local asset references and in-page anchors; desktop and 390px phone layout without horizontal overflow; pause/restart and screenshot tab selection including keyboard navigation; no browser warning/error logs during checks. GitHub deployment has not been performed. Native app builds are not required for these static website additions.
+
+
+### Website screenshot refresh — 9 October 2026
+
+- Replaced the outdated Guarding and Preferred Primary website images and refreshed Overview for consistency. All three are matching 2610 × 1700 dark-mode native window captures of the current preview console.
+- Captured with ScreenCaptureKit's `showsCursor = false`; no images were retouched or synthesized. Preview uses the existing isolated fixtures, including current sidebar navigation, SwiftBot branding, the renewal ring, presence reports and compact Preferred Primary row.
+- Verified refreshed images in the local website and updated the downloadable package. Updated Guarding's screenshot caption to describe the service-list view accurately.
+- Used a private copy of the existing Debug app with a preview-only launcher and the bundle preview flag; production app source, preferences, storage, Keychain and services were not modified. UI source files predate the successful Debug binary used for capture.
+- Additional validation limit: a fresh isolated Debug build compiled but failed at code signing due to resource-fork/Finder metadata in generated resources, including after one metadata-cleanup retry. The website captures use the existing successfully built Debug app; this screenshot update does not claim a fresh native build passed.
+
+### Website screenshot presentation — 9 October 2026
+
+- Hide the macOS purple capture indicator in the unused upper-left titlebar area with a responsive CSS cover shared by all three screenshot tabs. Native screenshot files and app content remain unchanged.
+- Verified the rendered local browser preview without the badge, checked screenshot tabs, and refreshed the downloadable website archive. Added a stylesheet cache version so the refreshed presentation loads immediately.

@@ -40,7 +40,8 @@ public actor LeaseStore {
             for row in 0..<leases.rowCount {
                 let term = try leases.integer(2, row: row), expiry = try leases.number(3, row: row)
                 let duration = try leases.number(4, row: row)
-                guard LeaseDatabaseSetup.validTerm(term), expiry >= 0, duration > 0 else { throw Self.damagedLease() }
+                guard LeaseDatabaseSetup.validTerm(term), expiry >= 0,
+                      Self.leaseDurationRange.contains(duration) else { throw Self.damagedLease() }
                 // Released leases store expiry 0. A non-zero expiry is a live or
                 // restored lease (restores are ownerless); wait out the longest.
                 if expiry > 0 { longest = max(longest, duration) }
@@ -108,11 +109,14 @@ public actor LeaseStore {
                             try log(connection, action: "Released", request: request, term: request.term)
                             reply = .released
                         } else {
-                            // A changed service length takes effect from this renewal.
+                            // A lost renewal response leaves the owner trusting its
+                            // earlier grant. Never shorten that outstanding permission
+                            // when the operator reduces the configured lease length.
+                            let remaining = max(duration, previous.expiry - now)
                             try writeLease(connection, clusterID: request.clusterID, owner: request.nodeID,
-                                           term: request.term, expiry: now + duration, duration: duration)
+                                           term: request.term, expiry: now + remaining, duration: remaining)
                             reply = try .grant(LeaseGrant(ownerNodeID: request.nodeID, term: request.term,
-                                                        expiresInSeconds: duration))
+                                                        expiresInSeconds: remaining))
                         }
                     }
                     try writeNodeName(connection, request: request)
@@ -245,7 +249,7 @@ public actor LeaseStore {
     }
 
     private static func damagedLease() -> WitnessError {
-        .database("The stored ownership term or expiry is damaged; no fresh authority will be created.")
+        .database("The stored ownership term, expiry or duration is damaged; no fresh authority will be created.")
     }
 
     private func writeLease(_ connection: Connection, clusterID: String, owner: String, term: Int64,

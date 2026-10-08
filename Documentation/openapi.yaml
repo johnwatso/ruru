@@ -186,7 +186,7 @@ components:
             properties:
               ownerNodeID: { type: string, description: "Only own the lease if this is your nodeID" }
               term: { type: integer, format: int64, description: "Fencing token" }
-              expiresInSeconds: { type: number, description: "The service's lease length; measure from request send time" }
+              expiresInSeconds: { type: number, maximum: 300, description: "Positive granted remaining duration; acquire retries do not extend it, and shorter renewals retain earlier permission. Measure from request send time with a stopping margin." }
     Error:
       description: Error
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
