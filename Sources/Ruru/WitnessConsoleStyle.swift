@@ -62,7 +62,9 @@ struct ConsolePageHeader<Accessory: View>: View {
     private var heading: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.largeTitle.weight(.bold)).accessibilityAddTraits(.isHeader)
-            Text(subtitle).font(.title3).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if !subtitle.isEmpty {
+                Text(subtitle).font(.title3).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

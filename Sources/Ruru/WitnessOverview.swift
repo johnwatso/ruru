@@ -14,7 +14,7 @@ struct WitnessOverview: View {
     private var headline: String {
         if model.isRecovering { return "Waiting for earlier ownership to expire." }
         switch model.state {
-        case .running: return "Ruru is running on this Mac."
+        case .running: return ""
         case .starting: return "Starting the ownership service."
         case .stopped: return "Ruru is stopped on this Mac."
         case .failed: return "Ruru needs attention before it can run."
@@ -116,11 +116,6 @@ struct WitnessOverview: View {
     private var appIcon: some View {
         Image(nsImage: NSApp.applicationIconImage)
             .resizable().interpolation(.high).frame(width: 108, height: 108)
-            .overlay(alignment: .bottomTrailing) {
-                Circle().fill(model.serviceHealth.tint).frame(width: 22, height: 22)
-                    .overlay(Circle().strokeBorder(.background, lineWidth: 3.5))
-                    .offset(x: -8, y: -8)
-            }
             .accessibilityLabel("Ruru, \(model.statusText)")
     }
 

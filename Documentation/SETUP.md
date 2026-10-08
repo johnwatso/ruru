@@ -21,9 +21,10 @@ Apple silicon executables.
 4. Open the service's **Connection Details** and give every participating server
    the endpoint, cluster ID and token, or use **Pair a Server** to create a
    single-use code and approve the server's request (for servers whose software
-   supports pairing codes). For SwiftBot, enter them in the preferred
-   Primary's **SwiftMesh → Recovery and Pairing**; a fresh Failover Join Code
-   carries them to the Failover. Other apps use [RuruClient or the
+   supports pairing codes). For SwiftBot, create a code and enter it with
+   Ruru's address in the preferred Primary's **SwiftMesh → Recovery and Pairing
+   → Set Up Ruru**, then approve the request in Ruru; a fresh Failover Join
+   Code carries the settings to the Failover. Other apps use [RuruClient or the
    protocol](INTEGRATIONS.md).
 5. In **Settings → General**, enable **Launch at login** and **Start the service automatically**,
    then save the changes. macOS may require approval under System Settings

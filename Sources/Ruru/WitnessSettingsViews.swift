@@ -325,7 +325,7 @@ struct ConnectionDetailsSheet: View {
         if let service {
         VStack(spacing: 0) {
             WitnessSheetHeader(title: "Connect " + service.name, subtitle: service.kind == .swiftBot
-                ? "Enter these values in SwiftMesh → Recovery and Pairing on every participating SwiftBot."
+                ? "Create a pairing code below and enter it in SwiftBot’s SwiftMesh → Recovery and Pairing → Set Up Ruru."
                 : "Configure this app’s participating servers with these ownership connection details.", symbol: "link")
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
