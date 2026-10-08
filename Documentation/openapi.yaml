@@ -32,6 +32,13 @@ paths:
                 nodeID: { type: string, minLength: 1, description: "At most 128 UTF-8 bytes; no control characters or whitespace padding" }
                 nodeName: { type: [string, "null"], description: "At most 256 UTF-8 bytes; no control characters" }
                 role: { type: string, enum: [active, standby, worker, unknown] }
+                webUIURL:
+                  type: [string, "null"]
+                  description: >
+                    Optional reported Web UI HTTPS origin, at most 256 UTF-8
+                    bytes. No credentials, non-root paths, queries or fragments.
+                    Omission clears the prior address; stale reports lose their
+                    URL. Display only, with no reachability check.
       responses:
         "200":
           description: Contact accepted; not an ownership grant

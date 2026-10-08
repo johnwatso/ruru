@@ -182,7 +182,7 @@ Feature-detect `participantPresence` version 1 in `GET /v1/service`. Send
 `POST /v1/participants/report` every 15 seconds with the service bearer token:
 
 ```json
-{"version":1,"clusterID":"swiftbot","nodeID":"stable-backup-id","nodeName":"Backup Mac","role":"standby"}
+{"version":1,"clusterID":"swiftbot","nodeID":"stable-backup-id","nodeName":"Backup Mac","role":"standby","webUIURL":"https://failover.example.com"}
 ```
 
 Roles are `active`, `standby`, `worker` or `unknown` and are self-reported; Ruru
@@ -193,6 +193,18 @@ Missing/invalid credentials return 401, cross-service reports 403, invalid field
 must be nonempty, at most 128 UTF-8 bytes, without whitespace padding or control
 characters; optional names have a 256-byte limit and no control characters.
 
+`webUIURL` is optional: a credential-free HTTPS website origin, at most 256
+UTF-8 bytes, with no path except `/`, query or fragment. Ruru normalizes host
+case and the default port. Invalid addresses reject the report (400). Omit it
+when the website is disabled or no public HTTPS address is configured; omission
+clears the previous address. Older clients can continue omitting this field,
+and older Ruru versions ignore it.
+
+Failover and recovery Discord embeds include a **Web UI** website link only from
+the current lease owner's fresh report, matched by service and stable node ID.
+The address is self-reported, never probed, and does not prove reachability or
+readiness. A stale report loses its advertised URL; reports remain ephemeral.
+
 Reports become stale at 45 seconds and expire at 600 seconds using monotonic
 time. Up to 32 nodes per service (32 services total) are held in a separate
 in-memory actor; restart starts empty, removal/token replacement clears reports.
@@ -201,7 +213,7 @@ leaving the remaining listener capacity available for leases. Service tokens
 authenticate a trusted group, not the individual claimed node ID. Public
 `/health` and policy reads do not register participants.
 
-RuruClient exposes `reportPresence(role:)`; call it in a separate reporting loop
+RuruClient exposes `reportPresence(role:webUIURL:)`; call it in a separate reporting loop
 and check `describe().supports("participantPresence")` before using it. Old
 clients retain lease compatibility; they cannot show standby presence until
 updated. Updated SwiftBot feature-detects, rechecking once per minute, and ignores

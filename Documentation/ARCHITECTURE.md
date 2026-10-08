@@ -25,6 +25,10 @@ reference Swift client; its conformance tests run against the real server.
 Alerts (`RuruAlerts.swift`) watch each poll for services whose owner stops
 renewing, failovers and authority problems, and deliver them to macOS
 notifications and an optional Discord webhook kept in Keychain.
+Failover/recovery embeds can link to the current owner's self-reported HTTPS
+Web UI origin from a fresh participant report. Matching uses service and stable
+node ID; display names never determine alert ownership. Addresses are ephemeral,
+credential-free and unprobed, independently of resource catalogue opt-in.
 
 ## Coordinator direction
 

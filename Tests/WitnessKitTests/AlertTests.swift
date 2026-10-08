@@ -7,7 +7,8 @@ final class AlertTests: XCTestCase {
     private func observe(_ owners: [String: String], running: Bool = true, recovering: Bool = false,
                          releases: Set<String> = [], tunnel: String? = nil) -> RuruAlertMonitor.Observation {
         .init(serviceRunning: running, recovering: recovering, serviceFailure: nil, tunnelError: tunnel,
-              snapshotError: nil, owners: owners, services: ["bot": "SwiftBot", "media": "Media"], releases: releases)
+              snapshotError: nil, owners: owners.mapValues { .init(nodeID: $0, name: $0) },
+              services: ["bot": "SwiftBot", "media": "Media"], releases: releases)
     }
 
     func testAnOwnerThatStopsRenewingIsDownAfterTheGraceAndBackWhenOwnershipReturns() {
@@ -19,17 +20,28 @@ final class AlertTests: XCTestCase {
         XCTAssertEqual(down.map(\.kind), [.serviceDown])
         XCTAssertEqual(down.first?.title, "SwiftBot is down")
         XCTAssertTrue(down.first?.detail.contains("Home Mac") == true)
+        XCTAssertEqual(down.first?.context, .init(service: "SwiftBot", previousOwner: "Home Mac"))
         XCTAssertTrue(monitor.observe(observe([:]), at: start + 60).isEmpty, "Down is reported once")
-        XCTAssertEqual(monitor.observe(observe(["bot": "Home Mac"]), at: start + 70).map(\.kind), [.serviceRecovered])
+        let recovered = monitor.observe(observe(["bot": "Home Mac"]), at: start + 70)
+        XCTAssertEqual(recovered.map(\.kind), [.serviceRecovered])
+        XCTAssertEqual(recovered.first?.context, .init(service: "SwiftBot", currentOwner: "Home Mac"))
     }
 
-    func testATakeoverWithinTheGraceIsAFailoverNotAnOutage() {
+    func testATakeoverWithinTheGraceIsAFailoverNotAnOutage() throws {
         var monitor = RuruAlertMonitor()
         _ = monitor.observe(observe(["bot": "Home Mac"]), at: start)
         _ = monitor.observe(observe([:]), at: start + 1)
         let failover = monitor.observe(observe(["bot": "Backup Mac"]), at: start + 5)
         XCTAssertEqual(failover.map(\.kind), [.failover])
         XCTAssertEqual(failover.first?.detail, "Ownership moved from Home Mac to Backup Mac.")
+        let alert = try XCTUnwrap(failover.first)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: RuruDiscordWebhook.payload(for: alert, at: start)) as? [String: Any])
+        let embed = try XCTUnwrap((json["embeds"] as? [[String: Any]])?.first)
+        XCTAssertEqual(embed["description"] as? String, "Another server has taken over ownership.")
+        let fields = try XCTUnwrap(embed["fields"] as? [[String: Any]])
+        XCTAssertEqual(fields.compactMap { $0["name"] as? String }, ["Service", "Previous owner", "Current owner"])
+        XCTAssertEqual(fields.compactMap { $0["value"] as? String }, ["SwiftBot", "Home Mac", "Backup Mac"])
+        XCTAssertEqual(fields.compactMap { $0["inline"] as? Bool }, [false, true, true])
         XCTAssertTrue(monitor.observe(observe(["bot": "Backup Mac"]), at: start + 30).isEmpty)
     }
 
@@ -68,6 +80,46 @@ final class AlertTests: XCTestCase {
         XCTAssertEqual(decoded, RuruAlertPreferences())
     }
 
+    func testFailoverUsesNodeIdentityAndTheNewOwnersWebsite() throws {
+        var monitor = RuruAlertMonitor()
+        var observation = observe([:])
+        observation.owners = ["bot": .init(nodeID: "primary", name: "Mac", webUIURL: "https://primary.example.com")]
+        _ = monitor.observe(observation, at: start)
+        observation.owners = ["bot": .init(nodeID: "backup", name: "Mac", webUIURL: "https://failover.example.com")]
+        let alert = try XCTUnwrap(monitor.observe(observation, at: start + 1).first)
+        XCTAssertEqual(alert.kind, .failover, "Different nodes may have the same display name")
+        XCTAssertEqual(alert.context?.webUIURL, "https://failover.example.com")
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: RuruDiscordWebhook.payload(for: alert, at: start)) as? [String: Any])
+        let embed = try XCTUnwrap((json["embeds"] as? [[String: Any]])?.first)
+        let field = try XCTUnwrap((embed["fields"] as? [[String: Any]])?.last)
+        XCTAssertEqual(field["name"] as? String, "Web UI")
+        XCTAssertEqual(field["value"] as? String, "[failover.example.com](https://failover.example.com)")
+        XCTAssertFalse(String(decoding: try RuruDiscordWebhook.payload(for: alert, at: start), as: UTF8.self).contains("primary.example.com"))
+        observation.owners = ["bot": .init(nodeID: "backup", name: "Renamed Mac", webUIURL: "https://new.example.com")]
+        XCTAssertTrue(monitor.observe(observation, at: start + 2).isEmpty, "Renaming or changing URL alone is not failover")
+    }
+
+    func testRecoveryLinksOnlyTheCurrentOwnerAndUnsafeWebsitesAreOmitted() throws {
+        var monitor = RuruAlertMonitor()
+        var observation = observe([:])
+        observation.owners = ["bot": .init(nodeID: "primary", name: "Home Mac", webUIURL: "https://primary.example.com")]
+        _ = monitor.observe(observation, at: start)
+        observation.owners = [:]
+        _ = monitor.observe(observation, at: start + 1)
+        let down = try XCTUnwrap(monitor.observe(observation, at: start + 16).first)
+        XCTAssertNil(down.context?.webUIURL)
+        observation.owners = ["bot": .init(nodeID: "backup", name: "Backup Mac", webUIURL: "https://failover.example.com")]
+        let recovered = try XCTUnwrap(monitor.observe(observation, at: start + 17).first)
+        XCTAssertEqual(recovered.context?.webUIURL, "https://failover.example.com")
+        for url in ["https://example.com?token=secret", "http://example.com"] {
+            let unsafe = RuruAlert(kind: .failover, key: "k", title: "Failover", detail: "Changed owner.",
+                                   context: .init(service: "App", webUIURL: url))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: RuruDiscordWebhook.payload(for: unsafe, at: start)) as? [String: Any])
+            let embed = try XCTUnwrap((json["embeds"] as? [[String: Any]])?.first)
+            XCTAssertFalse(((embed["fields"] as? [[String: Any]]) ?? []).contains { $0["name"] as? String == "Web UI" })
+        }
+    }
+
     func testOnlyGenuineDiscordWebhookURLsAreAccepted() {
         let secret = String(repeating: "aB3_-", count: 13)
         XCTAssertNotNil(RuruDiscordWebhook.validated("https://discord.com/api/webhooks/123456789012345678/\(secret)"))
@@ -92,8 +144,52 @@ final class AlertTests: XCTestCase {
         XCTAssertEqual(json["username"] as? String, "Ruru")
         XCTAssertEqual((json["allowed_mentions"] as? [String: [String]])?["parse"], [])
         let embed = try XCTUnwrap((json["embeds"] as? [[String: Any]])?.first)
-        XCTAssertEqual(embed["title"] as? String, "SwiftBot is down")
+        XCTAssertEqual(embed["title"] as? String, "⛔ SwiftBot is down")
         XCTAssertEqual(embed["color"] as? Int, 0xE5484D)
+        XCTAssertEqual((embed["footer"] as? [String: String])?["text"], "Ruru • Guarding")
+        XCTAssertEqual(embed["timestamp"] as? String, ISO8601DateFormatter().string(from: start))
+        XCTAssertNil(embed["fields"], "Alerts without structured context still work")
         XCTAssertNil(json["content"])
+    }
+
+    func testDiscordFieldsKeepNamesLiteralAndOmitEmptyValuesAndInternalKeys() throws {
+        let alert = RuruAlert(kind: .pairingRequest, key: "pair|private-request-id", title: "Pairing request",
+                              detail: "Approve in Ruru.",
+                              context: .init(service: "Media_*", server: "[Home](https://example.com)"))
+        let data = try RuruDiscordWebhook.payload(for: alert, at: start)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let embed = try XCTUnwrap((json["embeds"] as? [[String: Any]])?.first)
+        let fields = try XCTUnwrap(embed["fields"] as? [[String: Any]])
+        XCTAssertEqual(fields.compactMap { $0["value"] as? String }, ["Media\\_\\*", "\\[Home\\](https://example.com)"])
+        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains(alert.key))
+
+        let empty = RuruAlert(kind: .test, key: "test", title: "Test", detail: "Connected.",
+                              context: .init(service: " ", server: "\n"))
+        let emptyJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: RuruDiscordWebhook.payload(for: empty, at: start)) as? [String: Any])
+        XCTAssertNil((emptyJSON["embeds"] as? [[String: Any]])?.first?["fields"])
+    }
+
+    func testDiscordPayloadBoundsLongUnicodeNamesAndDetails() throws {
+        let long = String(repeating: "👩🏽‍💻_*", count: 2_000)
+        let alert = RuruAlert(kind: .authorityProblem, key: "k", title: long, detail: long,
+                              context: .init(service: long, previousOwner: long, currentOwner: long, server: long))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: RuruDiscordWebhook.payload(for: alert, at: start)) as? [String: Any])
+        let embed = try XCTUnwrap((json["embeds"] as? [[String: Any]])?.first)
+        let title = try XCTUnwrap(embed["title"] as? String)
+        let detail = try XCTUnwrap(embed["description"] as? String)
+        let footer = try XCTUnwrap((embed["footer"] as? [String: String])?["text"])
+        XCTAssertLessThanOrEqual(title.utf16.count, 256)
+        XCTAssertLessThanOrEqual(detail.utf16.count, 2_000)
+        XCTAssertTrue(title.hasSuffix("…"))
+        XCTAssertTrue(detail.hasSuffix("…"))
+        var total = title.utf16.count + detail.utf16.count + footer.utf16.count
+        for field in try XCTUnwrap(embed["fields"] as? [[String: Any]]) {
+            let name = try XCTUnwrap(field["name"] as? String)
+            let value = try XCTUnwrap(field["value"] as? String)
+            XCTAssertLessThanOrEqual(value.utf16.count, 512)
+            XCTAssertFalse(value.contains("�"))
+            total += name.utf16.count + value.utf16.count
+        }
+        XCTAssertLessThanOrEqual(total, 6_000)
     }
 }

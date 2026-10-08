@@ -1,5 +1,49 @@
 # Development log and next steps
 
+## 2026-10-09 — New owner's Web UI in failover alerts
+
+- Participant presence v1 accepts an optional bounded HTTPS `webUIURL` origin,
+  independently of catalogue sharing. Credentials, queries, fragments and
+  non-root paths are rejected. Omission withdraws a URL, and it disappears from
+  stale reports after 45 seconds; restart and credential revocation clear it.
+- SwiftBot reports its own configured website, including in standby; RuruClient
+  exposes the optional URL too. Failover and recovery embeds show a clickable
+  Web UI domain from the fresh current-owner report, matched by cluster/node ID.
+  Alert transitions now compare stable node IDs, so duplicate names work and
+  cosmetic renaming cannot look like failover. Lease routes/storage are unchanged.
+- Updated API/integration docs and all eleven local embed previews. The URL is
+  reported metadata, with no reachability claim or background probe. Both apps
+  need updated builds for SwiftBot website reporting; older clients remain valid.
+- Validation: Ruru's full 138-test suite passed, plus final build/11 alert tests;
+  SwiftBot build/22 mesh tests passed. Tests cover website validation, freshness,
+  withdrawal, node identity and lease isolation. SwiftBot's final build and all
+  22 mesh tests also passed after the formatting fix. All eleven previews passed
+  light/dark and narrow-layout checks. Final Release build passed; app and
+  WitnessKit contain x86_64 + arm64, and both app slices target macOS 15.0.
+  Live Discord/two-Mac failover and actual Intel/Sequoia execution remain unverified.
+
+## 2026-10-08 — Clearer Discord webhook embeds
+
+- Added event icons, severity colours (including blue informational messages),
+  category footers and timestamps. Service alerts show the service plus last,
+  previous or current owner; failover owners sit side by side. Pairing requests
+  show the service and requesting server with a short approval instruction.
+- Embed descriptions avoid repeating the names in the fields. Native
+  notification wording is preserved. Names and details are escaped for Discord
+  formatting, long Unicode text is truncated with an ellipsis, empty fields are
+  omitted, and payloads remain bounded with mentions disabled.
+- Updated Discord setup copy to explain the names included in alerts.
+- Validation: Debug build and all 135 Xcode tests passed; the final description
+  changes passed a build and all 9 focused alert tests. Release build passed;
+  app and WitnessKit binaries contain x86_64 + arm64, with macOS 15.0 verified
+  on both app slices. No live Discord post, client-rendering check or execution
+  on Intel/Sequoia hardware was performed.
+- Follow-up: rendered all eleven message examples from the actual payload
+  serializer in a local Discord-style preview. Inspected light/dark renders and
+  checked all examples at 360px and 768px without horizontal overflow or script
+  errors. Screenshots are in `.artifacts/webhook-preview/`; exact Discord client
+  layout remains unverified.
+
 ## 2026-10-08 — Standby participant visibility
 
 - Added application-neutral `participantPresence` v1 discovery and authenticated

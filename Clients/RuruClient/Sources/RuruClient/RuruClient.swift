@@ -116,16 +116,17 @@ public actor RuruLeaseClient {
 
     /// Call every 15 seconds, independently of lease acquisition/renewal.
     /// Discover `participantPresence` first; a report never grants ownership.
-    public func reportPresence(role: ParticipantRole = .unknown) async throws {
+    public func reportPresence(role: ParticipantRole = .unknown, webUIURL: URL? = nil) async throws {
         struct Report: Encodable {
             let version = 1
             let clusterID: String
             let nodeID: String
             let nodeName: String?
             let role: ParticipantRole
+            let webUIURL: String?
         }
         let body = try JSONEncoder().encode(Report(clusterID: configuration.clusterID,
-            nodeID: configuration.nodeID, nodeName: configuration.nodeName, role: role))
+            nodeID: configuration.nodeID, nodeName: configuration.nodeName, role: role, webUIURL: webUIURL?.absoluteString))
         let data = try await send("/v1/participants/report", body: body)
         struct Reply: Decodable { let version: Int; let accepted: Bool }
         guard let reply = try? JSONDecoder().decode(Reply.self, from: data), reply.version == 1, reply.accepted else {

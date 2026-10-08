@@ -26,10 +26,20 @@ struct RuruAlert: Equatable {
     enum Kind: Equatable { case serviceDown, serviceRecovered, failover, authorityProblem, authorityRecovered, pairingRequest, test }
     enum Severity: Equatable { case critical, warning, resolved, info }
 
+    /// Display names only; never include credentials or internal alert keys.
+    struct Context: Equatable {
+        let service: String
+        var previousOwner: String? = nil
+        var currentOwner: String? = nil
+        var server: String? = nil
+        var webUIURL: String? = nil
+    }
+
     let kind: Kind
     let key: String
     let title: String
     let detail: String
+    var context: Context? = nil
 
     var severity: Severity {
         switch kind {
@@ -53,14 +63,19 @@ struct RuruAlert: Equatable {
 /// Turns successive observations into alerts. Pure and deterministic: the
 /// model feeds it once per poll, and tests feed it directly.
 struct RuruAlertMonitor {
+    struct Owner {
+        let nodeID: String
+        let name: String
+        var webUIURL: String? = nil
+    }
     struct Observation {
         var serviceRunning: Bool
         var recovering: Bool
         var serviceFailure: String?
         var tunnelError: String?
         var snapshotError: String?
-        /// clusterID → current owner's display name, for services with a live owner.
-        var owners: [String: String]
+        /// clusterID → current owner, identified by the durable lease's node ID.
+        var owners: [String: Owner]
         /// clusterID → service name, for every configured service.
         var services: [String: String]
         /// IDs of release events, so planned hand-offs never alert.
@@ -71,8 +86,8 @@ struct RuruAlertMonitor {
     /// over within this time; a takeover inside it is reported as a failover.
     var takeoverGrace: TimeInterval = 15
 
-    private var owners: [String: String] = [:]
-    private var lost: [String: (owner: String, since: Date)] = [:]
+    private var owners: [String: Owner] = [:]
+    private var lost: [String: (owner: Owner, since: Date)] = [:]
     private var down: Set<String> = []
     private var problems: [String: String] = [:]
     private var seenReleases: Set<String>?
@@ -97,22 +112,29 @@ struct RuruAlertMonitor {
                 else { lost[cluster] = (previous, now) }
             }
             if let current {
-                if let loss = lost.removeValue(forKey: cluster), loss.owner != current, observation.services[cluster] != nil {
+                if let loss = lost.removeValue(forKey: cluster), loss.owner.nodeID != current.nodeID, observation.services[cluster] != nil {
                     alerts.append(RuruAlert(kind: .failover, key: "failover|" + cluster, title: "\(name) failed over",
-                                            detail: "Ownership moved from \(loss.owner) to \(current)."))
-                } else if let previous = owners[cluster], previous != current, !released.contains(cluster) {
+                                            detail: "Ownership moved from \(loss.owner.name) to \(current.name).",
+                                            context: .init(service: name, previousOwner: loss.owner.name, currentOwner: current.name,
+                                                           webUIURL: ParticipantWebUI.normalizedURL(current.webUIURL))))
+                } else if let previous = owners[cluster], previous.nodeID != current.nodeID, !released.contains(cluster) {
                     alerts.append(RuruAlert(kind: .failover, key: "failover|" + cluster, title: "\(name) failed over",
-                                            detail: "Ownership moved from \(previous) to \(current)."))
+                                            detail: "Ownership moved from \(previous.name) to \(current.name).",
+                                            context: .init(service: name, previousOwner: previous.name, currentOwner: current.name,
+                                                           webUIURL: ParticipantWebUI.normalizedURL(current.webUIURL))))
                 }
                 if down.remove(cluster) != nil {
                     alerts.append(RuruAlert(kind: .serviceRecovered, key: "down|" + cluster, title: "\(name) is back",
-                                            detail: "\(current) now owns \(name)."))
+                                            detail: "\(current.name) now owns \(name).",
+                                            context: .init(service: name, currentOwner: current.name,
+                                                           webUIURL: ParticipantWebUI.normalizedURL(current.webUIURL))))
                 }
             } else if let loss = lost[cluster], now.timeIntervalSince(loss.since) >= takeoverGrace, !down.contains(cluster) {
                 lost[cluster] = nil
                 down.insert(cluster)
                 alerts.append(RuruAlert(kind: .serviceDown, key: "down|" + cluster, title: "\(name) is down",
-                                        detail: "\(loss.owner) stopped renewing and no other server has taken over."))
+                                        detail: "\(loss.owner.name) stopped renewing and no other server has taken over.",
+                                        context: .init(service: name, previousOwner: loss.owner.name)))
             }
         }
         owners = observation.owners.filter { observation.services[$0.key] != nil }
@@ -164,18 +186,83 @@ enum RuruDiscordWebhook {
         case .critical: 0xE5484D
         case .warning: 0xF5A524
         case .resolved: 0x30A46C
-        case .info: 0x6E7681
+        case .info: 0x5865F2
+        }
+        let presentation: (icon: String, footer: String) = switch alert.kind {
+        case .serviceDown: ("⛔", "Ruru • Guarding")
+        case .serviceRecovered: ("✅", "Ruru • Guarding")
+        case .failover: ("🔄", "Ruru • Guarding")
+        case .authorityProblem: ("⚠️", "Ruru • System")
+        case .authorityRecovered: ("✅", "Ruru • System")
+        case .pairingRequest: ("🔔", "Ruru • Pairing")
+        case .test: ("✅", "Ruru • Test notification")
+        }
+        let description: String
+        if alert.context != nil {
+            description = switch alert.kind {
+            case .serviceDown: "The owner stopped renewing and no other server has taken over."
+            case .serviceRecovered: "Ownership has been restored."
+            case .failover: ParticipantWebUI.normalizedURL(alert.context?.webUIURL) != nil
+                ? "Another server has taken over ownership. Use the Web UI below to connect to the new owner."
+                : "Another server has taken over ownership."
+            case .pairingRequest: "Approve or reject this request in Ruru → Guarding."
+            default: alert.detail
+            }
+        } else {
+            description = alert.detail
+        }
+        var embed: [String: Any] = [
+            "title": limitedText("\(presentation.icon) \(alert.title)", to: 256),
+            "description": limitedText(plainText(description), to: 2_000),
+            "color": color,
+            "footer": ["text": presentation.footer],
+            "timestamp": ISO8601DateFormatter().string(from: date)
+        ]
+        if let context = alert.context {
+            var fields: [[String: Any]] = []
+            func addField(_ name: String, _ value: String?, inline: Bool) {
+                guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                fields.append(["name": name, "value": limitedText(plainText(value), to: 512), "inline": inline])
+            }
+            addField("Service", context.service, inline: false)
+            addField(alert.kind == .serviceDown ? "Last owner" : "Previous owner", context.previousOwner, inline: true)
+            addField("Current owner", context.currentOwner, inline: true)
+            addField("Server", context.server, inline: true)
+            if [.failover, .serviceRecovered].contains(alert.kind),
+               let url = ParticipantWebUI.normalizedURL(context.webUIURL) {
+                let address = plainText(String(url.dropFirst("https://".count)))
+                fields.append(["name": "Web UI", "value": "[\(address)](\(url))", "inline": false])
+            }
+            if !fields.isEmpty { embed["fields"] = fields }
         }
         let body: [String: Any] = [
             "username": "Ruru",
             "allowed_mentions": ["parse": [String]()],
-            "embeds": [[
-                "title": String(alert.title.prefix(256)),
-                "description": String(alert.detail.prefix(2_000)),
-                "color": color,
-                "timestamp": ISO8601DateFormatter().string(from: date)
-            ]]
+            "embeds": [embed]
         ]
         return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    }
+
+    /// Keep display names and error details from becoming Discord formatting.
+    private static func plainText(_ text: String) -> String {
+        text.reduce(into: "") { result, character in
+            if "\\`*_~|>[]".contains(character) { result.append("\\") }
+            result.append(character)
+        }
+    }
+
+    /// A conservative UTF-16 budget also bounds emoji-heavy names. Preserve
+    /// whole characters and leave room for an ellipsis when truncating.
+    private static func limitedText(_ text: String, to limit: Int) -> String {
+        guard text.utf16.count > limit else { return text }
+        var result = ""
+        var length = 0
+        for character in text {
+            let count = String(character).utf16.count
+            guard length + count < limit else { break }
+            result.append(character)
+            length += count
+        }
+        return result + "…"
     }
 }

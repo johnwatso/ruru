@@ -1021,7 +1021,10 @@ final class WitnessAppModel: ObservableObject {
             tunnelError: internetStatus.state == .error ? internetStatus.detail : nil,
             snapshotError: snapshotError,
             owners: Dictionary(leases.filter { $0.remainingSeconds > 0 && !$0.ownerNodeID.isEmpty }.map {
-                ($0.clusterID, nodeDisplayName(for: $0.ownerNodeID, reportedName: $0.ownerNodeName, clusterID: $0.clusterID))
+                let contact = participant(for: $0.ownerNodeID, clusterID: $0.clusterID)
+                return ($0.clusterID, RuruAlertMonitor.Owner(nodeID: $0.ownerNodeID,
+                    name: nodeDisplayName(for: $0.ownerNodeID, reportedName: $0.ownerNodeName, clusterID: $0.clusterID),
+                    webUIURL: contact?.fresh == true ? contact?.webUIURL : nil))
             }, uniquingKeysWith: { first, _ in first }),
             services: Dictionary(configuration.services.map { ($0.clusterID, $0.name) }, uniquingKeysWith: { first, _ in first }),
             releases: Set((snapshot?.events ?? []).filter { $0.action == "Released" }.map { "\($0.clusterID)|\($0.id)" }))
@@ -1029,9 +1032,11 @@ final class WitnessAppModel: ObservableObject {
         for request in pairingRequests where !announcedPairings.contains(request.id) {
             announcedPairings.insert(request.id)
             let server = request.nodeName ?? request.nodeID
+            let service = serviceName(for: request.clusterID)
             alerts.append(RuruAlert(kind: .pairingRequest, key: "pair|" + request.id,
-                                    title: "\(server) wants to pair with \(serviceName(for: request.clusterID))",
-                                    detail: "Approve or reject it in Ruru → Guarding → \(serviceName(for: request.clusterID))."))
+                                    title: "\(server) wants to pair with \(service)",
+                                    detail: "Approve or reject it in Ruru → Guarding → \(service).",
+                                    context: .init(service: service, server: server)))
         }
         announcedPairings.formIntersection(pairingRequests.map(\.id))
         guard !alerts.isEmpty else { return }

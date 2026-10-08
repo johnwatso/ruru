@@ -652,7 +652,7 @@ struct WitnessDiscordSetupSheet: View {
                 } header: {
                     Text("Discord Webhook")
                 } footer: {
-                    Text("In Discord, open the channel’s settings → Integrations → Webhooks → New Webhook, then Copy Webhook URL. Ruru keeps it in Keychain and sends only alert titles, descriptions and times.")
+                    Text("In Discord, open the channel’s settings → Integrations → Webhooks → New Webhook, then Copy Webhook URL. Ruru keeps it in Keychain. Alerts include a description, service and server names, a reported Web UI address where relevant, and a timestamp.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }

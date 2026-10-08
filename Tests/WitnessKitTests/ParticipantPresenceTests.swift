@@ -8,9 +8,34 @@ final class ParticipantPresenceTests: XCTestCase {
         [.init(clusterID: "app", token: token), .init(clusterID: "other", token: String(repeating: "other-only-", count: 4))]
     }
     private func request(_ node: String = "backup", cluster: String = "app", token: String? = nil,
-                         name: String? = "Backup Mac", version: Int = 1) throws -> HTTPRequest {
+                         name: String? = "Backup Mac", version: Int = 1, webUIURL: String? = nil) throws -> HTTPRequest {
         .init(method: "POST", path: "/v1/participants/report", headers: ["authorization": "Bearer " + (token ?? self.token)],
-              body: try JSONEncoder().encode(ParticipantReport(clusterID: cluster, nodeID: node, nodeName: name, role: .standby, version: version)))
+              body: try JSONEncoder().encode(ParticipantReport(clusterID: cluster, nodeID: node, nodeName: name, role: .standby, version: version, webUIURL: webUIURL)))
+    }
+
+    func testWebsiteValidationFreshnessAndWithdrawal() async throws {
+        let clock = TestClock(0)
+        let presence = ParticipantPresence(clock: clock.now)
+        try await presence.configureServices(services)
+        let accepted = await presence.route(try request(webUIURL: "https://Failover.Example.com:443/"))
+        XCTAssertEqual(accepted.status, 200)
+        for value in ["http://example.com", "https://user:secret@example.com", "https://example.com?token=secret",
+                      "https://example.com#secret", "https://example.com/login", "https://example.com)/[link]",
+                      "https://example.com\n", String(repeating: "a", count: 257)] {
+            let rejected = await presence.route(try request(webUIURL: value))
+            XCTAssertEqual(rejected.status, 400, value)
+        }
+        var snapshot = await presence.snapshot()
+        XCTAssertEqual(snapshot.first?.webUIURL, "https://failover.example.com")
+        clock.advance(45)
+        snapshot = await presence.snapshot()
+        XCTAssertNil(snapshot.first?.webUIURL, "Stale reports must not advertise a current website")
+        _ = await presence.route(try request(webUIURL: "https://new.example.com"))
+        snapshot = await presence.snapshot()
+        XCTAssertEqual(snapshot.first?.webUIURL, "https://new.example.com")
+        _ = await presence.route(try request())
+        snapshot = await presence.snapshot()
+        XCTAssertNil(snapshot.first?.webUIURL, "Omitting the website withdraws the prior address")
     }
 
     func testAuthenticationValidationAndServiceIsolation() async throws {

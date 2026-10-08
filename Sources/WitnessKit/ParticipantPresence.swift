@@ -6,20 +6,34 @@ public enum ParticipantRole: String, Codable, Sendable {
     case active, standby, worker, unknown
 }
 
+/// A reported, display-only website. No credentials, paths or probes.
+public enum ParticipantWebUI {
+    public static func normalizedURL(_ value: String?) -> String? {
+        guard let value, value.utf8.count <= 256,
+              let origin = CoordinationPolicy.normalizedOrigin(value),
+              let host = URL(string: origin)?.host,
+              host.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0) ||
+                  (48...57).contains($0) || [45, 46, 58, 91, 93].contains($0) }) else { return nil }
+        return origin
+    }
+}
+
 public struct ParticipantReport: Codable, Sendable {
     public let version: Int
     public let clusterID: String
     public let nodeID: String
     public let nodeName: String?
     public let role: ParticipantRole
+    public let webUIURL: String?
 
     public init(clusterID: String, nodeID: String, nodeName: String? = nil,
-                role: ParticipantRole = .unknown, version: Int = 1) {
+                role: ParticipantRole = .unknown, version: Int = 1, webUIURL: String? = nil) {
         self.version = version
         self.clusterID = clusterID
         self.nodeID = nodeID
         self.nodeName = nodeName
         self.role = role
+        self.webUIURL = webUIURL
     }
 }
 
@@ -30,11 +44,13 @@ public struct ParticipantObservation: Sendable {
     public let role: ParticipantRole
     public let ageSeconds: Double
     public let fresh: Bool
+    public let webUIURL: String?
 
     public init(clusterID: String, nodeID: String, nodeName: String?, role: ParticipantRole,
-                ageSeconds: Double, fresh: Bool) {
+                ageSeconds: Double, fresh: Bool, webUIURL: String? = nil) {
         self.clusterID = clusterID; self.nodeID = nodeID; self.nodeName = nodeName
         self.role = role; self.ageSeconds = ageSeconds; self.fresh = fresh
+        self.webUIURL = webUIURL
     }
 }
 
@@ -79,7 +95,8 @@ public actor ParticipantPresence {
         guard !request.body.isEmpty, request.body.count <= HTTPParser.maxBodyBytes,
               let report = try? JSONDecoder().decode(ParticipantReport.self, from: request.body),
               WitnessPrimaryPreference.validNodeID(report.nodeID),
-              report.nodeName == nil || WitnessNodeName.normalized(report.nodeName) != nil else {
+              report.nodeName == nil || WitnessNodeName.normalized(report.nodeName) != nil,
+              report.webUIURL == nil || ParticipantWebUI.normalizedURL(report.webUIURL) != nil else {
             return .error("invalid_request", status: 400)
         }
         guard report.clusterID == cluster else { return .error("forbidden_cluster", status: 403) }
@@ -100,7 +117,8 @@ public actor ParticipantPresence {
             let age = max(0, now - $0.at)
             return ParticipantObservation(clusterID: $0.report.clusterID, nodeID: $0.report.nodeID,
                 nodeName: WitnessNodeName.normalized($0.report.nodeName), role: $0.report.role,
-                ageSeconds: age, fresh: age < Self.freshSeconds)
+                ageSeconds: age, fresh: age < Self.freshSeconds,
+                webUIURL: age < Self.freshSeconds ? ParticipantWebUI.normalizedURL($0.report.webUIURL) : nil)
         }.sorted { ($0.clusterID, $0.nodeID) < ($1.clusterID, $1.nodeID) }
     }
 
