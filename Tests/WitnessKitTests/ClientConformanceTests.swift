@@ -51,6 +51,30 @@ final class ClientConformanceTests: XCTestCase {
         catch { XCTAssertEqual(error as? RuruError, .unauthorized) }
     }
 
+    func testStandbyPresenceIsVisibleWithoutChangingOwnerOrTerm() async throws {
+        let (server, endpoint, _) = try await authority(leaseSeconds: 30)
+        defer { Task { await server.stop() } }
+        let primary = client(endpoint, node: "home"), backup = client(endpoint, node: "backup")
+        let lease = try await primary.acquire()
+        let discovery = try await backup.describe()
+        XCTAssertTrue(discovery.supports("participantPresence"))
+        try await primary.reportPresence(role: .active)
+        try await backup.reportPresence(role: .standby)
+        let participants = await server.participants.snapshot()
+        XCTAssertEqual(Set(participants.map(\.nodeID)), ["home", "backup"])
+        XCTAssertEqual(participants.first { $0.nodeID == "backup" }?.role, .standby)
+        let unchanged = try await backup.describe()
+        XCTAssertEqual(unchanged.lease?.ownerNodeID, "home")
+        XCTAssertEqual(unchanged.lease?.term, lease.term)
+        let renewed = try await primary.renew(lease)
+        XCTAssertEqual(renewed.term, lease.term)
+        try await server.configureServices([])
+        let cleared = await server.participants.snapshot()
+        XCTAssertTrue(cleared.isEmpty)
+        do { try await backup.reportPresence(role: .standby); XCTFail("Removed service reported") }
+        catch { XCTAssertEqual(error as? RuruError, .unauthorized) }
+    }
+
     func testMaintainHandsOverWhenTheOwnerStops() async throws {
         let (server, endpoint, _) = try await authority()
         defer { Task { await server.stop() } }

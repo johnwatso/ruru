@@ -25,7 +25,8 @@ final class AppUpdater: NSObject, ObservableObject {
 
     init(bundle: Bundle = .main, defaults: UserDefaults = .standard,
          preview: Bool = ProcessInfo.processInfo.arguments.contains("--preview") ||
-         ProcessInfo.processInfo.arguments.contains("--preview-screenshots")) {
+         ProcessInfo.processInfo.arguments.contains("--preview-screenshots") ||
+         Bundle.main.object(forInfoDictionaryKey: "RuruScreenshotPreview") as? Bool == true) {
         isPreview = preview
         self.defaults = defaults
         hostBundle = bundle

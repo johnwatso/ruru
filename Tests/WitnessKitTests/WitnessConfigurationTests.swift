@@ -128,6 +128,18 @@ final class WitnessConfigurationTests: XCTestCase {
         XCTAssertEqual(encoded?["showInDock"] as? Bool, true)
     }
 
+    func testSetupProgressDefaultsToUnfinishedAndPersists() throws {
+        let data = Data(#"{"bindAddress":"127.0.0.1","port":38990,"publicEndpoint":"","startAutomatically":true,"services":[]}"#.utf8)
+        var configuration = try JSONDecoder().decode(WitnessConfiguration.self, from: data)
+        XCTAssertEqual(configuration.setup, RuruSetupState())
+        XCTAssertFalse(configuration.setup.completed)
+        configuration.setup.completed = true
+        configuration.setup.localOnly = true
+        let restored = try JSONDecoder().decode(WitnessConfiguration.self, from: JSONEncoder().encode(configuration))
+        XCTAssertTrue(restored.setup.completed)
+        XCTAssertTrue(restored.setup.localOnly)
+    }
+
     func testMissingRequiredSettingsAreNotSilentlyReplaced() {
         XCTAssertThrowsError(try JSONDecoder().decode(WitnessConfiguration.self, from: Data("{}".utf8)))
     }

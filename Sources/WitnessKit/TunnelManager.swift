@@ -44,8 +44,8 @@ actor TunnelManager {
         self.retryDelay = retryDelay
         self.monitorNetwork = monitorNetwork
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 5
-        config.timeoutIntervalForResource = 5
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 15
         config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         session = URLSession(configuration: config)
     }
@@ -126,6 +126,7 @@ actor TunnelManager {
         let lines = outputBuffer.components(separatedBy: "\n")
         outputBuffer = String((lines.last ?? "").suffix(8192))
         for line in lines.dropLast() {
+            remember(line)
             if line.contains("Registered tunnel connection") {
                 failures = 0
                 await publish(.enabled, detail: "Connected through Cloudflare Tunnel")
@@ -135,6 +136,22 @@ actor TunnelManager {
                 await publish(.error, detail: "Cloudflare rejected the tunnel. Reconnect in Internet Access to refresh its token.")
             }
         }
+    }
+
+    private var recentLines: [String] = []
+
+    /// The connector's last output, with long token-like values redacted, for
+    /// explaining a tunnel that never connects.
+    func recentOutput() -> [String] { recentLines }
+
+    private func remember(_ line: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let redacted = trimmed.split(separator: " ", omittingEmptySubsequences: false).map { word in
+            word.count >= 40 ? "[redacted]" : String(word)
+        }.joined(separator: " ")
+        recentLines.append(String(redacted.prefix(300)))
+        if recentLines.count > 20 { recentLines.removeFirst(recentLines.count - 20) }
     }
 
     private func exited(id: UUID, status: Int32) async {

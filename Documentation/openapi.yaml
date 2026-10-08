@@ -12,6 +12,44 @@ servers:
 security:
   - bearer: []
 paths:
+  /v1/participants/report:
+    post:
+      summary: Report recent participant contact independently of lease ownership
+      description: >
+        Feature-detect participantPresence v1. Report every 15 seconds. Fresh for
+        45 seconds, stale until expiry at 600 seconds. Roles are self-reported;
+        this never grants or extends a lease. At most 32 nodes per service.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, clusterID, nodeID, role]
+              properties:
+                version: { type: integer, const: 1 }
+                clusterID: { type: string }
+                nodeID: { type: string, minLength: 1, description: "At most 128 UTF-8 bytes; no control characters or whitespace padding" }
+                nodeName: { type: [string, "null"], description: "At most 256 UTF-8 bytes; no control characters" }
+                role: { type: string, enum: [active, standby, worker, unknown] }
+      responses:
+        "200":
+          description: Contact accepted; not an ownership grant
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, accepted, freshSeconds, reportAfterSeconds]
+                properties:
+                  version: { const: 1 }
+                  accepted: { const: true }
+                  freshSeconds: { const: 45 }
+                  reportAfterSeconds: { const: 15 }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { description: unsupported_version }
+        "429": { description: participant_limit or coordination_busy }
   /v1/lease/acquire:
     post:
       summary: Obtain ownership, or confirm it for the current owner

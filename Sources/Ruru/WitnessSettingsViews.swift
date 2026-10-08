@@ -368,69 +368,24 @@ struct ConnectionDetailsSheet: View {
 struct WitnessInternetSheet: View {
     @EnvironmentObject private var model: WitnessAppModel
     @Environment(\.dismiss) private var dismiss
-    @State var hostname: String
-    @State private var apiToken = ""
-    @State private var error: String?
+    /// Kept for call-site compatibility; the address is chosen from the token’s domains.
+    init(hostname: String) {}
+
     var body: some View {
         VStack(spacing: 0) {
-            WitnessSheetHeader(title: "Cloudflare Internet Access", subtitle: "Give this witness its own address. The app sets up DNS, HTTPS access, and the tunnel.", symbol: "globe")
+            WitnessSheetHeader(title: "Cloudflare Internet Access",
+                               subtitle: "Give Ruru its own HTTPS address. It sets up the DNS record and tunnel for you.", symbol: "globe")
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    ConsoleSection("Cloudflare") {
-                        VStack(spacing: 0) {
-                            ConsoleSettingRow(title: "Hostname", subtitle: "Choose an unused subdomain.") {
-                                TextField("Hostname", text: $hostname, prompt: Text("ruru.example.com"))
-                                    .textFieldStyle(.roundedBorder).frame(width: 270)
-                                    .disabled(model.configuration.tunnel.isConfigured)
-                            }
-                            Divider().padding(.leading, 16)
-                            ConsoleSettingRow(title: "API token", subtitle: model.configuration.tunnel.isConfigured ? "Leave blank to use the saved token." : "Saved to Keychain after verification.") {
-                                SecureField("Cloudflare API token", text: $apiToken).textFieldStyle(.roundedBorder).frame(width: 270)
-                            }
-                        }.consoleRowGroup().disabled(model.internetBusy)
-                    }
-                    ConsoleSection("API Permissions") {
-                        VStack(spacing: 0) {
-                            ConsoleValueRow(title: "Zone", value: "Zone → Read\nDNS → Edit")
-                            Divider().padding(.leading, 16)
-                            ConsoleValueRow(title: "Account", value: "Cloudflare Tunnel → Edit")
-                        }.consoleRowGroup()
-                        HStack {
-                            Text("Scope the token to your domain and account.").font(.callout).foregroundStyle(.secondary)
-                            Spacer()
-                            Link("Create API Token", destination: URL(string: "https://dash.cloudflare.com/profile/api-tokens")!)
-                                .font(.callout)
-                        }
-                    }
-                    if model.internetBusy {
-                        HStack { ProgressView().controlSize(.small); Text(model.internetProgress).font(.callout) }
-                    }
-                    if let error { ConsoleIssue(title: "Setup could not be completed", detail: error) }
-                }.padding(.horizontal, 24).padding(.bottom, 24)
+                RuruCloudflareConnect().padding(.horizontal, 24).padding(.bottom, 24)
             }
             Divider()
             HStack {
                 Text("A separate tunnel for this Ruru.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction).disabled(model.internetBusy)
-                Button(model.internetBusy ? "Setting Up…" : "Connect") { connect() }
-                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-                    .disabled(WitnessInternetSetup.normalizedHostname(hostname) == nil || model.internetBusy || model.busy
-                        || (!model.configuration.tunnel.isConfigured && apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction).disabled(model.internetBusy)
             }.controlSize(.large).padding(20)
-        }.frame(width: 680, height: 610).background(WitnessGlassBackground())
+        }.frame(width: 640, height: 600).background(WitnessGlassBackground())
             .interactiveDismissDisabled(model.internetBusy)
-    }
-
-    private func connect() {
-        error = nil
-        Task {
-            do {
-                try await model.setupInternetAccess(hostname: hostname, tokenDraft: apiToken)
-                apiToken = ""
-                dismiss()
-            } catch { self.error = error.localizedDescription }
-        }
     }
 }
 
@@ -681,7 +636,7 @@ private struct WitnessAlertSettings: View {
     }
 }
 
-private struct WitnessDiscordSetupSheet: View {
+struct WitnessDiscordSetupSheet: View {
     @EnvironmentObject private var model: WitnessAppModel
     @Environment(\.dismiss) private var dismiss
     @State private var url = ""

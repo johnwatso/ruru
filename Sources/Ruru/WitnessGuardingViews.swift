@@ -94,6 +94,27 @@ private struct WitnessGuardedServiceDetails: View {
     private var nodes: [String] { model.knownNodes(for: service.clusterID) }
     private var events: [WitnessEvent] { model.events(for: service.clusterID) }
 
+    private func presenceLabel(_ role: ParticipantRole) -> String {
+        switch role {
+        case .standby: "Standby · Recent contact"
+        case .active: "Active · Recent contact"
+        case .worker: "Worker · Recent contact"
+        case .unknown: "Recent contact"
+        }
+    }
+
+    private func serverAccessibilityLabel(_ node: String) -> String {
+        var parts = [model.nodeDisplayName(for: node,
+            reportedName: model.reportedName(for: node, clusterID: service.clusterID), clusterID: service.clusterID)]
+        if lease?.ownerNodeID == node && (lease?.remainingSeconds ?? 0) > 0 { parts.append("Current owner") }
+        if let observation = model.participant(for: node, clusterID: service.clusterID) {
+            parts.append(observation.fresh ? presenceLabel(observation.role) : "Contact stale")
+            parts.append("Last seen \(Int(observation.ageSeconds)) seconds ago")
+        } else { parts.append("Presence unknown") }
+        if preference.preferredPrimaryNodeID == node { parts.append("Preferred Primary") }
+        return parts.joined(separator: ", ")
+    }
+
     /// A quiet, optional setting: most services never need one.
     private var preferredPrimaryRow: some View {
         HStack(spacing: 8) {
@@ -168,7 +189,7 @@ private struct WitnessGuardedServiceDetails: View {
         })
         ConsoleSection(title: "Known Servers", accessory: { Text("\(nodes.count) observed") }, content: {
             if nodes.isEmpty {
-                ConsoleEmptyState(symbol: "server.rack", title: "No servers observed yet", detail: "Servers appear after successfully participating in this service’s ownership.")
+                ConsoleEmptyState(symbol: "server.rack", title: "No servers observed yet", detail: "Compatible servers report their presence while active or in standby. Earlier clients appear after holding ownership.")
             } else {
                 VStack(spacing: 0) {
                     ForEach(nodes, id: \.self) { node in
@@ -185,19 +206,30 @@ private struct WitnessGuardedServiceDetails: View {
                                     if preference.preferredPrimaryNodeID == node {
                                         Label("Preferred Primary", systemImage: "star.fill").font(.caption).foregroundStyle(.secondary)
                                     }
-                                    Text(lease?.ownerNodeID == node && (lease?.remainingSeconds ?? 0) > 0 ? "Current owner" : "Previously observed")
-                                        .font(.caption).foregroundStyle(.secondary)
+                                    if lease?.ownerNodeID == node && (lease?.remainingSeconds ?? 0) > 0 {
+                                        Text("Current owner").font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    if let observation = model.participant(for: node, clusterID: service.clusterID) {
+                                        Label(observation.fresh ? presenceLabel(observation.role) : "Contact stale",
+                                              systemImage: observation.fresh ? "checkmark.circle" : "clock")
+                                            .font(.caption).foregroundStyle(observation.fresh ? Color.green : Color.secondary)
+                                        Text("Last seen \(Int(observation.ageSeconds))s ago").font(.caption).foregroundStyle(.secondary)
+                                    } else {
+                                        Text("Presence unknown").font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                                 Image(systemName: "info.circle").foregroundStyle(.secondary)
                             }.padding(12).contentShape(Rectangle())
                         }.buttonStyle(.plain)
+                            .accessibilityLabel(serverAccessibilityLabel(node))
+                            .accessibilityHint("Shows server details")
                         if node != nodes.last { Divider().padding(.leading, 58) }
                     }
                 }.consoleRowGroup()
             }
             preferredPrimaryRow
             if let preferenceError { ConsoleIssue(title: "Preference could not be saved", detail: preferenceError) }
-            Text("Known servers come from retained ownership history. This list does not indicate standby health or uptime.")
+            Text("Recent contact comes from authenticated server reports. Standby and active roles are reported by each server; current ownership comes from Ruru’s lease. Contact becomes stale after 45 seconds and does not prove failover readiness.")
                 .font(.caption).foregroundStyle(.secondary)
         })
         ConsoleSection("Recent Activity") {
@@ -226,7 +258,7 @@ private struct WitnessGuardedServiceDetails: View {
         } message: {
             Text("Its servers will no longer be able to acquire or renew ownership. Existing permission expires within 30 seconds. Ownership terms and history are retained, and other services keep running.")
         }
-        .popover(isPresented: Binding(get: { selectedNode != nil }, set: { if !$0 { selectedNode = nil } })) {
+        .sheet(isPresented: Binding(get: { selectedNode != nil }, set: { if !$0 { selectedNode = nil } })) {
             if let node = selectedNode {
                 WitnessOwnerDetails(nodeID: node, reportedName: model.reportedName(for: node, clusterID: service.clusterID),
                                     savedName: service.nodeDisplayNames[node], clusterID: service.clusterID) {
@@ -395,6 +427,10 @@ struct WitnessLeaseCode: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 14)
         .consoleRowGroup()
+        // Keep the animated/selectable code a single stable accessibility node.
+        // macOS can otherwise recurse while resolving its child labels.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Ownership term \(lease?.term ?? 0), \(owned ? "\(Int(ceil(lease?.remainingSeconds ?? 0))) seconds left in this grant" : caption(0))")
         .onAppear(perform: resetAnchor)
         .onChange(of: lease?.remainingSeconds) { resetAnchor() }
     }

@@ -66,6 +66,18 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
   one-second polls, refills on each renewal, and is green while renewals keep
   up, orange ("Renewal late") below a third, red in the last seconds. No
   progress bars for leases. Respect Reduce Motion.
+- First run opens a four-step setup assistant sheet that gets Ruru working
+  before any servers: Welcome, Public Address, Keep Ruru Running, Ready (with
+  Add Your First App). Step dots, Finish Later, Back and one primary action.
+  Steps read real state so it resumes correctly. A public address is expected;
+  "Skip — Local Testing Only" is a small link.
+- Cloudflare setup (assistant and Internet Access) is token → choose one of the
+  token's domains → subdomain (default "ruru") with a live address preview →
+  Connect, showing a step checklist, then "Reachable from the internet".
+  Failures name the step; a connector that doesn't register within 90 seconds
+  shows its last output lines (secrets redacted). Overview's summary lists "needs attention" items
+  (finish setup, stopped, no public address, no services, unpaired service,
+  servers waiting to pair), each with the one action that fixes it.
 - Pairing codes appear in Connection Details → Pair a Server in the same
   one-time-code style as leases: grouped monospaced characters and an expiry
   ring, with Cancel Code. Pending requests show server name, node ID and age
@@ -118,9 +130,18 @@ activity and per-service connection details. Add Service uses a modal draft;
 renaming does not interrupt ownership. Use “server” or “participant” for generic
 clients, and SwiftMesh pairing instructions only for a SwiftBot service.
 
-Distinguish current ownership from health. Label past participants “Previously
-observed”; do not call them connected, online or healthy without fresh evidence.
+Distinguish current ownership from health. Label historical participants' contact
+“Presence unknown”; do not call them connected, online or healthy without fresh evidence.
 Empty service ownership remains a neutral state.
+
+Known Servers also includes authenticated presence reports from standbys. Show
+Current owner independently of the reported role and Recent contact/Last seen.
+At 45 seconds show Contact stale and stop displaying the role as current; old
+clients with only ownership history show Presence unknown. Reports expire after
+600 seconds; history remains. Do not describe contact as proof of failover readiness.
+Server Details opens as a sheet, independent of where the clicked row or Activity
+lies in the scroll view. Expose the animated lease code as one stable accessible
+description containing its term and remaining grant time.
 
 Preferred Primary is optional and secondary: show it as one compact row under
 Known Servers (star, name or "None", a borderless Change menu with Choose… and

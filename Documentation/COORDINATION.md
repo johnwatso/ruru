@@ -84,10 +84,10 @@ Availability answers what has been observed recently. Several nodes may serve
 resources concurrently, including while another node owns the bot's active work.
 Keep these facts separate in the API, persisted model and console.
 
-Known Servers currently derives from ownership history. It must not become an
-implicit online-node registry. Future reports need an explicit freshness model,
-bounded expiry and an unknown/stale state. Use monotonic time for live freshness
-and conservatively treat prior-process observations as unverified after restart.
+Known Servers combines ownership history with explicit participant presence v1
+reports. Reports have bounded expiry and unknown/stale states, independent of
+resource catalogue opt-in. Freshness uses monotonic time; process restart starts
+empty. Recent contact and self-reported roles do not prove takeover readiness.
 Wall-clock timestamps support display and audit, not proof of current liveness.
 
 Managed operations need explicit authorization, durable intent where required,

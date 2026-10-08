@@ -13,6 +13,13 @@ public struct WitnessTunnelSettings: Codable, Equatable, Sendable {
     public var isConfigured: Bool { !hostname.isEmpty && !tunnelID.isEmpty && !accountID.isEmpty }
 }
 
+/// A Cloudflare zone the API token can manage, offered as Ruru's domain.
+public struct CloudflareDomain: Sendable, Hashable, Identifiable {
+    public let id: String
+    public let name: String
+    public init(id: String, name: String) { self.id = id; self.name = name }
+}
+
 public struct ProvisionedWitnessTunnel: Sendable {
     public let settings: WitnessTunnelSettings
     public let connectorToken: String
@@ -40,6 +47,18 @@ public struct WitnessInternetSetup: Sendable {
         return host
     }
 
+    /// The domains (zones) this token can see. Listing them is also the token
+    /// check, and works for both user and account-owned tokens.
+    public func listDomains(apiToken: String) async throws -> [CloudflareDomain] {
+        let token = Self.normalizedToken(apiToken)
+        guard !token.isEmpty else { throw SetupError.missingToken }
+        let zones: [CloudflareDNSProvider.ZoneSummary]
+        do { zones = try await CloudflareDNSProvider(apiToken: token, session: session).listZones() }
+        catch { throw SetupError.step("Checking the token", error) }
+        guard !zones.isEmpty else { throw SetupError.noDomains }
+        return zones.map { CloudflareDomain(id: $0.id, name: $0.name.lowercased()) }.sorted { $0.name < $1.name }
+    }
+
     public func provision(
         apiToken: String, hostname: String, settings: WitnessTunnelSettings, port: Int,
         progress: @escaping @Sendable (String) async -> Void = { _ in },
@@ -51,20 +70,25 @@ public struct WitnessInternetSetup: Sendable {
         guard !normalizedToken.isEmpty else { throw SetupError.missingToken }
         let dns = CloudflareDNSProvider(apiToken: normalizedToken, session: session)
         await progress("Checking Cloudflare access…")
-        try await dns.verifyAPITokenDetailed()
-        let zones = try await dns.listZones()
+        let zones: [CloudflareDNSProvider.ZoneSummary]
+        do { zones = try await dns.listZones() } catch { throw SetupError.step("Checking Cloudflare access", error) }
         guard let zone = zones.filter({ hostname.hasSuffix("." + $0.name.lowercased()) })
             .max(by: { $0.name.count < $1.name.count }) else { throw SetupError.zoneNotFound }
         await progress("Checking the hostname…")
         // Never replace a bot's or somebody else's DNS record. No force option.
-        if let record = try await dns.findDNSRecord(zoneID: zone.id, hostname: hostname) {
+        let existingRecord: CloudflareDNSProvider.DNSRecordSummary?
+        do { existingRecord = try await dns.findDNSRecord(zoneID: zone.id, hostname: hostname) }
+        catch { throw SetupError.step("Checking the address", error) }
+        if let record = existingRecord {
             guard !settings.tunnelID.isEmpty, record.type.uppercased() == "CNAME",
                   record.content.caseInsensitiveCompare(CloudflareTunnelClient.tunnelTargetHostname(for: settings.tunnelID)) == .orderedSame
             else { throw SetupError.hostnameInUse }
         }
         await progress("Creating Ruru’s tunnel…")
         let client = CloudflareTunnelClient(apiToken: normalizedToken, session: session)
-        let (tunnel, _) = try await client.createTunnel(hostname: hostname, zone: zone, name: settings.name)
+        let tunnel: CloudflareTunnelClient.TunnelSummary
+        do { (tunnel, _) = try await client.createTunnel(hostname: hostname, zone: zone, name: settings.name) }
+        catch { throw SetupError.step("Creating Ruru’s tunnel", error) }
         guard UUID(uuidString: tunnel.id) != nil, tunnel.name == settings.name else {
             throw SetupError.invalidConfiguration
         }
@@ -77,18 +101,25 @@ public struct WitnessInternetSetup: Sendable {
         let provisioned = ProvisionedWitnessTunnel(settings: saved, connectorToken: tunnel.token)
         try await checkpoint(provisioned)
         await progress("Connecting the local Ruru service…")
-        try await client.configureTunnel(tunnel, hostname: hostname, originURL: "http://127.0.0.1:\(port)")
+        do { try await client.configureTunnel(tunnel, hostname: hostname, originURL: "http://127.0.0.1:\(port)") }
+        catch { throw SetupError.step("Routing the tunnel to Ruru", error) }
         await progress("Creating the HTTPS address…")
-        _ = try await dns.configureTunnelDNSRoute(hostname: hostname,
-            tunnelTarget: CloudflareTunnelClient.tunnelTargetHostname(for: tunnel.id), zoneID: zone.id)
+        do {
+            _ = try await dns.configureTunnelDNSRoute(hostname: hostname,
+                tunnelTarget: CloudflareTunnelClient.tunnelTargetHostname(for: tunnel.id), zoneID: zone.id)
+        } catch { throw SetupError.step("Creating the DNS record", error) }
         saved.enabled = true
         return ProvisionedWitnessTunnel(settings: saved, connectorToken: tunnel.token)
     }
 
     public enum SetupError: LocalizedError {
-        case invalidConfiguration, missingToken, zoneNotFound, hostnameInUse
+        case invalidConfiguration, missingToken, zoneNotFound, hostnameInUse, noDomains
+        /// A Cloudflare step failed; the message says which one.
+        case step(String, Swift.Error)
         public var errorDescription: String? {
             switch self {
+            case .noDomains: "This token can’t see any domains. Give it Zone → Zone → Read for the domain Ruru should use."
+            case .step(let name, let error): "\(name) failed: \(error.localizedDescription)"
             case .invalidConfiguration: "Enter a subdomain such as ruru.example.com and a valid listener port."
             case .missingToken: "Enter a Cloudflare API token."
             case .zoneNotFound: "This subdomain is not in a zone accessible to this Cloudflare API token. Check Zone Read and DNS Edit permissions."
@@ -112,4 +143,7 @@ public actor WitnessInternetAccess {
     }
 
     public func stop() async { await manager.stopForAppTermination() }
+
+    /// The Cloudflare connector's recent output (secrets redacted).
+    public func diagnostics() async -> [String] { await manager.recentOutput() }
 }

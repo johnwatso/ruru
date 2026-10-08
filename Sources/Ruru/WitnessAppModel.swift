@@ -14,8 +14,14 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var coordinationEnrollments: [CoordinationEnrollment] = []
     private let catalogue = CoordinationCatalogue()
     private let pairing = PairingDesk()
+    private let participants = ParticipantPresence()
+    @Published private(set) var participantObservations: [ParticipantObservation] = []
     @Published private(set) var pairingCodes: [PairingDesk.Code] = []
     @Published private(set) var pairingRequests: [PairingDesk.Request] = []
+    /// Servers approved this session, by cluster ID, for the setup assistant.
+    @Published private(set) var pairedServers: [String: [String]] = [:]
+    /// The first-run setup assistant. Opens until setup is completed.
+    @Published var showingSetup = false
     private var announcedPairings: Set<String> = []
     @Published private(set) var snapshot: WitnessSnapshot?
     @Published private(set) var error: String?
@@ -50,12 +56,23 @@ final class WitnessAppModel: ObservableObject {
     private let preview: Bool
 
     init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--preview") ||
-         ProcessInfo.processInfo.arguments.contains("--preview-screenshots")) {
+         ProcessInfo.processInfo.arguments.contains("--preview-screenshots") ||
+         Bundle.main.object(forInfoDictionaryKey: "RuruScreenshotPreview") as? Bool == true) {
         self.preview = preview
         if preview {
             // Display-only service; previews never touch storage or Keychain.
             configuration.services = [Self.previewService]
-            if ProcessInfo.processInfo.arguments.contains("--preview-screenshots") {
+            configuration.setup.completed = true
+            if ProcessInfo.processInfo.arguments.contains("--preview-setup") {
+                configuration.services = []
+                configuration.setup.completed = false
+                state = .running
+                listenerPort = UInt16(configuration.port)
+                showingSetup = true
+                return
+            }
+            if ProcessInfo.processInfo.arguments.contains("--preview-screenshots") ||
+                Bundle.main.object(forInfoDictionaryKey: "RuruScreenshotPreview") as? Bool == true {
                 loadScreenshotPreview()
                 return
             }
@@ -78,6 +95,7 @@ final class WitnessAppModel: ObservableObject {
         }
         do {
             configuration = try WitnessStorage.load()
+            showingSetup = !configuration.setup.completed
             discordWebhook = (try? WitnessKeychain.read(RuruDiscordWebhook.keychainAccount)).flatMap { $0 }
                 .flatMap(RuruDiscordWebhook.validated)
             discordConfigured = discordWebhook != nil
@@ -131,6 +149,11 @@ final class WitnessAppModel: ObservableObject {
         internetStatus = WitnessInternetStatus(state: .enabled, publicURL: configuration.publicEndpoint,
                                               detail: "Connected to Cloudflare.")
         let now = Date()
+        participantObservations = [
+            .init(clusterID: previewCluster, nodeID: "home-mac", nodeName: "Home Mac", role: .active, ageSeconds: 2, fresh: true),
+            .init(clusterID: previewCluster, nodeID: "backup-mac", nodeName: "Backup Mac", role: .standby, ageSeconds: 4, fresh: true),
+            .init(clusterID: previewCluster, nodeID: "new-standby", nodeName: "New Standby", role: .standby, ageSeconds: 75, fresh: false)
+        ]
         snapshot = WitnessSnapshot(recoverySeconds: 0,
             leases: [LeaseStatus(clusterID: previewCluster, ownerNodeID: "home-mac", term: 42,
                                  remainingSeconds: 26, ownerNodeName: "Home Mac")],
@@ -146,11 +169,12 @@ final class WitnessAppModel: ObservableObject {
         // shows its normal refill cycle instead of draining to "late".
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
                 guard let self, let current = self.snapshot else { return }
                 self.snapshot = WitnessSnapshot(recoverySeconds: 0, leases: current.leases.map {
                     LeaseStatus(clusterID: $0.clusterID, ownerNodeID: $0.ownerNodeID, term: $0.term,
-                                remainingSeconds: 30, ownerNodeName: $0.ownerNodeName)
+                                remainingSeconds: $0.remainingSeconds <= 26 ? 30 : $0.remainingSeconds - 1,
+                                ownerNodeName: $0.ownerNodeName)
                 }, events: current.events)
             }
         }
@@ -162,13 +186,18 @@ final class WitnessAppModel: ObservableObject {
     func events(for clusterID: String) -> [WitnessEvent] { (snapshot?.events ?? []).filter { $0.clusterID == clusterID } }
     func knownNodes(for clusterID: String) -> [String] {
         var nodes = Set(events(for: clusterID).map(\.nodeID))
+        nodes.formUnion(participantObservations.filter { $0.clusterID == clusterID }.map(\.nodeID))
         if let owner = lease(for: clusterID)?.ownerNodeID, !owner.isEmpty { nodes.insert(owner) }
         return nodes.sorted()
     }
     func reportedName(for nodeID: String, clusterID: String) -> String? {
+        if let name = participant(for: nodeID, clusterID: clusterID)?.nodeName { return name }
         let lease = lease(for: clusterID)
         if lease?.ownerNodeID == nodeID { return lease?.ownerNodeName }
         return events(for: clusterID).first { $0.nodeID == nodeID }?.nodeName
+    }
+    func participant(for nodeID: String, clusterID: String) -> ParticipantObservation? {
+        participantObservations.first { $0.clusterID == clusterID && $0.nodeID == nodeID }
     }
     var guardingSummary: String {
         let count = configuration.guardedServices.count
@@ -219,7 +248,7 @@ final class WitnessAppModel: ObservableObject {
             for service in configuration.guardedServices where serviceCredentials[service.clusterID] == nil {
                 serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
             }
-            let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue, pairing: pairing)
+            let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue, pairing: pairing, participants: participants)
             self.server = server
             listenerPort = try await server.start(bindAddress: configuration.bindAddress, port: UInt16(configuration.port))
             state = .running
@@ -467,8 +496,12 @@ final class WitnessAppModel: ObservableObject {
         configuration = saved
         coordinationLocations.removeAll { $0.clusterID == service.clusterID }
         coordinationEnrollments.removeAll { $0.clusterID == service.clusterID }
+        participantObservations.removeAll { $0.clusterID == service.clusterID }
         await pairing.revoke(clusterID: service.clusterID)
-        if !preview, let access = try? accessCredentials() { try await catalogue.configureServices(access) }
+        if !preview, let access = try? accessCredentials() {
+            try await catalogue.configureServices(access)
+            try await participants.configureServices(access)
+        }
         // Durable leases and terms remain in DuckDB. Already granted permission
         // expires normally; old tokens cannot acquire or renew through the router.
     }
@@ -758,6 +791,9 @@ final class WitnessAppModel: ObservableObject {
     }
 
     private func refresh() async {
+        participantObservations = await participants.snapshot().filter { observation in
+            configuration.guardedServices.contains { $0.clusterID == observation.clusterID }
+        }
         pairingCodes = await pairing.activeCodes()
         pairingRequests = await pairing.pendingRequests()
         coordinationEnrollments = await catalogue.pendingEnrollments()
@@ -786,6 +822,155 @@ final class WitnessAppModel: ObservableObject {
         await evaluateAlerts()
     }
 
+    // MARK: Cloudflare
+
+    var hasSavedCloudflareToken: Bool {
+        !preview && ((try? WitnessKeychain.read("cloudflare-api-token")) ?? nil).map { !$0.isEmpty } == true
+    }
+
+    /// The domains a Cloudflare token can manage. An empty draft uses the saved token.
+    func cloudflareDomains(tokenDraft: String) async throws -> [CloudflareDomain] {
+        if preview {
+            try await Task.sleep(for: .milliseconds(400))
+            return [.init(id: "preview-1", name: "example.com"), .init(id: "preview-2", name: "ruruapp.dev")]
+        }
+        let token = tokenDraft.isEmpty ? ((try? WitnessKeychain.read("cloudflare-api-token")) ?? nil) ?? "" : tokenDraft
+        return try await WitnessInternetSetup().listDomains(apiToken: token)
+    }
+
+    /// Provisions the tunnel, then waits for the connector to register with
+    /// Cloudflare. If it doesn't within `timeout`, the error includes the
+    /// connector's recent output instead of leaving setup spinning.
+    func connectCloudflare(hostname: String, tokenDraft: String, timeout: Duration = .seconds(90)) async throws {
+        if preview {
+            // Display-only: walk the progress messages and show a connected tunnel.
+            for message in ["Checking Cloudflare access…", "Checking the hostname…", "Creating Ruru’s tunnel…",
+                            "Connecting the local Ruru service…", "Creating the HTTPS address…",
+                            "Starting Cloudflare’s connector on this Mac…"] {
+                internetProgress = message
+                try await Task.sleep(for: .milliseconds(450))
+            }
+            internetProgress = ""
+            configuration.tunnel.hostname = hostname
+            configuration.tunnel.tunnelID = "00000000-0000-4000-8000-000000000009"
+            configuration.tunnel.accountID = "preview"
+            configuration.tunnel.enabled = true
+            configuration.publicEndpoint = configuration.tunnel.publicURL
+            internetStatus = WitnessInternetStatus(state: .enabled, publicURL: configuration.publicEndpoint, detail: "Connected")
+            return
+        }
+        try await setupInternetAccess(hostname: hostname, tokenDraft: tokenDraft)
+        internetProgress = "Starting Cloudflare’s connector on this Mac…"
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if internetStatus.state == .enabled { internetProgress = ""; return }
+            if internetStatus.state == .error { break }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        internetProgress = ""
+        let lines = await internetAccess.diagnostics().suffix(6)
+        let reason = internetStatus.state == .error ? internetStatus.detail
+            : "The Cloudflare connector didn’t connect within \(Int(timeout.components.seconds)) seconds."
+        throw RuruBackup.Failure(lines.isEmpty ? reason : reason + "\n\nConnector output:\n" + lines.joined(separator: "\n"))
+    }
+
+    // MARK: Setup
+
+    /// Records setup choices (completion, local-only testing) without
+    /// touching services or the listener.
+    func updateSetup(_ change: (inout RuruSetupState) -> Void) async throws {
+        var draft = configuration
+        change(&draft.setup)
+        guard draft.setup != configuration.setup else { return }
+        try await saveConfiguration(draft)
+    }
+
+    /// A readable, unique cluster ID from a service name: "Media Server" → "media-server".
+    func suggestedClusterID(for name: String) -> String {
+        let slug = name.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
+            .split(separator: "-").joined(separator: "-")
+        let base = String((slug.isEmpty ? "service" : slug).prefix(48))
+        var candidate = base, index = 2
+        while configuration.services.contains(where: { $0.clusterID == candidate }) {
+            candidate = base + "-\(index)"; index += 1
+        }
+        return candidate
+    }
+
+    /// Checks that Ruru answers at its public address through Cloudflare, as a
+    /// server elsewhere would. Retries while DNS and the tunnel come up.
+    /// Returns nil on success, or a description of the last failure.
+    func verifyPublicAddress(attempts: Int = 12) async -> String? {
+        guard !preview else { return nil }
+        guard let url = URL(string: configuration.publicEndpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/health") else {
+            return "Ruru has no public address yet."
+        }
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        var last = "No response"
+        for attempt in 0..<attempts {
+            if attempt > 0 { try? await Task.sleep(for: .seconds(5)) }
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: 10)
+            request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            do {
+                let (data, response) = try await session.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                if (status == 200 || status == 503), body?["ready"] != nil { return nil }
+                last = "HTTP \(status)"
+            } catch { last = error.localizedDescription }
+        }
+        return "Ruru isn’t reachable at \(configuration.publicEndpoint) yet (\(last)). DNS can take a few minutes; try again shortly."
+    }
+
+    struct Attention: Identifiable {
+        enum Action { case continueSetup, start, page(WitnessPage) }
+        let id: String
+        let title: String
+        let detail: String
+        let health: WitnessHealth
+        let actionTitle: String
+        let action: Action
+    }
+
+    /// What stops Ruru being useful right now, most important first. Shown on
+    /// Overview, each with the one action that fixes it.
+    var attentionItems: [Attention] {
+        var items: [Attention] = []
+        let waiting = pairingRequests.count
+        if waiting > 0 {
+            items.append(.init(id: "pairing", title: waiting == 1 ? "A server wants to pair" : "\(waiting) servers want to pair",
+                               detail: "Approve or reject in the service’s page.", health: .warning,
+                               actionTitle: "Review", action: .page(.guarding)))
+        }
+        guard configuration.setup.completed else {
+            items.insert(.init(id: "setup", title: "Finish setting up Ruru",
+                               detail: "A few steps remain before your servers can use Ruru.", health: .warning,
+                               actionTitle: "Continue Setup", action: .continueSetup), at: 0)
+            return items
+        }
+        if state == .stopped, !legacyStorageNeedsReplacement {
+            items.append(.init(id: "stopped", title: "Ruru is stopped", detail: "Servers can’t take or keep ownership until it runs.",
+                               health: .warning, actionTitle: "Start", action: .start))
+        }
+        if !configuration.tunnel.isConfigured, !configuration.setup.localOnly {
+            items.append(.init(id: "address", title: "No public address",
+                               detail: "Servers on other Macs can’t reach Ruru until Internet Access is set up.",
+                               health: .warning, actionTitle: "Set Up", action: .page(.internet)))
+        }
+        if configuration.services.isEmpty {
+            items.append(.init(id: "services", title: "No services yet", detail: "Add an app such as SwiftBot, then pair its servers.",
+                               health: .inactive, actionTitle: "Add Service", action: .page(.guarding)))
+        }
+        for service in configuration.services where knownNodes(for: service.clusterID).isEmpty
+            && (pairedServers[service.clusterID] ?? []).isEmpty {
+            items.append(.init(id: "unpaired-" + service.id, title: "\(service.name) has no servers yet",
+                               detail: "Pair its servers with a code from Connection Details.", health: .inactive,
+                               actionTitle: "Pair", action: .page(.guarding)))
+        }
+        return items
+    }
+
     // MARK: Pairing
 
     /// A single-use code a server can exchange for this service's connection
@@ -812,6 +997,7 @@ final class WitnessAppModel: ObservableObject {
         }
         try await pairing.approve(request.id, with: .init(clusterID: service.clusterID, token: token,
                                                          leaseSeconds: Double(service.leaseSeconds)))
+        pairedServers[request.clusterID, default: []].append(request.nodeName ?? request.nodeID)
         pairingRequests = await pairing.pendingRequests()
     }
 

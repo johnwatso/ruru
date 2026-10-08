@@ -6,7 +6,8 @@ was the first app to use it and has a built-in template (its icon and pairing
 instructions), but every service is configured the same way and nothing in the
 protocol is SwiftBot-specific.
 
-This is lease guarding, not passive uptime monitoring or service discovery.
+Lease guarding controls exclusive work; participant reports independently show
+recent contact, including servers in standby.
 
 ## Register a service
 
@@ -95,7 +96,7 @@ Send JSON over HTTPS with `Authorization: Bearer <service token>`:
   `{"released":true}`. Release never decreases the term.
 - `GET /v1/service` describes the caller's service: `clusterID`, `leaseSeconds`,
   `recoverySeconds`, versioned `capabilities` (`lease`, `primaryPreference`,
-  `coordination`) and the current `lease` (owner, term, remaining seconds).
+  `coordination`, `participantPresence`) and the current `lease` (owner, term, remaining seconds).
   Feature-detect from `capabilities` rather than assuming a version. It is also
   a safe status endpoint for monitoring tools, scoped to one service's token.
 - 503 `authority_recovering` means Ruru restarted (or was restored) and is
@@ -167,13 +168,44 @@ failover or revokes a live lease. See [Preferred Primary](PRIMARY_PREFERENCE.md)
 
 ## What the console knows
 
-Known Servers comes from ownership history and the last stored owner. Past
-participation is not proof of current uptime, and a standby that never held
-ownership may not appear. Ruru keeps the last 256 transitions **per service**
+Known Servers combines ownership history with authenticated participant reports.
+An updated SwiftBot reports every 15 seconds, including while in standby. Past
+ownership alone shows **Presence unknown**. Ruru keeps the last 256 transitions **per service**
 (and shows the newest 64 per service), so a busy service can't hide another's
 history. Alerts report a service as down when its owner stops renewing and
-nobody takes over within 15 seconds. Probes and standby heartbeats are not
-implemented.
+nobody takes over within 15 seconds. Contact reports do not prove application
+health, synchronization, or readiness to take over.
+
+### Participant presence v1
+
+Feature-detect `participantPresence` version 1 in `GET /v1/service`. Send
+`POST /v1/participants/report` every 15 seconds with the service bearer token:
+
+```json
+{"version":1,"clusterID":"swiftbot","nodeID":"stable-backup-id","nodeName":"Backup Mac","role":"standby"}
+```
+
+Roles are `active`, `standby`, `worker` or `unknown` and are self-reported; Ruru
+always derives Current owner from the lease. A report neither acquires nor renews
+a lease. Success: `{"version":1,"accepted":true,"freshSeconds":45,"reportAfterSeconds":15}`.
+Missing/invalid credentials return 401, cross-service reports 403, invalid fields
+400, unsupported versions 409, and capacity/admission overflow 429. Node IDs
+must be nonempty, at most 128 UTF-8 bytes, without whitespace padding or control
+characters; optional names have a 256-byte limit and no control characters.
+
+Reports become stale at 45 seconds and expire at 600 seconds using monotonic
+time. Up to 32 nodes per service (32 services total) are held in a separate
+in-memory actor; restart starts empty, removal/token replacement clears reports.
+The existing four-request metadata budget also covers participant traffic,
+leaving the remaining listener capacity available for leases. Service tokens
+authenticate a trusted group, not the individual claimed node ID. Public
+`/health` and policy reads do not register participants.
+
+RuruClient exposes `reportPresence(role:)`; call it in a separate reporting loop
+and check `describe().supports("participantPresence")` before using it. Old
+clients retain lease compatibility; they cannot show standby presence until
+updated. Updated SwiftBot feature-detects, rechecking once per minute, and ignores
+presence failures independently of its ownership deadlines.
 
 ## Resource catalogue
 

@@ -46,6 +46,14 @@ struct WitnessOverview: View {
         .sheet(isPresented: $showingStorageSetup) { WitnessLegacyStorageSetupSheet().environmentObject(model) }
     }
 
+    private func perform(_ action: WitnessAppModel.Attention.Action) {
+        switch action {
+        case .continueSetup: model.showingSetup = true
+        case .start: Task { await model.start() }
+        case .page(let page): onNavigate(page)
+        }
+    }
+
     private func showSettings() {
         NSApplication.shared.activate()
         openSettings()
@@ -59,6 +67,7 @@ struct WitnessOverview: View {
                         Button("Stop Service…", systemImage: "stop.fill", role: .destructive, action: onStop)
                         Divider()
                     }
+                    Button("Run Setup Assistant…", systemImage: "wand.and.stars") { model.showingSetup = true }
                     Button("Show Data Folder in Finder", systemImage: "folder") {
                         NSWorkspace.shared.activateFileViewerSelecting([WitnessStorage.directory])
                     }
@@ -89,8 +98,12 @@ struct WitnessOverview: View {
                 VStack(alignment: .leading, spacing: 18) { appIcon; summaryIdentity }
             }.padding(28)
 
-            if model.error != nil || model.isRecovering || model.internetStatus.state == .error {
+            if model.error != nil || model.isRecovering || model.internetStatus.state == .error || !model.attentionItems.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.attentionItems) { item in
+                        WitnessOverviewIssue(title: item.title, detail: item.detail, health: item.health,
+                                             reviewTitle: item.actionTitle) { perform(item.action) }
+                    }
                     if let error = model.error {
                         WitnessOverviewIssue(title: "Authority unavailable", detail: error, health: .error,
                                              reviewTitle: model.legacyStorageNeedsReplacement ? "Set Up DuckDB…" : "Review") {

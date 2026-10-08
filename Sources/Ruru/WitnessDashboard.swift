@@ -39,6 +39,7 @@ struct WitnessDashboard: View {
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 640)
         .sheet(isPresented: $showInternet) { WitnessInternetSheet(hostname: model.configuration.tunnel.hostname).environmentObject(model) }
+        .sheet(isPresented: $model.showingSetup) { RuruSetupAssistant().environmentObject(model) }
         .confirmationDialog("Stop the Ruru service?", isPresented: $confirmingStop) {
             Button("Stop Service", role: .destructive) { Task { await model.stop() } }
         } message: {

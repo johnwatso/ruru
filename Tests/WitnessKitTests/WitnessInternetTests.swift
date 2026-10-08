@@ -41,6 +41,36 @@ final class WitnessInternetTests: XCTestCase {
         return session
     }
 
+    func testDomainsComeFromTheTokenWithoutTheUserOnlyVerifyEndpoint() async throws {
+        let domains = try await WitnessInternetSetup(session: session()).listDomains(apiToken: "test-api-secret")
+        XCTAssertEqual(domains, [CloudflareDomain(id: "zone", name: "example.com")])
+        XCTAssertFalse(MockCloudflare.requests.contains { $0.url!.path.hasSuffix("/user/tokens/verify") },
+                       "Account-owned tokens can't use /user/tokens/verify")
+        _ = try await WitnessInternetSetup(session: session()).provision(apiToken: "test-api-secret", hostname: hostname,
+            settings: WitnessTunnelSettings(), port: 38990)
+        XCTAssertFalse(MockCloudflare.requests.contains { $0.url!.path.hasSuffix("/user/tokens/verify") })
+    }
+
+    func testATokenWithNoDomainsAndFailedStepsExplainThemselves() async throws {
+        MockCloudflare.install { _ in (200, ["success": true, "result": [] as [Any], "errors": []]) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockCloudflare.self]
+        let empty = URLSession(configuration: config)
+        defer { empty.invalidateAndCancel() }
+        do { _ = try await WitnessInternetSetup(session: empty).listDomains(apiToken: "test-api-secret"); XCTFail() }
+        catch { XCTAssertTrue(error.localizedDescription.contains("can’t see any domains"), error.localizedDescription) }
+
+        let failing = session(failurePath: "/client/v4/accounts/account/cfd_tunnel")
+        do {
+            _ = try await WitnessInternetSetup(session: failing).provision(apiToken: "test-api-secret", hostname: hostname,
+                settings: WitnessTunnelSettings(), port: 38990)
+            XCTFail("Expected the tunnel step to fail")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.hasPrefix("Creating Ruru’s tunnel failed"), error.localizedDescription)
+        }
+        XCTAssertTrue(CloudflareDNSProvider.transportError(URLError(.timedOut)).localizedDescription.contains("didn’t respond in time"))
+    }
+
     func testCreatesIndependentTunnelLoopbackRouteAndProxiedDNS() async throws {
         let session = session()
         let settings = WitnessTunnelSettings()

@@ -1,5 +1,72 @@
 # Development log and next steps
 
+## 2026-10-08 — Standby participant visibility
+
+- Added application-neutral `participantPresence` v1 discovery and authenticated
+  `/v1/participants/report`, independent of lease acquisition. A bounded actor
+  holds 32 nodes per service, uses monotonic 45-second freshness/600-second
+  retention, starts empty after restart, and clears removed/rotated scopes.
+  Presence shares the existing four metadata connection slots; the durable lease
+  schema, terms, quarantine and commit path are unchanged.
+- Known Servers combines reports with ownership history, shows Current owner
+  separately from reported role/recent contact, and displays Last seen, Contact
+  stale or Presence unknown. RuruClient exposes `reportPresence(role:)`; SwiftBot
+  now sends reports from its monitoring loop on both Primary and Standby, with
+  feature detection for older Ruru versions. Both apps need updating for standby
+  presence; re-pairing is not required when the service credentials are unchanged.
+- Validation: full Ruru suite passed (133 tests), including a real server/client
+  standby report while another node holds ownership, unchanged term/renewal,
+  scope authentication, validation, bounds, freshness, revocation and mixed
+  presence/catalogue load with lease renewals. The first run hit the existing
+  restart conformance test's asynchronous lock-release race; isolated recheck and
+  the final full run passed. After the client error-mapping change, all 22 focused
+  conformance/presence/coordination tests also passed. Final Debug and universal
+  Release builds passed; app and WitnessKit contain arm64/x86_64 with a 15.0 app
+  deployment target. SwiftBot's final isolated build and 21 mesh tests passed.
+- Native preview verified owner, fresh standby and stale contact rows, plus
+  details for a node with no ownership history. Server details use a sheet so
+  rows remain usable when Activity is below the viewport. The animated lease
+  has one stable accessibility label, avoiding the observed macOS 27 label
+  recursion; preview renewals now update every second and refill every five.
+  Screenshot: `.artifacts/participant-preview/standby-presence.png`.
+- UI tooling briefly relaunched a preview without its arguments and opened the
+  existing local development authority data. Copied test bundles can now carry
+  `RuruScreenshotPreview=true` to retain model/updater isolation on relaunch;
+  the Release plist was checked and does not contain it. No remote Mac,
+  credentials, login item or tunnel was changed. Actual deployment to the user's
+  Macs and Intel/Sequoia execution remain unverified.
+
+## 2026-10-08 — Setup assistant, Cloudflare domain picker and needs-attention list
+
+- First launch opens a setup assistant scoped to getting Ruru itself working
+  before any servers: Welcome; Public Address; Keep Ruru Running (login item,
+  auto-start, notifications, Discord); Ready (status checklist and Add Your
+  First App). Apps and pairing happen afterwards in Guarding.
+- Cloudflare setup now starts from the token: it lists the token's domains
+  (zones), you pick one and a subdomain, and Ruru connects. The separate
+  `/user/tokens/verify` call is gone (it rejects account-owned tokens and had a
+  5-second timeout); listing zones is the check, and the header-injection guard
+  moved there. Cloudflare transport errors are readable ("didn't respond in
+  time", DNS, offline), reads retry once on timeout, every provisioning failure
+  names its step, and the tunnel health probe allows 15 s. After provisioning,
+  Ruru waits up to 90 s for the connector to register; if it doesn't, the error
+  includes the connector's last output lines with long tokens redacted. The
+  Internet Access sheet uses the same flow.
+- Steps resume from real state; `setup.completed` and `setup.localOnly` are the
+  only stored progress. Finish Later leaves a "Finish setting up" item on
+  Overview; More → Run Setup Assistant… reopens it.
+- Overview's summary lists what needs attention, each with one fixing action:
+  finish setup, Ruru stopped, no public address, no services, a service without
+  servers, servers waiting to pair.
+- Validation: full suite passed (129 tests, zero failures), including domain
+  listing, no use of the user-only verify endpoint, step-named failures and the
+  header-injection guard. Clicked through every step in `--preview
+  --preview-setup` (domains and connection simulated). Not exercised: a real
+  Cloudflare account. The original timeout on the Mac mini was not reproduced
+  here; the likely causes (5 s token check, unnamed URL timeouts, a connector
+  that never registered with no explanation) are addressed, and a repeat will
+  now say which step and why.
+
 ## 2026-10-08 — Pairing codes
 
 - Connection Details → Pair a Server creates a single-use, 10-minute code

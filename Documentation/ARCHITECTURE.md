@@ -243,6 +243,9 @@ Home Mac/Backup Mac ownership history and `https://gaurd.ruruapp.dev`. This flag
 enables preview isolation for both the model and updater. Running/connected
 status is simulated without opening storage, loading credentials, starting a
 listener/connector, provisioning Cloudflare or registering login items.
+Copied UI-test bundles can also set `RuruScreenshotPreview=true` in their plist
+to preserve this isolation when UI tools relaunch without arguments. This key
+is absent from normal generated app/Release configuration.
 
 ## Guarded services
 
@@ -267,10 +270,15 @@ startup failure and never resets storage. Other services and the authority epoch
 remain intact. Settings drafts cannot resurrect a removed service.
 
 Activity snapshots include the existing database cluster column and all 256
-retained transitions. Known servers are derived from successful ownership events
-and the last owner, with names scoped by service. They are not an online/heartbeat
-registry; a standby that has never held ownership may not appear. Independent
-uptime probes, alerts and automatic application discovery are future work.
+retained transitions. Known servers combine successful ownership history with
+authenticated presence reports in a separate bounded in-memory actor. Updated
+clients report every 15 seconds even in standby. Contact is fresh for 45 seconds,
+stale until 600 seconds, then discarded; restart clears it. Current ownership is
+always derived from the lease, while reported roles remain self-reported. Old
+clients without reports show unknown presence. The capability shares the four
+metadata-request slots and preserves the lease schema, commit path and deadlines.
+See [participant presence](INTEGRATIONS.md#participant-presence-v1). Independent
+uptime probes and automatic application discovery remain future work.
 Other apps must implement the lease protocol and stop output before their local
 monotonic permission expires; see [integrations](INTEGRATIONS.md).
 

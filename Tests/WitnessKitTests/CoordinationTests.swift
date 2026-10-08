@@ -272,7 +272,14 @@ final class CoordinationTests: XCTestCase {
             let reportData = try JSONEncoder().encode(CoordinationReport(clusterID: "app", nodeID: "standby", resources: [resource()]))
             let renewData = try JSONEncoder().encode(LeaseRequest(clusterID: "app", nodeID: "owner", term: grant.term))
             try await withThrowingTaskGroup(of: (Int, Bool).self) { group in
-                for _ in 0..<40 { group.addTask { (try await send("/v1/coordination/report", reportData).1, false) } }
+                let presenceData = try JSONEncoder().encode(ParticipantReport(clusterID: "app", nodeID: "backup", role: .standby))
+                for index in 0..<40 {
+                    group.addTask {
+                        let path = index.isMultiple(of: 2) ? "/v1/coordination/report" : "/v1/participants/report"
+                        let body = index.isMultiple(of: 2) ? reportData : presenceData
+                        return (try await send(path, body).1, false)
+                    }
+                }
                 for _ in 0..<10 { group.addTask { (try await send("/v1/lease/renew", renewData).1, true) } }
                 for try await (status, renewal) in group {
                     if renewal { XCTAssertEqual(status, 200) }
@@ -291,7 +298,7 @@ final class CoordinationTests: XCTestCase {
             await server.stop()
         } catch { await server.stop(); throw error }
     }
-    func testSlowCatalogueConnectionsLeaveRoomForLeaseRequests() async throws {
+    func testSlowMetadataConnectionsLeaveRoomForLeaseRequests() async throws {
         let server = try WitnessHTTPServer(store: store(), services: credentials())
         let port = try await server.start(port: 0)
         var sockets: [Int32] = []
@@ -299,7 +306,7 @@ final class CoordinationTests: XCTestCase {
         let session = URLSession(configuration: .ephemeral)
         defer { session.invalidateAndCancel() }
         do {
-            for _ in 0..<4 {
+            for index in 0..<4 {
                 let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
                 guard descriptor >= 0 else { throw POSIXError(.EIO) }
                 sockets.append(descriptor)
@@ -315,7 +322,8 @@ final class CoordinationTests: XCTestCase {
                 }
                 XCTAssertEqual(connected, 0)
                 // Valid headers, deliberately unfinished body. Read timeout remains bounded.
-                let header = Data("POST /v1/coordination/report HTTP/1.1\r\nContent-Length: 20\r\n\r\n".utf8)
+                let path = index.isMultiple(of: 2) ? "/v1/coordination/report" : "/v1/participants/report"
+                let header = Data("POST \(path) HTTP/1.1\r\nContent-Length: 20\r\n\r\n".utf8)
                 let written = header.withUnsafeBytes { Darwin.write(descriptor, $0.baseAddress, $0.count) }
                 XCTAssertEqual(written, header.count)
             }

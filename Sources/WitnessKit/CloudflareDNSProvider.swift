@@ -334,6 +334,10 @@ struct CloudflareDNSProvider: Sendable {
     }
 
     func listZones() async throws -> [ZoneSummary] {
+        // The first request of every setup: refuse tokens that could inject headers.
+        guard !Self.hasInvalidAuthorizationHeaderCharacters(apiToken) else {
+            throw Error.apiFailed(Self.invalidRequestHeadersMessage)
+        }
         var components = URLComponents(url: baseURL.appendingPathComponent("zones"), resolvingAgainstBaseURL: false)
         components?.queryItems = [URLQueryItem(name: "per_page", value: "50")]
         guard let url = components?.url else { return [] }
@@ -517,12 +521,30 @@ struct CloudflareDNSProvider: Sendable {
     }
 
     private func sendData(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await session.data(for: request)
+        let (data, response): (Data, URLResponse)
+        do { (data, response) = try await session.data(for: request) }
+        catch let error as URLError where error.code == .timedOut && request.httpMethod == "GET" {
+            // Reads are safe to repeat; a slow first connection often succeeds on retry.
+            do { (data, response) = try await session.data(for: request) }
+            catch { throw Self.transportError(error) }
+        } catch { throw Self.transportError(error) }
         guard let http = response as? HTTPURLResponse else {
             throw Error.apiFailed("Cloudflare returned an invalid response.")
         }
 
         return (data, http)
+    }
+
+    static func transportError(_ error: Swift.Error) -> Error {
+        guard let error = error as? URLError else { return .apiFailed(error.localizedDescription) }
+        switch error.code {
+        case .timedOut: return .apiFailed("Cloudflare didn’t respond in time. Check this Mac’s internet connection and try again.")
+        case .notConnectedToInternet, .networkConnectionLost:
+            return .apiFailed("This Mac isn’t connected to the internet.")
+        case .cannotFindHost, .dnsLookupFailed:
+            return .apiFailed("This Mac couldn’t look up api.cloudflare.com. Check its DNS settings.")
+        default: return .apiFailed("Couldn’t reach Cloudflare: \(error.localizedDescription)")
+        }
     }
 
     private static func hasIdenticalRecordError(_ errors: [APIError]) -> Bool {

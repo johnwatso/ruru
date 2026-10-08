@@ -46,7 +46,24 @@ struct GuardedService: Codable, Equatable, Identifiable {
     }
 }
 
+/// First-run setup progress. Steps that can be read from state (tunnel,
+/// services) are not stored; only the choices that can't be are.
+struct RuruSetupState: Codable, Equatable {
+    /// The operator finished (or deliberately closed out) the setup assistant.
+    var completed = false
+    /// The operator chose to test without a public address.
+    var localOnly = false
+
+    init() {}
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        completed = try values.decodeIfPresent(Bool.self, forKey: .completed) ?? false
+        localOnly = try values.decodeIfPresent(Bool.self, forKey: .localOnly) ?? false
+    }
+}
+
 struct WitnessConfiguration: Codable, Equatable {
+    var setup = RuruSetupState()
     var bindAddress = "127.0.0.1"
     var port = 38990
     var publicEndpoint = ""
@@ -116,7 +133,7 @@ struct WitnessConfiguration: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case bindAddress, port, publicEndpoint, startAutomatically, showInDock, tunnel, alerts, services, servicePrimaryPreferences, serviceCoordinationPolicies
+        case setup, bindAddress, port, publicEndpoint, startAutomatically, showInDock, tunnel, alerts, services, servicePrimaryPreferences, serviceCoordinationPolicies
     }
 
     init(from decoder: Decoder) throws {
@@ -128,6 +145,7 @@ struct WitnessConfiguration: Codable, Equatable {
         showInDock = try values.decodeIfPresent(Bool.self, forKey: .showInDock) ?? false
         tunnel = try values.decodeIfPresent(WitnessTunnelSettings.self, forKey: .tunnel) ?? WitnessTunnelSettings()
         alerts = try values.decodeIfPresent(RuruAlertPreferences.self, forKey: .alerts) ?? RuruAlertPreferences()
+        setup = try values.decodeIfPresent(RuruSetupState.self, forKey: .setup) ?? RuruSetupState()
         services = try values.decode([GuardedService].self, forKey: .services)
         serviceCoordinationPolicies = try values.decodeIfPresent([String: CoordinationPolicy].self, forKey: .serviceCoordinationPolicies) ?? [:]
         servicePrimaryPreferences = try values.decodeIfPresent([String: WitnessPrimaryPreference].self, forKey: .servicePrimaryPreferences) ?? [:]

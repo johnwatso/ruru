@@ -116,6 +116,7 @@ struct WitnessRouter: Sendable {
     let services: [WitnessServiceCredential]
     let catalogue: CoordinationCatalogue
     let pairing: PairingDesk
+    let participants: ParticipantPresence
     private let policies: [String: WitnessServicePolicy]
     private let leaseSeconds: [String: Double]
 
@@ -124,12 +125,13 @@ struct WitnessRouter: Sendable {
     }
 
     init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil,
-         pairing: PairingDesk? = nil) throws {
+         pairing: PairingDesk? = nil, participants: ParticipantPresence? = nil) throws {
         authorization = try WitnessAuthorization(services: services)
         self.services = services
         self.store = store
         self.catalogue = try catalogue ?? CoordinationCatalogue(services: services)
         self.pairing = pairing ?? PairingDesk()
+        self.participants = try participants ?? ParticipantPresence(services: services)
         policies = Dictionary(uniqueKeysWithValues: services.map {
             ($0.clusterID, WitnessServicePolicy(clusterID: $0.clusterID, preference: $0.primaryPreference))
         })
@@ -137,6 +139,7 @@ struct WitnessRouter: Sendable {
     }
 
     func route(_ request: HTTPRequest) async -> LeaseReply {
+        if request.path.hasPrefix("/v1/participants/") { return await participants.route(request) }
         if request.path.hasPrefix("/v1/coordination/") { return await catalogue.route(request) }
         if request.method == "GET", request.path == "/health" || request.path.hasPrefix("/health?") {
             do {

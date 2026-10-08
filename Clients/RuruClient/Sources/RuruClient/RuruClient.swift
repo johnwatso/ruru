@@ -82,6 +82,7 @@ public enum RuruLeaseState: Sendable, Equatable {
 
 /// A client for Ruru's lease protocol (`/v1/lease/acquire|renew|release`).
 public actor RuruLeaseClient {
+    public enum ParticipantRole: String, Encodable, Sendable { case active, standby, worker, unknown }
     public let configuration: RuruConfiguration
     private let session: URLSession
     private var highestTerm: Int64 = 0
@@ -111,6 +112,25 @@ public actor RuruLeaseClient {
         let data = try await send("/v1/service", body: nil)
         do { return try JSONDecoder().decode(RuruServiceDescription.self, from: data) }
         catch { throw RuruError.server(status: 200, code: "invalid_response") }
+    }
+
+    /// Call every 15 seconds, independently of lease acquisition/renewal.
+    /// Discover `participantPresence` first; a report never grants ownership.
+    public func reportPresence(role: ParticipantRole = .unknown) async throws {
+        struct Report: Encodable {
+            let version = 1
+            let clusterID: String
+            let nodeID: String
+            let nodeName: String?
+            let role: ParticipantRole
+        }
+        let body = try JSONEncoder().encode(Report(clusterID: configuration.clusterID,
+            nodeID: configuration.nodeID, nodeName: configuration.nodeName, role: role))
+        let data = try await send("/v1/participants/report", body: body)
+        struct Reply: Decodable { let version: Int; let accepted: Bool }
+        guard let reply = try? JSONDecoder().decode(Reply.self, from: data), reply.version == 1, reply.accepted else {
+            throw RuruError.server(status: 200, code: "invalid_response")
+        }
     }
 
     /// Keeps ownership for as long as the calling task runs, reporting each
@@ -224,8 +244,8 @@ public actor RuruLeaseClient {
         if (200..<300).contains(status) { return data }
         let code = (try? JSONDecoder().decode([String: String].self, from: data))?["error"] ?? ""
         switch (status, code) {
-        case (409, "ownership_held"): throw RuruError.ownershipHeld
-        case (409, _): throw RuruError.ownershipLost
+        case (409, "ownership_held") where path.hasPrefix("/v1/lease/"): throw RuruError.ownershipHeld
+        case (409, _) where path.hasPrefix("/v1/lease/"): throw RuruError.ownershipLost
         case (503, "authority_recovering"): throw RuruError.recovering
         case (401, _): throw RuruError.unauthorized
         case (403, _): throw RuruError.forbidden(code)

@@ -44,6 +44,10 @@ existing owner; choosing, clearing or cancelling updates only the preview's
 metadata. It opens no database, listener or Keychain. The Preferred Primary
 image uses this fixture rather than a live workload.
 
+`--preview --preview-setup` opens the setup assistant with no services, for
+checking onboarding without touching storage, Keychain or Cloudflare (Connect
+is unavailable in preview; use Skip).
+
 For README captures, `--preview-screenshots` supplies a running/connected display
 with Home Mac and Backup Mac history and `https://gaurd.ruruapp.dev`. Add
 `--preview-light` or `--preview-dark` to override only this process's appearance,

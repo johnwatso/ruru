@@ -272,7 +272,7 @@ struct CloudflareTunnelClient: Sendable {
     }
 
     private func makeRequest(url: URL, method: String) -> URLRequest {
-        var request = URLRequest(url: url, timeoutInterval: 20)
+        var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = method
         request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -282,7 +282,12 @@ struct CloudflareTunnelClient: Sendable {
     }
 
     private func send<ResultType: Decodable>(_ request: URLRequest) async throws -> APIEnvelope<ResultType> {
-        let (data, response) = try await session.data(for: request)
+        let (data, response): (Data, URLResponse)
+        do { (data, response) = try await session.data(for: request) }
+        catch let error as URLError where error.code == .timedOut && request.httpMethod == "GET" {
+            do { (data, response) = try await session.data(for: request) }
+            catch { throw CloudflareDNSProvider.transportError(error) }
+        } catch { throw CloudflareDNSProvider.transportError(error) }
         guard let http = response as? HTTPURLResponse else {
             throw Error.invalidResponse
         }
