@@ -66,6 +66,11 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
   one-second polls, refills on each renewal, and is green while renewals keep
   up, orange ("Renewal late") below a third, red in the last seconds. No
   progress bars for leases. Respect Reduce Motion.
+- Pairing codes appear in Connection Details → Pair a Server in the same
+  one-time-code style as leases: grouped monospaced characters and an expiry
+  ring, with Cancel Code. Pending requests show server name, node ID and age
+  with Reject and Approve, both there and in a Pairing Requests section at the
+  top of the service page.
 - Services are equal: Guarding lists only configured services, starting empty.
   The SwiftBot template shows SwiftBot's app icon; other services use an SF
   Symbol tile. Add Service and Edit include a lease-length picker.

@@ -21,6 +21,29 @@ independent owner and term.
 SwiftBot uses **SwiftMesh → Recovery and Pairing**. "Other app" is a generic
 lease integration; it does not imply an adapter for any named application.
 
+## Pair with a code
+
+Instead of copying the token, an operator can open a service's **Connection
+Details → Pair a Server → Create Code**. Ruru shows a single-use code such as
+`7KQ4-M2XP` that expires after 10 minutes. On the server:
+
+```swift
+let configuration = try await RuruPairing.pair(
+    endpoint: URL(string: "https://ruru.example.com")!,
+    code: "7KQ4-M2XP", nodeID: stableNodeID, nodeName: "Studio Mac")
+// Save configuration.token in Keychain, then use RuruLeaseClient.
+```
+
+Over HTTP: `POST /v1/pair` with `{"code","nodeID","nodeName"}` (no bearer
+token) uses the code up and returns 202 `{"pairingID","status":"pending"}`.
+Poll `POST /v1/pair/status` with `{"pairingID"}`: 202 while pending; 200
+`{"status":"approved","clusterID","token","leaseSeconds"}` exactly once after
+the operator clicks **Approve** in Ruru; 403 if rejected; 410 if expired. A
+wrong, used or expired code returns 404; ten wrong codes in a minute pause
+pairing (429) for a minute. Nothing is released without approval, codes and
+requests live only in memory (a restart cancels them), and removing a service
+cancels its codes and requests. Ruru notifies the operator of each request.
+
 ## Use RuruClient (Swift)
 
 [`Clients/RuruClient`](../Clients/RuruClient) is a small Swift package

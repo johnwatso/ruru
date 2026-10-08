@@ -343,6 +343,7 @@ struct ConnectionDetailsSheet: View {
                     }
                     Text("The bearer token grants access only to this service’s ownership group. Cloudflare credentials stay on this Mac.")
                         .font(.callout).foregroundStyle(.secondary)
+                    WitnessPairingPanel(service: service)
                     if let feedback { Label(feedback, systemImage: "checkmark.circle").font(.callout).foregroundStyle(.secondary) }
                 }.padding(.horizontal, 24).padding(.bottom, 24)
             }
@@ -354,7 +355,7 @@ struct ConnectionDetailsSheet: View {
                 Spacer()
                 Button("Done") { dismiss() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }.controlSize(.large).padding(20)
-        }.frame(width: 640, height: 470).background(WitnessGlassBackground())
+        }.frame(width: 640, height: 640).background(WitnessGlassBackground())
         } else {
             VStack(spacing: 20) {
                 ConsoleEmptyState(symbol: "checkmark.shield", title: "No service selected", detail: "Add a service in Guarding to get its connection details.")

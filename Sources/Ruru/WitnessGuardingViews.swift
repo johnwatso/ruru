@@ -140,6 +140,11 @@ private struct WitnessGuardedServiceDetails: View {
             }
         }
         if let removalError { ConsoleIssue(title: "Service could not be removed", detail: removalError) }
+        if !model.pairingRequests(for: service.clusterID).isEmpty {
+            ConsoleSection(title: "Pairing Requests", accessory: { Text("Expire after 10 minutes") }, content: {
+                WitnessPairingRequestList(service: service)
+            })
+        }
         ConsoleSection(title: "Ownership", accessory: {
             WitnessStatusBadge(text: model.guardStatus(for: service.clusterID), health: model.guardHealth(for: service.clusterID))
         }, content: {
@@ -448,5 +453,123 @@ struct WitnessLeaseRing: View {
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+}
+
+/// Creates a single-use pairing code and shows it like a one-time code, with a
+/// ring counting down to its expiry. Requests from servers appear below it.
+struct WitnessPairingPanel: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    let service: GuardedService
+    @State private var creating = false
+    @State private var error: String?
+
+    private var code: PairingDesk.Code? { model.pairingCodes.first { $0.clusterID == service.clusterID } }
+
+    var body: some View {
+        ConsoleSection(title: "Pair a Server", accessory: { Text("Single use") }, content: {
+            VStack(alignment: .leading, spacing: 14) {
+                if let code {
+                    WitnessPairingCodeView(code: code) { Task { await model.cancelPairingCode(code.code) } }
+                    Text("On the server, enter this Ruru’s address and the code. You’ll approve the request here before it receives any credentials.")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    HStack(alignment: .center, spacing: 12) {
+                        Text("Pair without copying the token: create a code, enter it on the server, then approve the request here.")
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Button(creating ? "Creating…" : "Create Code", systemImage: "number") {
+                            creating = true
+                            Task {
+                                do { _ = try await model.createPairingCode(for: service.clusterID); error = nil }
+                                catch { self.error = error.localizedDescription }
+                                creating = false
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(creating || model.state != .running)
+                    }
+                    if model.state != .running {
+                        Text("Start Ruru’s service to pair servers.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if let error { ConsoleIssue(title: "Pairing code unavailable", detail: error) }
+                WitnessPairingRequestList(service: service)
+                Text("The server’s software must support Ruru pairing codes (RuruClient’s RuruPairing, or POST /v1/pair). Otherwise, use the details above.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        })
+    }
+}
+
+struct WitnessPairingCodeView: View {
+    let code: PairingDesk.Code
+    let cancel: () -> Void
+    @State private var anchor = (remaining: 0.0, at: Date())
+
+    var body: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pairing code").font(.callout).foregroundStyle(.secondary)
+                Text(code.code.replacingOccurrences(of: "-", with: " "))
+                    .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                    .textSelection(.enabled)
+                    .accessibilityLabel("Pairing code " + code.code.map(String.init).joined(separator: " "))
+            }
+            Spacer(minLength: 12)
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let remaining = max(0, anchor.remaining - context.date.timeIntervalSince(anchor.at))
+                HStack(spacing: 10) {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("Expires in \(Int(ceil(remaining / 60))) min").font(.callout.weight(.medium))
+                        Button("Cancel Code", action: cancel).buttonStyle(.link).font(.caption)
+                    }
+                    WitnessLeaseRing(fraction: remaining / PairingDesk.codeLifetime, seconds: nil,
+                                     tint: remaining < 60 ? .orange : .accentColor)
+                }
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .consoleRowGroup()
+        .onAppear { anchor = (code.expiresIn, Date()) }
+        .onChange(of: code.code) { anchor = (code.expiresIn, Date()) }
+    }
+}
+
+/// Servers waiting for approval. Approving releases this service's endpoint
+/// details and bearer token to that server once.
+struct WitnessPairingRequestList: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    let service: GuardedService
+    @State private var error: String?
+
+    var body: some View {
+        let requests = model.pairingRequests(for: service.clusterID)
+        if !requests.isEmpty {
+            VStack(spacing: 0) {
+                ForEach(requests) { request in
+                    HStack(spacing: 12) {
+                        ConsoleIconTile(symbol: "desktopcomputer", size: 34)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text((request.nodeName ?? "Unnamed server") + " wants to pair").font(.callout.weight(.semibold))
+                            Text(request.nodeID + " · " + (request.age < 60 ? "just now" : "\(Int(request.age / 60)) min ago"))
+                                .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 8)
+                        Button("Reject") { Task { await model.rejectPairing(request) } }.buttonStyle(.bordered)
+                        Button("Approve") {
+                            Task {
+                                do { try await model.approvePairing(request); error = nil }
+                                catch { self.error = error.localizedDescription }
+                            }
+                        }.buttonStyle(.borderedProminent)
+                    }.padding(12)
+                    if request.id != requests.last?.id { Divider().padding(.leading, 58) }
+                }
+            }.consoleRowGroup()
+            Text("Only approve servers you just paired. Approving sends this service’s connection details and token to that server.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        if let error { ConsoleIssue(title: "Request could not be approved", detail: error) }
     }
 }

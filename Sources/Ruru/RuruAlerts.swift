@@ -23,7 +23,7 @@ struct RuruAlertPreferences: Codable, Equatable {
 }
 
 struct RuruAlert: Equatable {
-    enum Kind: Equatable { case serviceDown, serviceRecovered, failover, authorityProblem, authorityRecovered, test }
+    enum Kind: Equatable { case serviceDown, serviceRecovered, failover, authorityProblem, authorityRecovered, pairingRequest, test }
     enum Severity: Equatable { case critical, warning, resolved, info }
 
     let kind: Kind
@@ -36,7 +36,7 @@ struct RuruAlert: Equatable {
         case .serviceDown, .authorityProblem: .critical
         case .failover: .warning
         case .serviceRecovered, .authorityRecovered: .resolved
-        case .test: .info
+        case .pairingRequest, .test: .info
         }
     }
 
@@ -45,7 +45,7 @@ struct RuruAlert: Equatable {
         case .serviceDown, .serviceRecovered: preferences.serviceDown
         case .failover: preferences.failover
         case .authorityProblem, .authorityRecovered: preferences.authorityProblems
-        case .test: true
+        case .pairingRequest, .test: true
         }
     }
 }

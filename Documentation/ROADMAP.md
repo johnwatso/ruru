@@ -1,5 +1,23 @@
 # Development log and next steps
 
+## 2026-10-08 — Pairing codes
+
+- Connection Details → Pair a Server creates a single-use, 10-minute code
+  (8 characters from an unambiguous alphabet, shown as `XXXX-XXXX`). A server
+  sends it to unauthenticated `POST /v1/pair`, which uses it up and creates a
+  pending request; Ruru notifies the operator, who approves or rejects it on
+  the service page or in the sheet. Only then does `POST /v1/pair/status`
+  return the cluster ID, token and lease length, once.
+- Bounds: 8 live codes, 16 pending requests, 10 wrong codes per minute before
+  a one-minute pause. Codes and requests are in memory only; removing a
+  service revokes them.
+- RuruClient gains `RuruPairing.pair`. OpenAPI and INTEGRATIONS.md document it.
+- Validation: full suite passed (126 tests, zero failures), including an
+  end-to-end test where RuruClient pairs with the real server, is approved, and
+  acquires a lease with the received credentials. Checked the sheet in the
+  isolated preview. SwiftBot does not support pairing codes yet; it still
+  needs the manual details until it adopts `/v1/pair`.
+
 ## 2026-10-08 — Lease shown as a one-time code
 
 - Replaced the service detail's 30-second progress bar (which twitched between

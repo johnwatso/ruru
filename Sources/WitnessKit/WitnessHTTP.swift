@@ -115,6 +115,7 @@ struct WitnessRouter: Sendable {
     private let authorization: WitnessAuthorization
     let services: [WitnessServiceCredential]
     let catalogue: CoordinationCatalogue
+    let pairing: PairingDesk
     private let policies: [String: WitnessServicePolicy]
     private let leaseSeconds: [String: Double]
 
@@ -122,11 +123,13 @@ struct WitnessRouter: Sendable {
         try self.init(store: store, services: [WitnessServiceCredential(clusterID: clusterID, token: token)])
     }
 
-    init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil) throws {
+    init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil,
+         pairing: PairingDesk? = nil) throws {
         authorization = try WitnessAuthorization(services: services)
         self.services = services
         self.store = store
         self.catalogue = try catalogue ?? CoordinationCatalogue(services: services)
+        self.pairing = pairing ?? PairingDesk()
         policies = Dictionary(uniqueKeysWithValues: services.map {
             ($0.clusterID, WitnessServicePolicy(clusterID: $0.clusterID, preference: $0.primaryPreference))
         })
@@ -142,6 +145,9 @@ struct WitnessRouter: Sendable {
                 return LeaseReply(status: ready ? 200 : 503,
                                   body: Data((ready ? #"{"ready":true}"# : #"{"ready":false}"#).utf8))
             } catch { return .error("authority_unavailable", status: 503) }
+        }
+        if request.method == "POST", request.path == "/v1/pair" || request.path == "/v1/pair/status" {
+            return await routePairing(request)
         }
         if request.method == "GET", request.path == "/v1/service" {
             guard let cluster = authorization.cluster(for: request.headers["authorization"]),
@@ -183,5 +189,54 @@ struct WitnessRouter: Sendable {
         guard payload.clusterID == allowedCluster else { return .error("forbidden_cluster", status: 403) }
         return await store.apply(action, request: payload,
                                  leaseDuration: leaseSeconds[payload.clusterID] ?? LeaseStore.leaseDuration)
+    }
+}
+
+// MARK: Pairing
+
+struct PairClaim: Decodable {
+    let code: String
+    let nodeID: String
+    let nodeName: String?
+}
+
+struct PairStatusRequest: Decodable {
+    let pairingID: String
+}
+
+extension WitnessRouter {
+    /// Unauthenticated by design: the code (or pairing ID) is the credential,
+    /// and nothing is released until the operator approves in Ruru.
+    func routePairing(_ request: HTTPRequest) async -> LeaseReply {
+        guard !request.body.isEmpty, request.body.count <= HTTPParser.maxBodyBytes else {
+            return .error("invalid_request", status: 400)
+        }
+        func json(_ status: Int, _ object: [String: Any]) -> LeaseReply {
+            LeaseReply(status: status, body: (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data())
+        }
+        if request.path == "/v1/pair" {
+            guard let claim = try? JSONDecoder().decode(PairClaim.self, from: request.body),
+                  WitnessPrimaryPreference.validNodeID(claim.nodeID) else {
+                return .error("invalid_request", status: 400)
+            }
+            switch await pairing.claim(code: claim.code, nodeID: claim.nodeID, nodeName: WitnessNodeName.normalized(claim.nodeName)) {
+            case .accepted(let id): return json(202, ["pairingID": id, "status": "pending", "retryAfter": 2])
+            case .invalid: return .error("invalid_code", status: 404)
+            case .throttled: return .error("too_many_attempts", status: 429)
+            case .full: return .error("pairing_busy", status: 503)
+            }
+        }
+        guard let poll = try? JSONDecoder().decode(PairStatusRequest.self, from: request.body),
+              !poll.pairingID.isEmpty, poll.pairingID.utf8.count <= 64 else {
+            return .error("invalid_request", status: 400)
+        }
+        switch await pairing.status(of: poll.pairingID) {
+        case .pending: return json(202, ["status": "pending", "retryAfter": 2])
+        case .rejected: return .error("pairing_rejected", status: 403)
+        case .expired: return .error("pairing_expired", status: 410)
+        case .approved(let credential):
+            return json(200, ["status": "approved", "clusterID": credential.clusterID,
+                              "token": credential.token, "leaseSeconds": credential.leaseSeconds])
+        }
     }
 }

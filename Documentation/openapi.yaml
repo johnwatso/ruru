@@ -66,6 +66,47 @@ paths:
                   clusterID: { type: string }
                   preferredPrimaryNodeID: { type: [string, "null"] }
                   preferenceRevision: { type: integer, format: int64 }
+  /v1/pair:
+    post:
+      summary: Exchange a one-time pairing code for a pending request (no bearer token)
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, nodeID]
+              properties:
+                code: { type: string, description: "As shown in Ruru, e.g. 7KQ4-M2XP; case, spaces and dashes are ignored" }
+                nodeID: { type: string, maxLength: 128 }
+                nodeName: { type: string }
+      responses:
+        "202":
+          description: Waiting for the operator to approve in Ruru
+          content: { application/json: { schema: { type: object, properties: { pairingID: { type: string }, status: { const: pending }, retryAfter: { type: number } } } } }
+        "404": { description: "invalid_code — wrong, used or expired" }
+        "429": { description: "too_many_attempts — wait a minute" }
+  /v1/pair/status:
+    post:
+      summary: Poll a pairing request
+      security: []
+      requestBody:
+        content: { application/json: { schema: { type: object, required: [pairingID], properties: { pairingID: { type: string } } } } }
+      responses:
+        "200":
+          description: Approved; delivered once
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { const: approved }
+                  clusterID: { type: string }
+                  token: { type: string, description: "Store securely; never log" }
+                  leaseSeconds: { type: number }
+        "202": { description: Still pending }
+        "403": { description: pairing_rejected }
+        "410": { description: pairing_expired }
   /health:
     get:
       summary: Authority readiness only; no service details

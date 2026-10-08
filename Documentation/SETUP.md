@@ -19,7 +19,9 @@ Apple silicon executables.
    app**, a name, a unique cluster ID and a lease length (30 seconds suits most
    apps). Ruru creates a bearer token for that service in this Mac's Keychain.
 4. Open the service's **Connection Details** and give every participating server
-   the endpoint, cluster ID and token. For SwiftBot, enter them in the preferred
+   the endpoint, cluster ID and token, or use **Pair a Server** to create a
+   single-use code and approve the server's request (for servers whose software
+   supports pairing codes). For SwiftBot, enter them in the preferred
    Primary's **SwiftMesh → Recovery and Pairing**; a fresh Failover Join Code
    carries them to the Failover. Other apps use [RuruClient or the
    protocol](INTEGRATIONS.md).

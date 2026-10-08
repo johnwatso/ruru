@@ -13,6 +13,10 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var coordinationLocations: [CoordinationLocation] = []
     @Published private(set) var coordinationEnrollments: [CoordinationEnrollment] = []
     private let catalogue = CoordinationCatalogue()
+    private let pairing = PairingDesk()
+    @Published private(set) var pairingCodes: [PairingDesk.Code] = []
+    @Published private(set) var pairingRequests: [PairingDesk.Request] = []
+    private var announcedPairings: Set<String> = []
     @Published private(set) var snapshot: WitnessSnapshot?
     @Published private(set) var error: String?
     @Published private(set) var busy = false
@@ -215,7 +219,7 @@ final class WitnessAppModel: ObservableObject {
             for service in configuration.guardedServices where serviceCredentials[service.clusterID] == nil {
                 serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
             }
-            let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue)
+            let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue, pairing: pairing)
             self.server = server
             listenerPort = try await server.start(bindAddress: configuration.bindAddress, port: UInt16(configuration.port))
             state = .running
@@ -463,6 +467,7 @@ final class WitnessAppModel: ObservableObject {
         configuration = saved
         coordinationLocations.removeAll { $0.clusterID == service.clusterID }
         coordinationEnrollments.removeAll { $0.clusterID == service.clusterID }
+        await pairing.revoke(clusterID: service.clusterID)
         if !preview, let access = try? accessCredentials() { try await catalogue.configureServices(access) }
         // Durable leases and terms remain in DuckDB. Already granted permission
         // expires normally; old tokens cannot acquire or renew through the router.
@@ -753,6 +758,8 @@ final class WitnessAppModel: ObservableObject {
     }
 
     private func refresh() async {
+        pairingCodes = await pairing.activeCodes()
+        pairingRequests = await pairing.pendingRequests()
         coordinationEnrollments = await catalogue.pendingEnrollments()
         coordinationLocations = await catalogue.snapshot().filter { location in
             configuration.guardedServices.contains { $0.clusterID == location.clusterID && configuration.coordinationPolicy(for: $0.id).enabled }
@@ -779,6 +786,44 @@ final class WitnessAppModel: ObservableObject {
         await evaluateAlerts()
     }
 
+    // MARK: Pairing
+
+    /// A single-use code a server can exchange for this service's connection
+    /// details, once approved here. Only useful while the listener is running.
+    func createPairingCode(for clusterID: String) async throws -> PairingDesk.Code {
+        guard state == .running, service(for: clusterID) != nil else {
+            throw RuruBackup.Failure("Start Ruru's service before pairing a server.")
+        }
+        let code: PairingDesk.Code
+        do { code = try await pairing.createCode(for: clusterID) }
+        catch { throw RuruBackup.Failure("Too many pairing codes are active. Wait for one to expire or cancel it.") }
+        pairingCodes = await pairing.activeCodes()
+        return code
+    }
+
+    func cancelPairingCode(_ code: String) async {
+        await pairing.cancelCode(code)
+        pairingCodes = await pairing.activeCodes()
+    }
+
+    func approvePairing(_ request: PairingDesk.Request) async throws {
+        guard let service = service(for: request.clusterID), let token = serviceCredentials[request.clusterID] else {
+            throw RuruBackup.Failure("This service no longer exists or its credential is unavailable.")
+        }
+        try await pairing.approve(request.id, with: .init(clusterID: service.clusterID, token: token,
+                                                         leaseSeconds: Double(service.leaseSeconds)))
+        pairingRequests = await pairing.pendingRequests()
+    }
+
+    func rejectPairing(_ request: PairingDesk.Request) async {
+        await pairing.reject(request.id)
+        pairingRequests = await pairing.pendingRequests()
+    }
+
+    func pairingRequests(for clusterID: String) -> [PairingDesk.Request] {
+        pairingRequests.filter { $0.clusterID == clusterID }
+    }
+
     // MARK: Alerts
 
     private func evaluateAlerts() async {
@@ -794,7 +839,15 @@ final class WitnessAppModel: ObservableObject {
             }, uniquingKeysWith: { first, _ in first }),
             services: Dictionary(configuration.services.map { ($0.clusterID, $0.name) }, uniquingKeysWith: { first, _ in first }),
             releases: Set((snapshot?.events ?? []).filter { $0.action == "Released" }.map { "\($0.clusterID)|\($0.id)" }))
-        let alerts = alertMonitor.observe(observation, at: Date())
+        var alerts = alertMonitor.observe(observation, at: Date())
+        for request in pairingRequests where !announcedPairings.contains(request.id) {
+            announcedPairings.insert(request.id)
+            let server = request.nodeName ?? request.nodeID
+            alerts.append(RuruAlert(kind: .pairingRequest, key: "pair|" + request.id,
+                                    title: "\(server) wants to pair with \(serviceName(for: request.clusterID))",
+                                    detail: "Approve or reject it in Ruru → Guarding → \(serviceName(for: request.clusterID))."))
+        }
+        announcedPairings.formIntersection(pairingRequests.map(\.id))
         guard !alerts.isEmpty else { return }
         if let failure = await alertDelivery.deliver(alerts, preferences: configuration.alerts, webhook: discordWebhook) {
             alertDeliveryError = failure

@@ -7,6 +7,7 @@ public actor WitnessHTTPServer {
     private var configuringServices = false
     private var router: WitnessRouter
     public nonisolated let catalogue: CoordinationCatalogue
+    public nonisolated let pairing: PairingDesk
     private let queue = DispatchQueue(label: "dev.ruruapp.ruru.http", qos: .utility)
     private var listener: NWListener?
     private var listenerID = UUID()
@@ -25,17 +26,20 @@ public actor WitnessHTTPServer {
     public init(store: LeaseStore, clusterID: String, token: String) throws {
         router = try WitnessRouter(store: store, clusterID: clusterID, token: token)
         catalogue = router.catalogue
+        pairing = router.pairing
     }
 
-    public init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil) throws {
-        router = try WitnessRouter(store: store, services: services, catalogue: catalogue)
+    public init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil,
+                pairing: PairingDesk? = nil) throws {
+        router = try WitnessRouter(store: store, services: services, catalogue: catalogue, pairing: pairing)
         self.catalogue = router.catalogue
+        self.pairing = router.pairing
     }
 
     /// Changes admission only; the database, lease deadlines and listener stay alive.
     public func configureServices(_ services: [WitnessServiceCredential]) async throws {
         guard !configuringServices else { throw WitnessError.invalidConfiguration }
-        let updated = try WitnessRouter(store: router.store, services: services, catalogue: catalogue)
+        let updated = try WitnessRouter(store: router.store, services: services, catalogue: catalogue, pairing: pairing)
         configuringServices = true
         defer { configuringServices = false }
         try await catalogue.configureServices(services)
@@ -183,7 +187,7 @@ public actor WitnessHTTPServer {
     }
 
     private func send(_ reply: LeaseReply, id: UUID) {
-        let reasons = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict",
+        let reasons = [200: "OK", 202: "Accepted", 410: "Gone", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict",
                        429: "Too Many Requests", 411: "Length Required", 413: "Content Too Large", 431: "Request Header Fields Too Large", 503: "Service Unavailable"]
         var bytes = Data("HTTP/1.1 \(reply.status) \(reasons[reply.status] ?? "Error")\r\nContent-Type: application/json\r\nContent-Length: \(reply.body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".utf8)
         bytes.append(reply.body)
