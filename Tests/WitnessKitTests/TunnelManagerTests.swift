@@ -34,6 +34,9 @@ time.sleep(10)
             if status.state == .enabled { connected.fulfill() }
         }
         await fulfillment(of: [connected], timeout: 5)
+        let diagnostics = await manager.diagnostics()
+        XCTAssertEqual(diagnostics.state, .enabled)
+        XCTAssertFalse(diagnostics.retryExhausted)
         await manager.stopForAppTermination()
         let invocation = try JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("invocation.json"))) as! [String: Any]
         XCTAssertEqual(invocation["argv"] as? [String], ["tunnel", "--no-autoupdate", "run"])
@@ -70,6 +73,10 @@ sys.exit(1)
             if status.state == .error && status.detail.contains("five attempts") { stopped.fulfill() }
         }
         await fulfillment(of: [stopped], timeout: 5)
+        let diagnostics = await manager.diagnostics()
+        XCTAssertEqual(diagnostics.state, .error)
+        XCTAssertTrue(diagnostics.retryExhausted)
+        XCTAssertEqual(diagnostics.retryAttempts, 5)
         await manager.stopForAppTermination()
         let attempts = try String(contentsOf: directory.appendingPathComponent("attempts"), encoding: .utf8).split(separator: "\n")
         XCTAssertEqual(attempts.count, 5)

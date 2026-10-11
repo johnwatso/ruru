@@ -22,6 +22,7 @@
 		23EDEFA0BB12F1685702EB1C /* AlertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF00FFD0764524C3F4B90383 /* AlertTests.swift */; };
 		27D5F1476A6E13CE7F0DBB8C /* WitnessHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB1D944D9DF13483B3F58F9 /* WitnessHTTPServer.swift */; };
 		2B23FEE30A03ACF65B8A71B7 /* BackupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0C7A44BE370460F30CA7AE /* BackupTests.swift */; };
+		2FE4C48088E000C09926CC3C /* WitnessTransportDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8CB025C2896CBAF4B8E75CF /* WitnessTransportDiagnostics.swift */; };
 		3118737F7C9BD996FE6C23C8 /* RuruAlertDelivery.swift in Sources */ = {isa = PBXBuildFile; fileRef = E42373788CE3F9F11B8D4CF3 /* RuruAlertDelivery.swift */; };
 		35A5C1C5343CC399F0632FC3 /* WitnessDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ABF87C6AD71482A1F6264BA /* WitnessDashboard.swift */; };
 		36E39751CEE7B58A60C161F4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6E642B2BFDC2E9B39904B319 /* Assets.xcassets */; };
@@ -63,6 +64,7 @@
 		B6EF4145A27C8B6A0F7B62DE /* CloudflareTunnelClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF8D3058FEE8AA4A62308A99 /* CloudflareTunnelClient.swift */; };
 		BC0AC4BC26AC09E1664AA847 /* StorageProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4849497892124A0AC81F8B5D /* StorageProbe.swift */; };
 		BECFD308F35EC7A73DA09916 /* Pairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9932375055BEB2EE0933958E /* Pairing.swift */; };
+		C0AA717F3FDC78F0C740CF24 /* WitnessTransportDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0047855EA2F1733C68587BC /* WitnessTransportDiagnosticsTests.swift */; };
 		C137E10FA5B102C47816647B /* WitnessOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139481AB632E0A52F5FEB8B2 /* WitnessOverview.swift */; };
 		C18BF56767ACE5A3B67E30D9 /* RuruAlerts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF39C444DFA7AB19816451D7 /* RuruAlerts.swift */; };
 		C49D294B2238269ECF6490AE /* RuruUpdateConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B2014C61EC1C9648C1C16D /* RuruUpdateConfiguration.swift */; };
@@ -198,8 +200,10 @@
 		CC039156A34B2774A50AC5D8 /* AppUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdater.swift; sourceTree = "<group>"; };
 		D0425971E5EFD8DD4C38C82F /* CoordinationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinationTests.swift; sourceTree = "<group>"; };
 		D1600100A033FF4455132B5E /* TunnelManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelManagerTests.swift; sourceTree = "<group>"; };
+		D8CB025C2896CBAF4B8E75CF /* WitnessTransportDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessTransportDiagnostics.swift; sourceTree = "<group>"; };
 		D97E8AAAF34560CCDBDFD0D6 /* LeaseDurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseDurationTests.swift; sourceTree = "<group>"; };
 		DF39C444DFA7AB19816451D7 /* RuruAlerts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruAlerts.swift; sourceTree = "<group>"; };
+		E0047855EA2F1733C68587BC /* WitnessTransportDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessTransportDiagnosticsTests.swift; sourceTree = "<group>"; };
 		E42373788CE3F9F11B8D4CF3 /* RuruAlertDelivery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruAlertDelivery.swift; sourceTree = "<group>"; };
 		E524AFD498B4D66069C76234 /* WitnessPreferredPrimarySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessPreferredPrimarySheet.swift; sourceTree = "<group>"; };
 		E55690EED6F3284A3E6F0C1A /* RuruClientSafetyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruClientSafetyTests.swift; sourceTree = "<group>"; };
@@ -271,6 +275,7 @@
 				E6EF0A5DA812F3130511BD6C /* WitnessConfigurationTests.swift */,
 				BCC680F6E57E9994BE1BC16D /* WitnessHTTPTests.swift */,
 				6B7AEB160DF8CCFE691C0549 /* WitnessInternetTests.swift */,
+				E0047855EA2F1733C68587BC /* WitnessTransportDiagnosticsTests.swift */,
 			);
 			name = WitnessKitTests;
 			path = Tests/WitnessKitTests;
@@ -350,6 +355,7 @@
 				4EB1D944D9DF13483B3F58F9 /* WitnessHTTPServer.swift */,
 				FB0DE86CD88FFB20F836FC48 /* WitnessInternetAccess.swift */,
 				E693FF768D6A33CE65656535 /* WitnessServicePolicy.swift */,
+				D8CB025C2896CBAF4B8E75CF /* WitnessTransportDiagnostics.swift */,
 			);
 			name = WitnessKit;
 			path = Sources/WitnessKit;
@@ -602,6 +608,7 @@
 				27D5F1476A6E13CE7F0DBB8C /* WitnessHTTPServer.swift in Sources */,
 				8B9A58ADF82F7B7DDF648233 /* WitnessInternetAccess.swift in Sources */,
 				DCEE07C9D0AEFA6B9FA6A296 /* WitnessServicePolicy.swift in Sources */,
+				2FE4C48088E000C09926CC3C /* WitnessTransportDiagnostics.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -631,6 +638,7 @@
 				FDF44B05A0BDF782DB61C25F /* WitnessConfigurationTests.swift in Sources */,
 				7E8653657367B67F565D27F7 /* WitnessHTTPTests.swift in Sources */,
 				B624B5E8C68B5C4321515FE5 /* WitnessInternetTests.swift in Sources */,
+				C0AA717F3FDC78F0C740CF24 /* WitnessTransportDiagnosticsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

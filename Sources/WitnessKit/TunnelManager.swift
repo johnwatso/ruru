@@ -33,6 +33,9 @@ actor TunnelManager {
     private var lastPath: String?
     private var failures = 0
     private var healthFailures = 0
+    private var lastPublicHealthSuccess: Date?
+    private var retryExhausted = false
+    private var latestStatus = WitnessInternetStatus()
     private var handler: (@MainActor @Sendable (WitnessInternetStatus) -> Void)?
     private let binaryURL: URL?
     private let retryDelay: Double
@@ -59,6 +62,9 @@ actor TunnelManager {
         let ticket = generation
         desired = configuration
         failures = 0
+        healthFailures = 0
+        lastPublicHealthSuccess = nil
+        retryExhausted = false
         await stopProcess()
         guard generation == ticket else { return }
         guard let configuration else {
@@ -144,6 +150,19 @@ actor TunnelManager {
     /// explaining a tunnel that never connects.
     func recentOutput() -> [String] { recentLines }
 
+    /// Non-secret connector state for the operator's diagnostic view. This is
+    /// observation only; consuming it cannot restart the connector or touch
+    /// lease authority state.
+    func diagnostics() -> WitnessTransportDiagnostics.Connector {
+        WitnessTransportDiagnostics.Connector(
+            state: latestStatus.state,
+            retryAttempts: failures,
+            retryExhausted: retryExhausted,
+            lastPublicHealthSuccess: lastPublicHealthSuccess,
+            consecutivePublicHealthFailures: healthFailures
+        )
+    }
+
     private func remember(_ line: String) {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -163,6 +182,7 @@ actor TunnelManager {
         healthTask = nil
         failures += 1
         guard failures < 5 else {
+            retryExhausted = true
             await publish(.error, detail: "Cloudflare stopped after five attempts. Pause and resume Internet Access to retry.")
             return
         }
@@ -198,7 +218,9 @@ actor TunnelManager {
     }
 
     private func publish(_ state: WitnessInternetStatus.State, detail: String) async {
-        await handler?(WitnessInternetStatus(state: state, publicURL: desired?.publicURL ?? "", detail: detail))
+        let status = WitnessInternetStatus(state: state, publicURL: desired?.publicURL ?? "", detail: detail)
+        latestStatus = status
+        await handler?(status)
     }
 
     private func startMonitor() {
@@ -255,12 +277,17 @@ actor TunnelManager {
             ok = [200, 503].contains(status) && body?["ready"] is Bool
         } catch { ok = false }
         guard ticket == generation else { return }
-        if ok { healthFailures = 0; return }
+        if ok {
+            healthFailures = 0
+            lastPublicHealthSuccess = Date()
+            return
+        }
         healthFailures += 1
         guard healthFailures >= 3 else { return }
         generation &+= 1
         let next = generation
         failures = 0
+        retryExhausted = false
         await stopProcess()
         await startProcess(desired, ticket: next)
     }

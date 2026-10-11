@@ -30,7 +30,7 @@ struct RuruApp: App {
                 .environmentObject(model).environmentObject(updater).environmentObject(diagnostics)
         }
         .windowResizability(.contentSize)
-        MenuBarExtra("Ruru", systemImage: "checkmark.shield") {
+        MenuBarExtra("Ruru", systemImage: model.menuBarSymbol) {
             WitnessMenu().environmentObject(model).environmentObject(updater).environmentObject(diagnostics).onAppear {
                 delegate.model = model
                 updater.prepareForInstallation = model.shutdown

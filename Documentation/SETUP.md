@@ -46,7 +46,8 @@ The manual steps are:
 8. Test Primary loss, recovery/return, witness loss, and a witness restart.
    The earlier SQLite version was launched and connected on the target Mac.
    Ruru's DuckDB revision and a complete failover/return/partition drill still
-   need validation there.
+   need validation there. Follow [Operating Ruru safely](OPERATIONS.md) for
+   the exact drill, restart-quarantine expectations and backup rules.
 
 Closing the window leaves the menu bar service running. Quitting the app,
 logging out, system sleep, or loss of the Mac's network makes it unavailable;

@@ -30,6 +30,18 @@ final class ClientConformanceTests: XCTestCase {
                         session: URLSession(configuration: .ephemeral))
     }
 
+    func testPublicHealthIsUnauthenticatedAndContainsReadinessOnly() async throws {
+        let (server, endpoint, _) = try await authority()
+        defer { Task { await server.stop() } }
+        var request = URLRequest(url: endpoint.appendingPathComponent("health"))
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        let (data, response) = try await URLSession(configuration: .ephemeral).data(for: request)
+
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: data) as? [String: Bool], ["ready": true])
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+    }
+
     func testOneOwnerAtATimeWithRisingFencingTerms() async throws {
         let (server, endpoint, _) = try await authority(leaseSeconds: 20)
         defer { Task { await server.stop() } }
@@ -101,11 +113,20 @@ final class ClientConformanceTests: XCTestCase {
         let clock = TestClock(0)
         var first: (WitnessHTTPServer, URL, URL)? = try await authority(clock: clock.now)
         let database = first!.2
-        _ = try await client(first!.1, node: "home").acquire()
+        let primary = client(first!.1, node: "home")
+        let held = try await primary.acquire()
         await first!.0.stop()
         first = nil
         let (server, endpoint, _) = try await authority(clock: clock.now, url: database)
         defer { Task { await server.stop() } }
+        // The loopback fixture receives a new ephemeral port after restart;
+        // production clients retain the same public endpoint. Rebuild only the
+        // transport binding while preserving the lease granted before restart.
+        let restartedPrimary = client(endpoint, node: "home")
+        // Restart quarantine refuses both a new grant and an otherwise-valid
+        // renewal. A client must not treat a restart as permission to extend.
+        do { _ = try await restartedPrimary.renew(held); XCTFail() }
+        catch { XCTAssertEqual(error as? RuruError, .recovering) }
         do { _ = try await client(endpoint, node: "backup").acquire(); XCTFail() }
         catch { XCTAssertEqual(error as? RuruError, .recovering) }
         clock.advance(11)

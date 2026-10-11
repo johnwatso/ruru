@@ -107,6 +107,11 @@ struct WitnessOverview: View {
                                              reviewTitle: item.actionTitle) { perform(item.action) }
                     }
                 }.padding(.horizontal, 16).padding(.bottom, 16).padding(.top, -8)
+            } else {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Text("No issues need attention").font(.callout).foregroundStyle(.secondary)
+                }.padding(.horizontal, 24).padding(.bottom, 16).padding(.top, -8)
             }
         }.consoleSurface(cornerRadius: 22)
     }

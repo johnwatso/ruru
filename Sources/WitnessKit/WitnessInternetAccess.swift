@@ -132,6 +132,7 @@ public struct WitnessInternetSetup: Sendable {
 /// Runs independently of either bot; no Cloudflare API requests are needed on ordinary startup.
 public actor WitnessInternetAccess {
     private let manager = TunnelManager()
+    private let probe = WitnessTransportProbe()
     public init() {}
 
     public func start(settings: WitnessTunnelSettings, token: String,
@@ -146,4 +147,12 @@ public actor WitnessInternetAccess {
 
     /// The Cloudflare connector's recent output (secrets redacted).
     public func diagnostics() async -> [String] { await manager.recentOutput() }
+
+    /// Checks the local listener and the public tunnel route without changing
+    /// connector, listener, storage, or lease state. The connector's current
+    /// telemetry is included as the middle hop.
+    public func inspectTransport(localEndpoint: URL?, publicEndpoint: URL?) async -> WitnessTransportDiagnostics {
+        let connector = await manager.diagnostics()
+        return await probe.inspect(localEndpoint: localEndpoint, publicEndpoint: publicEndpoint, connector: connector)
+    }
 }

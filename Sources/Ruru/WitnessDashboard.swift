@@ -209,6 +209,30 @@ private struct WitnessInternetPage: View {
                         }
                     }
                 })
+                ConsoleSection(title: "Connection Check", accessory: {
+                    Button(model.transportDiagnosticsBusy ? "Checking…" : "Test Connection") {
+                        Task { await model.inspectInternetAccess() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.busy || model.internetBusy || model.transportDiagnosticsBusy)
+                }, content: {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let diagnostics = model.transportDiagnostics {
+                            transportCheckRow(title: "Local listener", hop: diagnostics.localListener)
+                            Divider().padding(.leading, 16)
+                            ConsoleSettingRow(title: "Cloudflare connector", subtitle: connectorDetail(diagnostics.connector)) {
+                                Text(connectorStateName(diagnostics.connector.state))
+                                    .font(.callout).foregroundStyle(.secondary)
+                            }
+                            Divider().padding(.leading, 16)
+                            transportCheckRow(title: "Public health", hop: diagnostics.publicHealth)
+                        } else {
+                            Text("Checks the local listener, connector state and public /health route. It never changes authority or leases.")
+                                .font(.callout).foregroundStyle(.secondary).padding(16)
+                        }
+                    }
+                    .consoleRowGroup()
+                })
                 ConsoleSection("Connection") {
                     VStack(spacing: 0) {
                         ConsoleSettingRow(title: "Local listener", subtitle: model.localURL) {
@@ -244,6 +268,42 @@ private struct WitnessInternetPage: View {
     private func resume() async {
         do { try await model.resumeInternetAccess(); error = nil }
         catch { self.error = error.localizedDescription }
+    }
+
+    @ViewBuilder
+    private func transportCheckRow(title: String, hop: WitnessTransportDiagnostics.Hop) -> some View {
+        ConsoleSettingRow(title: title, subtitle: hop.detail) {
+            Text(healthName(hop.health)).font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    private func healthName(_ health: WitnessTransportDiagnostics.Health) -> String {
+        switch health {
+        case .ready: "Ready"
+        case .recovering: "Recovering"
+        case .unavailable: "Unavailable"
+        case .notConfigured: "Not configured"
+        }
+    }
+
+    private func connectorStateName(_ state: WitnessInternetStatus.State) -> String {
+        switch state {
+        case .disabled: "Stopped"
+        case .enabling: "Connecting"
+        case .enabled: "Connected"
+        case .error: "Unavailable"
+        }
+    }
+
+    private func connectorDetail(_ connector: WitnessTransportDiagnostics.Connector) -> String {
+        if connector.retryExhausted { return "Retry budget exhausted; pause and resume Internet Access to try again." }
+        if let date = connector.lastPublicHealthSuccess {
+            return "Last public health success \(date.formatted(date: .abbreviated, time: .shortened))."
+        }
+        if connector.consecutivePublicHealthFailures > 0 {
+            return "\(connector.consecutivePublicHealthFailures) consecutive public health check failures."
+        }
+        return "No completed public health check yet."
     }
 }
 

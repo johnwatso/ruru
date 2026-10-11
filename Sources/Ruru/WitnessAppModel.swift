@@ -45,6 +45,9 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var internetBusy = false
     @Published private(set) var internetProgress = ""
     @Published private(set) var internetError: String?
+    /// Results from an explicit, observation-only Internet Access check.
+    @Published private(set) var transportDiagnostics: WitnessTransportDiagnostics?
+    @Published private(set) var transportDiagnosticsBusy = false
     private let internetAccess = WitnessInternetAccess()
     private var shuttingDown = false
 
@@ -90,6 +93,18 @@ final class WitnessAppModel: ObservableObject {
                 legacyStorageNeedsReplacement = true
                 state = .failed
                 error = LegacyAuthorityStorageError().localizedDescription
+            }
+            if ProcessInfo.processInfo.arguments.contains("--preview-transport-error") {
+                loadPreviewTransportError()
+            }
+            if ProcessInfo.processInfo.arguments.contains("--preview-quarantine") {
+                loadPreviewQuarantine()
+            }
+            if ProcessInfo.processInfo.arguments.contains("--preview-ownerless") {
+                loadPreviewOwnerless()
+            }
+            if ProcessInfo.processInfo.arguments.contains("--preview-authority-error") {
+                loadPreviewAuthorityError()
             }
             return
         }
@@ -180,6 +195,67 @@ final class WitnessAppModel: ObservableObject {
         }
     }
 
+    private func loadPreviewTransportError() {
+        state = .running
+        listenerPort = UInt16(configuration.port)
+        serviceStartedAt = .now.advanced(by: .seconds(-3_600))
+        internetStatus = WitnessInternetStatus(state: .error, publicURL: "", detail: "Tunnel connection lost.")
+        configuration.tunnel.hostname = "gaurd.ruruapp.dev"
+        configuration.tunnel.enabled = true
+        configuration.tunnel.tunnelID = "00000000-0000-4000-8000-000000000001"
+        configuration.tunnel.accountID = "screenshot-preview"
+        snapshot = WitnessSnapshot(recoverySeconds: 0,
+            leases: [LeaseStatus(clusterID: previewCluster, ownerNodeID: "home-mac", term: 42,
+                                 remainingSeconds: 280, ownerNodeName: "Home Mac")],
+            events: [WitnessEvent(clusterID: previewCluster, id: 1, time: Date().addingTimeInterval(-3_600),
+                                  action: "Acquired", nodeID: "home-mac", term: 42, nodeName: "Home Mac")])
+    }
+
+    private func loadPreviewQuarantine() {
+        state = .running
+        listenerPort = UInt16(configuration.port)
+        serviceStartedAt = .now.advanced(by: .seconds(-10))
+        configuration.publicEndpoint = "https://gaurd.ruruapp.dev"
+        configuration.tunnel.hostname = "gaurd.ruruapp.dev"
+        configuration.tunnel.enabled = true
+        configuration.tunnel.tunnelID = "00000000-0000-4000-8000-000000000001"
+        configuration.tunnel.accountID = "screenshot-preview"
+        internetStatus = WitnessInternetStatus(state: .enabled, publicURL: configuration.publicEndpoint,
+                                              detail: "Connected to Cloudflare.")
+        snapshot = WitnessSnapshot(recoverySeconds: 245,
+            leases: [],
+            events: [WitnessEvent(clusterID: previewCluster, id: 1, time: Date().addingTimeInterval(-600),
+                                  action: "Acquired", nodeID: "home-mac", term: 41, nodeName: "Home Mac")])
+    }
+
+    private func loadPreviewOwnerless() {
+        state = .running
+        listenerPort = UInt16(configuration.port)
+        serviceStartedAt = .now.advanced(by: .seconds(-7_200))
+        configuration.publicEndpoint = "https://gaurd.ruruapp.dev"
+        configuration.tunnel.hostname = "gaurd.ruruapp.dev"
+        configuration.tunnel.enabled = true
+        configuration.tunnel.tunnelID = "00000000-0000-4000-8000-000000000001"
+        configuration.tunnel.accountID = "screenshot-preview"
+        internetStatus = WitnessInternetStatus(state: .enabled, publicURL: configuration.publicEndpoint,
+                                              detail: "Connected to Cloudflare.")
+        snapshot = WitnessSnapshot(recoverySeconds: 0,
+            leases: [],
+            events: [WitnessEvent(clusterID: previewCluster, id: 2, time: Date().addingTimeInterval(-1_800),
+                                  action: "Released", nodeID: "home-mac", term: 40, nodeName: "Home Mac"),
+                     WitnessEvent(clusterID: previewCluster, id: 1, time: Date().addingTimeInterval(-7_200),
+                                  action: "Acquired", nodeID: "home-mac", term: 40, nodeName: "Home Mac")])
+        participantObservations = [
+            .init(clusterID: previewCluster, nodeID: "home-mac", nodeName: "Home Mac", role: .standby, ageSeconds: 4, fresh: true),
+            .init(clusterID: previewCluster, nodeID: "backup-mac", nodeName: "Backup Mac", role: .standby, ageSeconds: 8, fresh: true)
+        ]
+    }
+
+    private func loadPreviewAuthorityError() {
+        state = .failed
+        error = "The database could not be opened. Check storage permissions and disk space."
+    }
+
     func lease(for clusterID: String) -> LeaseStatus? { snapshot?.leases.first { $0.clusterID == clusterID } }
     func service(for clusterID: String) -> GuardedService? { configuration.guardedServices.first { $0.clusterID == clusterID } }
     func serviceName(for clusterID: String) -> String { service(for: clusterID)?.name ?? clusterID }
@@ -205,6 +281,11 @@ final class WitnessAppModel: ObservableObject {
     }
     var activeServiceCount: Int {
         configuration.guardedServices.filter { (lease(for: $0.clusterID)?.remainingSeconds ?? 0) > 0 }.count
+    }
+    var menuBarSymbol: String {
+        if attentionItems.isEmpty { return "checkmark.shield" }
+        if attentionItems.contains(where: { $0.health == .error }) { return "xmark.shield.fill" }
+        return "exclamationmark.shield"
     }
     func nodeDisplayName(for nodeID: String, reportedName: String?, clusterID: String? = nil) -> String {
         let service = clusterID.flatMap(service(for:))
@@ -328,6 +409,7 @@ final class WitnessAppModel: ObservableObject {
         busy = true
         await internetAccess.stop()
         internetStatus = WitnessInternetStatus()
+        transportDiagnostics = nil
         await server?.stop()
         server = nil
         listenerPort = nil
@@ -414,6 +496,7 @@ final class WitnessAppModel: ObservableObject {
         configuration = saved
         await internetAccess.stop()
         internetStatus = WitnessInternetStatus()
+        transportDiagnostics = nil
     }
 
     func resumeInternetAccess() async throws {
@@ -426,8 +509,24 @@ final class WitnessAppModel: ObservableObject {
         saved.tunnel.enabled = true
         try WitnessStorage.save(saved)
         configuration = saved
+        transportDiagnostics = nil
         if state != .running { await start() }
         else { await syncInternetAccess() }
+    }
+
+    /// Reads the local listener, Cloudflare connector telemetry, and public
+    /// health route. This deliberately has no lifecycle, storage, or lease
+    /// side effects, so an operator can run it during an outage investigation.
+    func inspectInternetAccess() async {
+        guard !preview, !busy, !internetBusy, !transportDiagnosticsBusy else { return }
+        transportDiagnosticsBusy = true
+        defer { transportDiagnosticsBusy = false }
+        let localEndpoint = listenerPort.flatMap { URL(string: "http://127.0.0.1:\($0)") }
+        let publicEndpoint = URL(string: configuration.publicEndpoint)
+        transportDiagnostics = await internetAccess.inspectTransport(
+            localEndpoint: localEndpoint,
+            publicEndpoint: publicEndpoint
+        )
     }
 
     private func syncInternetAccess() async {
@@ -1006,7 +1105,7 @@ final class WitnessAppModel: ObservableObject {
         }
         if isRecovering {
             items.append(.init(id: "recovery", tier: .authority, title: "Restart quarantine",
-                               detail: "Grants paused for \(Int(ceil(snapshot?.recoverySeconds ?? 0))) seconds while earlier leases expire.",
+                               detail: "Renewals and new grants refused for \(Int(ceil(snapshot?.recoverySeconds ?? 0))) seconds while earlier leases expire.",
                                health: .warning, actionTitle: "Guarding", action: .page(.guarding)))
         }
 

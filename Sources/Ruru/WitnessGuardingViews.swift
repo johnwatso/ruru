@@ -179,6 +179,9 @@ private struct WitnessGuardedServiceDetails: View {
                 }
                 WitnessLeaseCode(lease: lease, leaseSeconds: Double(service.leaseSeconds), recovering: model.isRecovering)
                 if (lease?.remainingSeconds ?? 0) > 0 {
+                    Label("Ruru's recorded grant expiry. The client's own local deadline is authoritative and may differ.",
+                          systemImage: "info.circle")
+                        .font(.caption).foregroundStyle(.secondary)
                     Text("The term is the fencing token servers attach to their work; it only ever increases. The ring shows how long the current grant lasts without another renewal, and refills each time the owner renews.")
                         .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 } else {

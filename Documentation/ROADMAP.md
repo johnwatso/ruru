@@ -1,5 +1,25 @@
 # Development log and next steps
 
+## 2026-10-12 — Transport diagnostic foundation and client contract coverage
+
+- Added a bounded, read-only transport diagnostic backend. It independently
+  checks the loopback listener and public `/health` route, carries the
+  connector's retry/last-public-success telemetry, and distinguishes ready,
+  recovery, unreachable and unconfigured hops. It performs no connector
+  lifecycle action and cannot touch lease, storage, authority epoch or service
+  state. Native UI wiring is intentionally serialized after the concurrent UI
+  changes settle.
+- Extended real-server RuruClient conformance coverage for public readiness
+  and the fact that restart quarantine refuses an otherwise-valid renewal as
+  well as a new acquisition. Release/publish remains deferred: no tag or
+  remote change was made.
+- Added [the operator runbook](OPERATIONS.md) for the two-client failure drill,
+  restart quarantine, UPS/network path and immutable-backup rules. The drill
+  is a manual acceptance activity and has not been run against live Macs.
+- Validation: XcodeGen, `git diff --check`, the Debug build and the full Xcode
+  suite passed. No live tunnel, client, Keychain, database, pairing or network
+  state was changed; the documented two-Mac/WAN drill remains outstanding.
+
 ## 2026-10-12 — Public RuruClient package foundation
 
 - Added a public SwiftPM manifest at the repository root. The Ruru repository
