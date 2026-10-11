@@ -6,10 +6,12 @@ struct RuruApp: App {
     @NSApplicationDelegateAdaptor(WitnessAppDelegate.self) private var delegate
     @StateObject private var model = WitnessAppModel()
     @StateObject private var updater = AppUpdater()
+    @StateObject private var diagnostics = RuruDiagnosticExportSession()
 
     var body: some Scene {
         Window("Ruru", id: "witness") {
-            WitnessWindowContent(delegate: delegate).environmentObject(model).environmentObject(updater)
+            WitnessWindowContent(delegate: delegate).environmentObject(model).environmentObject(updater).environmentObject(diagnostics)
+                .ruruDiagnosticExportPresenter(diagnostics)
         }
         .defaultSize(width: 1180, height: 850)
         .windowStyle(.hiddenTitleBar)
@@ -25,11 +27,11 @@ struct RuruApp: App {
         }
         Settings {
             WitnessSettingsView(configuration: model.configuration)
-                .environmentObject(model).environmentObject(updater)
+                .environmentObject(model).environmentObject(updater).environmentObject(diagnostics)
         }
         .windowResizability(.contentSize)
         MenuBarExtra("Ruru", systemImage: "checkmark.shield") {
-            WitnessMenu().environmentObject(model).environmentObject(updater).onAppear {
+            WitnessMenu().environmentObject(model).environmentObject(updater).environmentObject(diagnostics).onAppear {
                 delegate.model = model
                 updater.prepareForInstallation = model.shutdown
                 updater.start()
@@ -100,6 +102,7 @@ private struct WitnessWindowContent: View {
 private struct WitnessMenu: View {
     @EnvironmentObject private var model: WitnessAppModel
     @EnvironmentObject private var updater: AppUpdater
+    @EnvironmentObject private var diagnostics: RuruDiagnosticExportSession
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
 
@@ -124,6 +127,11 @@ private struct WitnessMenu: View {
             NSApplication.shared.activate()
             openSettings()
         }
+        Button(diagnostics.isPreparing ? "Preparing Diagnostic Report…" : "Export Diagnostic Report…") {
+            openWindow(id: "witness")
+            NSApplication.shared.activate()
+            diagnostics.begin(model: model)
+        }.disabled(diagnostics.isPreparing || diagnostics.isExporterPresented)
         Button("Check for Updates…") { updater.checkForUpdates() }
             .disabled(!updater.canCheckForUpdates)
         Button("Quit Ruru") { NSApplication.shared.terminate(nil) }

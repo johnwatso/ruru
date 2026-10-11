@@ -27,6 +27,11 @@ and lease authority, not a SwiftBot bot/worker and not a root Swift package.
   `xcodebuild -project Ruru.xcodeproj -scheme Ruru test`
 - Verify a Release universal binary before claiming Intel support.
 - Preserve SwiftBot's `/v1/lease/acquire|renew|release` JSON protocol.
+- `RuruClient` is the supported public SwiftPM integration boundary. When Ruru
+  adds or changes a client-facing capability, update its typed client API,
+  documentation and conformance coverage in the same change. Preserve existing
+  public API and wire compatibility unless a deliberately versioned breaking
+  release is approved; keep app-specific workflows out of the package.
 - Terms never decrease; expired renewals never revive ownership. Persist before
   acknowledging grants. Clock expiry must be monotonic, with a full lease
   quarantine after process restart. Never silently replace a damaged database.

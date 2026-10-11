@@ -47,9 +47,12 @@ cancels its codes and requests. Ruru notifies the operator of each request.
 
 ## Use RuruClient (Swift)
 
-[`Clients/RuruClient`](../Clients/RuruClient) is a small Swift package
-(macOS 13+, iOS 16+) that implements the client rules below. Add it as a local
-or git package dependency.
+[`RuruClient`](../Clients/RuruClient) is the supported small Swift package
+ (macOS 13+, iOS 16+) that implements the client rules below. Its public
+manifest lives at the Ruru repository root, so add the Ruru repository as a
+local or git package dependency and select the `RuruClient` library product.
+Do not point SwiftPM at `Clients/RuruClient`: remote SwiftPM dependencies can
+resolve only a repository-root `Package.swift`.
 
 ```swift
 import RuruClient

@@ -91,6 +91,7 @@ targets:
       - Sources/Ruru/RuruUpdateConfiguration.swift
       - Sources/Ruru/RuruBackup.swift
       - Sources/Ruru/RuruAlerts.swift
+      - Sources/Ruru/RuruDiagnostics.swift
     dependencies:
       - target: WitnessKit
       # Conformance tests run the public client against the real server.

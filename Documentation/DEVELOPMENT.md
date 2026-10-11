@@ -18,7 +18,7 @@ xcodebuild -project Ruru.xcodeproj -scheme Ruru \
   -configuration Release ONLY_ACTIVE_ARCH=NO build
 ```
 
-`project.yml` is the source of truth. Run `xcodegen` after changes to targets, dependencies, resources, or build settings. This is not a root Swift package; use Xcode to build and test.
+`project.yml` is the source of truth. Run `xcodegen` after changes to targets, dependencies, resources, or build settings. Ruru itself is built and tested with Xcode; the root `Package.swift` exposes only the standalone `RuruClient` integration library for consuming apps.
 
 Xcode resolves DuckDB Swift at the pinned version **1.1.3** and Sparkle **2.9.5**, matching SwiftMiner. The connector is already vendored in `Resources/cloudflared`. The app does not download database extensions or require a package manager at runtime. `Scripts/vendor_cloudflared.py` is a maintenance tool, not part of the app runtime.
 

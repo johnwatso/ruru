@@ -235,6 +235,63 @@ final class WitnessAppModel: ObservableObject {
         return "http://\(host):\(listenerPort.map(Int.init) ?? configuration.port)"
     }
 
+    /// Produces the secret-free input for a support report. Existing snapshots
+    /// already bound history and observation counts, so this does no I/O and
+    /// cannot delay lease handling.
+    func diagnosticSnapshot(now: Date = Date()) -> RuruDiagnostics.Snapshot {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
+        let process = ProcessInfo.processInfo
+        let events = snapshot?.events ?? []
+
+        let services = configuration.guardedServices.enumerated().map { index, service in
+            let serviceEvents = events.filter { $0.clusterID == service.clusterID }
+            let observations = participantObservations.filter { $0.clusterID == service.clusterID }
+            let nodeIDs = Set(serviceEvents.map(\.nodeID))
+                .union(observations.map(\.nodeID))
+                .union(lease(for: service.clusterID).map { [$0.ownerNodeID] } ?? [])
+                .sorted()
+            let aliases = Dictionary(uniqueKeysWithValues: nodeIDs.enumerated().map { ("participant-\($0.offset + 1)", $0.element) })
+            let aliasFor: (String) -> String = { nodeID in
+                aliases.first(where: { $0.value == nodeID })?.key ?? "participant-unknown"
+            }
+            let policy = configuration.coordinationPolicy(for: service.id)
+            let locations = coordinationLocations.filter { $0.clusterID == service.clusterID }
+            let currentLease = lease(for: service.clusterID)
+            return RuruDiagnostics.Snapshot.Service(
+                identifier: "service-\(index + 1)", kind: service.kind.rawValue, leaseSeconds: service.leaseSeconds,
+                coordinationEnabled: policy.enabled, allowedOriginCount: policy.allowedOrigins.count,
+                locationCount: locations.count, freshLocationCount: locations.filter(\.fresh).count,
+                pendingPairingCount: pairingRequests(for: service.clusterID).count,
+                pendingWebsiteCount: coordinationEnrollments.filter { $0.clusterID == service.clusterID }.count,
+                lease: currentLease.map { .init(owner: $0.ownerNodeID.isEmpty ? nil : aliasFor($0.ownerNodeID),
+                                                term: $0.term, remainingSeconds: $0.remainingSeconds) },
+                participants: observations.sorted { $0.nodeID < $1.nodeID }.map {
+                    .init(identifier: aliasFor($0.nodeID), role: $0.role.rawValue, ageSeconds: $0.ageSeconds,
+                          fresh: $0.fresh, hasWebUI: $0.webUIURL != nil)
+                },
+                events: serviceEvents.map {
+                    .init(time: $0.time, action: $0.action, participant: aliasFor($0.nodeID), term: $0.term)
+                }
+            )
+        }
+
+        #if arch(arm64)
+        let architecture = "arm64"
+        #elseif arch(x86_64)
+        let architecture = "x86_64"
+        #else
+        let architecture = "unknown"
+        #endif
+        return .init(generatedAt: now, appVersion: version, appBuild: build,
+                     operatingSystem: process.operatingSystemVersionString,
+                     architecture: architecture,
+                     authorityState: statusText, listenerPort: listenerPort,
+                     recoverySeconds: snapshot?.recoverySeconds ?? 0, hasAuthorityError: error != nil,
+                     internetState: internetStatus.state.rawValue, hasInternetError: internetError != nil || internetStatus.state == .error,
+                     services: services)
+    }
+
     func start() async {
         guard !busy, state != .running else { return }
         guard !preview, let store, configuration.isValid else {
@@ -924,8 +981,10 @@ final class WitnessAppModel: ObservableObject {
     }
 
     struct Attention: Identifiable {
-        enum Action { case continueSetup, start, page(WitnessPage) }
+        enum Tier: String { case authority = "Authority", guarding = "Guarding", transport = "Transport" }
+        enum Action { case continueSetup, start, setupStorage, page(WitnessPage) }
         let id: String
+        let tier: Tier
         let title: String
         let detail: String
         let health: WitnessHealth
@@ -937,34 +996,62 @@ final class WitnessAppModel: ObservableObject {
     /// Overview, each with the one action that fixes it.
     var attentionItems: [Attention] {
         var items: [Attention] = []
+
+        // Authority tier — highest priority
+        if let error {
+            items.append(.init(id: "authority-error", tier: .authority, title: "Authority unavailable",
+                               detail: error, health: .error,
+                               actionTitle: legacyStorageNeedsReplacement ? "Set Up DuckDB…" : "Review",
+                               action: legacyStorageNeedsReplacement ? .setupStorage : .page(.internet)))
+        }
+        if isRecovering {
+            items.append(.init(id: "recovery", tier: .authority, title: "Restart quarantine",
+                               detail: "Grants paused for \(Int(ceil(snapshot?.recoverySeconds ?? 0))) seconds while earlier leases expire.",
+                               health: .warning, actionTitle: "Guarding", action: .page(.guarding)))
+        }
+
+        // Guarding tier — pairing requests
         let waiting = pairingRequests.count
         if waiting > 0 {
-            items.append(.init(id: "pairing", title: waiting == 1 ? "A server wants to pair" : "\(waiting) servers want to pair",
+            items.append(.init(id: "pairing", tier: .guarding,
+                               title: waiting == 1 ? "A server wants to pair" : "\(waiting) servers want to pair",
                                detail: "Approve or reject in the service’s page.", health: .warning,
                                actionTitle: "Review", action: .page(.guarding)))
         }
         guard configuration.setup.completed else {
-            items.insert(.init(id: "setup", title: "Finish setting up Ruru",
+            items.insert(.init(id: "setup", tier: .authority, title: "Finish setting up Ruru",
                                detail: "A few steps remain before your servers can use Ruru.", health: .warning,
                                actionTitle: "Continue Setup", action: .continueSetup), at: 0)
             return items
         }
         if state == .stopped, !legacyStorageNeedsReplacement {
-            items.append(.init(id: "stopped", title: "Ruru is stopped", detail: "Servers can’t take or keep ownership until it runs.",
+            items.append(.init(id: "stopped", tier: .authority, title: "Ruru is stopped",
+                               detail: "Servers can’t take or keep ownership until it runs.",
                                health: .warning, actionTitle: "Start", action: .start))
         }
+
+        // Transport tier
         if !configuration.tunnel.isConfigured, !configuration.setup.localOnly {
-            items.append(.init(id: "address", title: "No public address",
+            items.append(.init(id: "address", tier: .transport, title: "No public address",
                                detail: "Servers on other Macs can’t reach Ruru until Internet Access is set up.",
                                health: .warning, actionTitle: "Set Up", action: .page(.internet)))
         }
+        if internetStatus.state == .error {
+            items.append(.init(id: "transport-error", tier: .transport, title: "Tunnel unavailable",
+                               detail: internetStatus.detail, health: .error,
+                               actionTitle: "Internet Access", action: .page(.internet)))
+        }
+
+        // Guarding tier — services
         if configuration.services.isEmpty {
-            items.append(.init(id: "services", title: "No services yet", detail: "Add an app such as SwiftBot, then pair its servers.",
+            items.append(.init(id: "services", tier: .guarding, title: "No services yet",
+                               detail: "Add an app such as SwiftBot, then pair its servers.",
                                health: .inactive, actionTitle: "Add Service", action: .page(.guarding)))
         }
         for service in configuration.services where knownNodes(for: service.clusterID).isEmpty
             && (pairedServers[service.clusterID] ?? []).isEmpty {
-            items.append(.init(id: "unpaired-" + service.id, title: "\(service.name) has no servers yet",
+            items.append(.init(id: "unpaired-" + service.id, tier: .guarding,
+                               title: "\(service.name) has no servers yet",
                                detail: "Pair its servers with a code from Connection Details.", health: .inactive,
                                actionTitle: "Pair", action: .page(.guarding)))
         }

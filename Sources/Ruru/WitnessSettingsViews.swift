@@ -6,6 +6,8 @@ import WitnessKit
 struct WitnessSettingsView: View {
     @EnvironmentObject private var model: WitnessAppModel
     @EnvironmentObject private var updater: AppUpdater
+    @EnvironmentObject private var diagnostics: RuruDiagnosticExportSession
+    @Environment(\.openWindow) private var openWindow
     /// Mirrors the saved preferences; each edit is applied immediately.
     @State var configuration: WitnessConfiguration
     private enum Pane: String, CaseIterable, Identifiable {
@@ -93,6 +95,24 @@ struct WitnessSettingsView: View {
             }
         } header: {
             Text("Startup")
+        }
+        Section {
+            LabeledContent {
+                Button(diagnostics.isPreparing ? "Preparing…" : "Export Report…") {
+                    // The exporter is hosted by the main window so it always has
+                    // a reliable presenting window, including in menu-bar mode.
+                    openWindow(id: "witness")
+                    NSApplication.shared.activate()
+                    diagnostics.begin(model: model)
+                }
+                .disabled(diagnostics.isPreparing || diagnostics.isExporterPresented)
+            } label: {
+                Text("Diagnostic report")
+                Text("Save a redacted authority and lease-state report for troubleshooting.")
+            }
+        } footer: {
+            Text("Reports exclude credentials, endpoints, URLs and raw error text. They use Ruru’s existing bounded ownership history and current observations only.")
+                .font(.footnote).foregroundStyle(.secondary)
         }
         if let error {
             Section { warning("Settings could not be saved: " + error) }

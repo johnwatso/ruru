@@ -1,5 +1,77 @@
 # Development log and next steps
 
+## 2026-10-12 — Public RuruClient package foundation
+
+- Added a public SwiftPM manifest at the repository root. The Ruru repository
+  now exposes only the application-neutral `RuruClient` library product; the
+  native macOS authority remains an Xcode project and is not a package product.
+  Remote SwiftPM clients can therefore depend on the versioned Ruru repository,
+  which is not possible from a nested package manifest.
+- Ruru's Xcode project retains a matching nested client manifest for its local
+  dependency. Pointing that project at the root manifest makes Xcode resolve
+  the project as its own package and creates invalid `.swiftpm/xcode` metadata.
+  The root manifest is for external consumers only; the generated empty
+  metadata directory was removed before regenerating the project.
+- Added client package documentation covering dependency setup, fencing and
+  deadline obligations, semantic-versioning expectations and the release gate:
+  the client unit suite plus Ruru's real-server conformance tests must pass.
+  `Documentation/INTEGRATIONS.md` now identifies the root manifest and product.
+- SwiftBot is the intended first adopter. Its existing `MeshWitnessClient` will
+  be replaced in a dedicated migration after RuruClient receives a published
+  release tag; its app-specific orchestration and persistence remain outside
+  the shared package. No SwiftBot source or configuration changed here.
+- Validation: XcodeGen, `git diff --check`, Ruru Debug build and the full Xcode
+  suite passed (150 tests) with the root package resolved as a local dependency.
+  No GitHub tag/release was created and no production/test authority, Keychain,
+  pairing, tunnel or service configuration was changed.
+
+## 2026-10-11 — Redacted authority diagnostics
+
+- Added an on-demand plain-text diagnostic report, available from Settings →
+  General and the menu bar. It captures the local authority state, bounded lease
+  history, per-service lease/capability counts and current participant freshness
+  using the snapshots already maintained by the app; it does not introduce
+  probes, client metadata fields, durable telemetry or database reads.
+- Report labels are local aliases. It excludes bearer tokens, Keychain values,
+  Cloudflare credentials, endpoints, reported URLs, hostnames and raw error
+  text. Export uses the standard macOS save dialog and reveals the saved file in
+  Finder.
+- Validation: XcodeGen, `git diff --check` and the full Xcode suite passed
+  (150 tests), including report content, bounded-history fields, redaction
+  guarantees and the UTC filename. The standard save-dialog flow has not yet
+  been exercised manually in a live app window; no production storage,
+  Keychain, listener, tunnel or login setting was changed.
+
+## 2026-10-11 — OkiDoki review and retained diagnostics ideas
+
+- Reviewed OkiDoki's ten-commit prototype against Ruru. Its heartbeat shell,
+  Cloudflare setup, client scaffolding and general coordination direction are
+  superseded by Ruru. No runtime code was imported. Its healthy-peer count is
+  not independent failure confirmation, and its in-memory terms and wall-clock
+  freshness must not replace Ruru's durable lease fencing or monotonic expiry.
+- Archived [OkiDoki](https://github.com/johnwatso/OkiDoki) on GitHub after
+  publishing a README notice that Ruru supersedes it. Updated its description
+  and homepage to point to Ruru; source and commit history remain available.
+- Retained optional future diagnostics from OkiDoki's node model: reported
+  application name/version, process uptime and explicitly self-reported
+  connectivity observations. These may help explain mismatched client versions,
+  recent process restarts or a participant's view of an outage. They are backlog
+  ideas, not implemented fields or permission to promote a node.
+- If a concrete integration needs them, extend application-neutral participant
+  reporting with bounded optional metadata and feature discovery. Preserve old
+  clients, the 4 KiB request limit, service isolation, monotonic freshness and
+  expiry on restart/removal. Omission should withdraw prior values; label unknown
+  or stale observations clearly. Do not add coordinator probes, arbitrary host
+  labels, machine identifiers or URLs just to populate diagnostics.
+- Before shipping, validate metadata bounds/invalid values, older-client
+  compatibility, withdrawal/freshness/restart, cross-service authorization and
+  lease renewal latency under reporting load. Uptime is reported telemetry, not
+  proof of liveness; connectivity reports never change lease ownership.
+- Validation for this review: local source/history and live GitHub metadata
+  checked; main matched the clean local checkout, with no other remote branches,
+  PRs, issues, tags or releases. Documentation-only change; no app build, live
+  deployment or new diagnostics implementation was performed.
+
 ## 2026-10-09 — Single-server deployment preference
 
 - Recorded the operator's choice of one Ruru authority and a five-minute

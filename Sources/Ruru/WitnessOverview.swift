@@ -50,6 +50,7 @@ struct WitnessOverview: View {
         switch action {
         case .continueSetup: model.showingSetup = true
         case .start: Task { await model.start() }
+        case .setupStorage: showingStorageSetup = true
         case .page(let page): onNavigate(page)
         }
     }
@@ -98,28 +99,12 @@ struct WitnessOverview: View {
                 VStack(alignment: .leading, spacing: 18) { appIcon; summaryIdentity }
             }.padding(28)
 
-            if model.error != nil || model.isRecovering || model.internetStatus.state == .error || !model.attentionItems.isEmpty {
+            if !model.attentionItems.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(model.attentionItems) { item in
-                        WitnessOverviewIssue(title: item.title, detail: item.detail, health: item.health,
+                        WitnessOverviewIssue(tier: item.tier.rawValue, title: item.title,
+                                             detail: item.detail, health: item.health,
                                              reviewTitle: item.actionTitle) { perform(item.action) }
-                    }
-                    if let error = model.error {
-                        WitnessOverviewIssue(title: "Authority unavailable", detail: error, health: .error,
-                                             reviewTitle: model.legacyStorageNeedsReplacement ? "Set Up DuckDB…" : "Review") {
-                            if model.legacyStorageNeedsReplacement { showingStorageSetup = true }
-                            else { onNavigate(.internet) }
-                        }
-                    }
-                    if model.isRecovering {
-                        WitnessOverviewIssue(title: "Recovering ownership", detail: "Waiting \(Int(ceil(model.snapshot?.recoverySeconds ?? 0))) seconds for earlier leases to expire.", health: .warning) {
-                            onNavigate(.guarding)
-                        }
-                    }
-                    if model.internetStatus.state == .error {
-                        WitnessOverviewIssue(title: "Internet Access unavailable", detail: model.internetStatus.detail, health: .error) {
-                            onNavigate(.internet)
-                        }
                     }
                 }.padding(.horizontal, 16).padding(.bottom, 16).padding(.top, -8)
             }
@@ -169,11 +154,11 @@ struct WitnessOverview: View {
         ConsoleSection(title: "Services", accessory: { Text(model.guardingSummary) }, content: {
             Group {
                 if availableServiceWidth == 0 || availableServiceWidth >= 168 * 4 + 14 * 3 {
-                    HStack(alignment: .top, spacing: 14) { authorityCard; guardingCard; internetCard; activityCard }
+                    HStack(alignment: .top, spacing: 14) { guardingCard; internetCard; activityCard; alertsCard }
                 } else {
                     Grid(horizontalSpacing: 14, verticalSpacing: 14) {
-                        GridRow { authorityCard; guardingCard }
-                        GridRow { internetCard; activityCard }
+                        GridRow { guardingCard; internetCard }
+                        GridRow { activityCard; alertsCard }
                     }
                 }
             }
@@ -182,10 +167,6 @@ struct WitnessOverview: View {
         })
     }
 
-    private var authorityCard: some View {
-        WitnessServiceCard(title: "Authority", symbol: "checkmark.shield", status: model.statusText,
-                           detail: model.localURL, health: model.serviceHealth) { onNavigate(.internet) }
-    }
     private var guardingCard: some View {
         WitnessServiceCard(title: "Guarding", symbol: "server.rack", status: "\(model.configuration.guardedServices.count) \(model.configuration.guardedServices.count == 1 ? "service" : "services")",
                            detail: "\(model.activeServiceCount) with an owner", health: model.activeServiceCount > 0 ? .healthy : .inactive) { onNavigate(.guarding) }
@@ -234,6 +215,13 @@ struct WitnessOverview: View {
         }.accessibilityElement(children: .combine)
     }
 
+    private var alertsCard: some View {
+        WitnessServiceCard(title: "Alerts", symbol: "bell.badge",
+                           status: model.alertsStatusText,
+                           detail: model.alertDeliveryError ?? "Service and authority notifications",
+                           health: model.alertsHealth) { showSettings() }
+    }
+
     private var recentActivity: some View {
         ConsoleSection(title: "Recent Activity", accessory: {
             Button("View All") { onNavigate(.activity) }.buttonStyle(.borderless)
@@ -253,6 +241,7 @@ struct WitnessOverview: View {
 }
 
 private struct WitnessOverviewIssue: View {
+    var tier: String = ""
     let title: String
     let detail: String
     let health: WitnessHealth
@@ -266,13 +255,22 @@ private struct WitnessOverviewIssue: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(health.tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(tier.isEmpty ? "" : "\(tier): ")\(title). \(detail)")
     }
     private var message: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: health == .error ? "exclamationmark.circle.fill" : "exclamationmark.triangle.fill")
-                .font(.title3).foregroundStyle(health.tint).accessibilityHidden(true)
+                .font(.system(size: 28)).foregroundStyle(health.tint).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.callout.weight(.semibold))
+                HStack(spacing: 6) {
+                    if !tier.isEmpty {
+                        Text(tier).font(.caption.weight(.semibold)).foregroundStyle(health.tint)
+                            .textCase(.uppercase).accessibilityHidden(true)
+                        Text("—").font(.caption).foregroundStyle(.tertiary).accessibilityHidden(true)
+                    }
+                    Text(title).font(.callout.weight(.semibold))
+                }
                 Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -282,6 +280,7 @@ private struct WitnessOverviewIssue: View {
             .accessibilityLabel(reviewTitle == "Review" ? "Review \(title)" : reviewTitle)
     }
 }
+
 
 private struct WitnessOverviewHost {
     let computerName: String

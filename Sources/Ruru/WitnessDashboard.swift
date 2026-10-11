@@ -350,6 +350,36 @@ extension WitnessAppModel {
         case .disabled, .enabling: return .inactive
         }
     }
+
+    var coordinationStatusText: String {
+        let enabledCount = configuration.guardedServices.filter { configuration.coordinationPolicy(for: $0.id).enabled }.count
+        guard enabledCount > 0 else { return "Not enabled" }
+        let freshCount = coordinationLocations.filter(\.fresh).count
+        let total = coordinationLocations.count
+        if total == 0 { return "Idle" }
+        return "Reporting · \(freshCount == total ? "\(total)" : "\(freshCount)/\(total) fresh") \(total == 1 ? "location" : "locations")"
+    }
+    var coordinationHealth: WitnessHealth {
+        let enabledCount = configuration.guardedServices.filter { configuration.coordinationPolicy(for: $0.id).enabled }.count
+        guard enabledCount > 0 else { return .inactive }
+        let total = coordinationLocations.count
+        if total == 0 { return .inactive }
+        let freshCount = coordinationLocations.filter(\.fresh).count
+        return freshCount == total ? .healthy : .warning
+    }
+
+    var alertsStatusText: String {
+        if let alertDeliveryError { return "Delivery failed" }
+        var destinations: [String] = []
+        if configuration.alerts.notifications { destinations.append("macOS") }
+        if configuration.alerts.discord, discordConfigured { destinations.append("Discord") }
+        return destinations.isEmpty ? "Not configured" : destinations.joined(separator: " + ")
+    }
+    var alertsHealth: WitnessHealth {
+        if alertDeliveryError != nil { return .error }
+        if !configuration.alerts.notifications && !(configuration.alerts.discord && discordConfigured) { return .inactive }
+        return .healthy
+    }
 }
 
 private let witnessHostName = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
