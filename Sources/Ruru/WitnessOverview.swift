@@ -260,14 +260,9 @@ private struct WitnessOverviewIssue: View {
     }
     private var message: some View {
         HStack(alignment: .center, spacing: 16) {
-            Group {
-                if health == .inactive {
-                    Image(systemName: health.symbol)
-                        .symbolRenderingMode(.palette).foregroundStyle(.yellow, .secondary)
-                } else {
-                    Image(systemName: health.symbol).foregroundStyle(health.tint)
-                }
-            }.font(.system(size: 22)).accessibilityHidden(true)
+            Image(systemName: health.symbol)
+                .font(.system(size: 22)).foregroundStyle(health == .inactive ? .orange : health.tint)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     if !tier.isEmpty {
