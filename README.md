@@ -53,6 +53,17 @@ Ruru requires **macOS 15.0 or later** and an independent Mac that all participat
 
 Public release assets are not published yet. For now, [build Ruru from source](Documentation/DEVELOPMENT.md), move `Ruru.app` into Applications, and follow the [setup guide](Documentation/SETUP.md) to pair SwiftBot or [integrate another app](Documentation/INTEGRATIONS.md). Published builds will be available from [GitHub Releases](https://github.com/johnwatso/ruru/releases).
 
+## For app developers
+
+The repository’s root SwiftPM manifest exposes **RuruClient**, Ruru’s small,
+application-neutral Swift client for lease fencing, pairing, capability discovery
+and participant presence. Ruru itself remains a native Xcode app; consumers link
+only the `RuruClient` product. Read the [client package guide](Clients/RuruClient/README.md)
+and the [integration guide](Documentation/INTEGRATIONS.md) before adopting it.
+
+The package is available locally for development now. A versioned remote SwiftPM
+dependency will be supported when its first RuruClient release tag is published.
+
 ## Why Ruru?
 
 Ruru exists to make a complicated feature easy to manage. Keeping multiple servers coordinated takes care; setting them up and seeing which one is allowed to act should be straightforward.

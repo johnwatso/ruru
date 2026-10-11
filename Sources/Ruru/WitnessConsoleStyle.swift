@@ -26,6 +26,14 @@ enum WitnessHealth {
         case .inactive: .secondary
         }
     }
+    var symbol: String {
+        switch self {
+        case .healthy: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.octagon.fill"
+        case .inactive: "exclamationmark.shield.fill"
+        }
+    }
 }
 
 struct WitnessStatusBadge: View {

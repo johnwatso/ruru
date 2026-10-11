@@ -15,7 +15,8 @@
 - Added client package documentation covering dependency setup, fencing and
   deadline obligations, semantic-versioning expectations and the release gate:
   the client unit suite plus Ruru's real-server conformance tests must pass.
-  `Documentation/INTEGRATIONS.md` now identifies the root manifest and product.
+  The repository README and `Documentation/INTEGRATIONS.md` identify the root
+  manifest and product.
 - SwiftBot is the intended first adopter. Its existing `MeshWitnessClient` will
   be replaced in a dedicated migration after RuruClient receives a published
   release tag; its app-specific orchestration and persistence remain outside

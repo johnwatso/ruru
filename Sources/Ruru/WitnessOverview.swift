@@ -253,15 +253,21 @@ private struct WitnessOverviewIssue: View {
             HStack(spacing: 12) { message; Spacer(minLength: 16); review }
             VStack(alignment: .leading, spacing: 12) { message; review }
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.leading, 24).padding(.trailing, 14).padding(.vertical, 10)
         .background(health.tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(tier.isEmpty ? "" : "\(tier): ")\(title). \(detail)")
     }
     private var message: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: health == .error ? "exclamationmark.circle.fill" : "exclamationmark.triangle.fill")
-                .font(.system(size: 28)).foregroundStyle(health.tint).accessibilityHidden(true)
+        HStack(alignment: .center, spacing: 16) {
+            Group {
+                if health == .inactive {
+                    Image(systemName: health.symbol)
+                        .symbolRenderingMode(.palette).foregroundStyle(.yellow, .secondary)
+                } else {
+                    Image(systemName: health.symbol).foregroundStyle(health.tint)
+                }
+            }.font(.system(size: 22)).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     if !tier.isEmpty {
