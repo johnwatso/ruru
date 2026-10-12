@@ -6,6 +6,11 @@ public enum ParticipantRole: String, Codable, Sendable {
     case active, standby, worker, unknown
 }
 
+/// A participant's self-reported power source. This is display telemetry only.
+public enum ParticipantPowerSource: String, Codable, Sendable {
+    case ac, ups, battery, unknown
+}
+
 /// A reported, display-only website. No credentials, paths or probes.
 public enum ParticipantWebUI {
     public static func normalizedURL(_ value: String?) -> String? {
@@ -25,15 +30,28 @@ public struct ParticipantReport: Codable, Sendable {
     public let nodeName: String?
     public let role: ParticipantRole
     public let webUIURL: String?
+    public let powerSource: ParticipantPowerSource?
+    public let externalPower: Bool?
+    public let batteryPercent: Int?
+    public let batteryTimeRemaining: Int?
+    public let sessionEnding: Bool?
 
     public init(clusterID: String, nodeID: String, nodeName: String? = nil,
-                role: ParticipantRole = .unknown, version: Int = 1, webUIURL: String? = nil) {
+                role: ParticipantRole = .unknown, version: Int = 1, webUIURL: String? = nil,
+                powerSource: ParticipantPowerSource? = nil, externalPower: Bool? = nil,
+                batteryPercent: Int? = nil, batteryTimeRemaining: Int? = nil,
+                sessionEnding: Bool? = nil) {
         self.version = version
         self.clusterID = clusterID
         self.nodeID = nodeID
         self.nodeName = nodeName
         self.role = role
         self.webUIURL = webUIURL
+        self.powerSource = powerSource
+        self.externalPower = externalPower
+        self.batteryPercent = batteryPercent
+        self.batteryTimeRemaining = batteryTimeRemaining
+        self.sessionEnding = sessionEnding
     }
 }
 
@@ -45,12 +63,23 @@ public struct ParticipantObservation: Sendable {
     public let ageSeconds: Double
     public let fresh: Bool
     public let webUIURL: String?
+    public let powerSource: ParticipantPowerSource?
+    public let externalPower: Bool?
+    public let batteryPercent: Int?
+    public let batteryTimeRemaining: Int?
+    public let sessionEnding: Bool?
 
     public init(clusterID: String, nodeID: String, nodeName: String?, role: ParticipantRole,
-                ageSeconds: Double, fresh: Bool, webUIURL: String? = nil) {
+                ageSeconds: Double, fresh: Bool, webUIURL: String? = nil,
+                powerSource: ParticipantPowerSource? = nil, externalPower: Bool? = nil,
+                batteryPercent: Int? = nil, batteryTimeRemaining: Int? = nil,
+                sessionEnding: Bool? = nil) {
         self.clusterID = clusterID; self.nodeID = nodeID; self.nodeName = nodeName
         self.role = role; self.ageSeconds = ageSeconds; self.fresh = fresh
         self.webUIURL = webUIURL
+        self.powerSource = powerSource; self.externalPower = externalPower
+        self.batteryPercent = batteryPercent; self.batteryTimeRemaining = batteryTimeRemaining
+        self.sessionEnding = sessionEnding
     }
 }
 
@@ -99,6 +128,11 @@ public actor ParticipantPresence {
               report.webUIURL == nil || ParticipantWebUI.normalizedURL(report.webUIURL) != nil else {
             return .error("invalid_request", status: 400)
         }
+        // Reject impossible readings rather than turning them into false warnings.
+        guard report.batteryPercent.map({ (0...100).contains($0) }) ?? true,
+              report.batteryTimeRemaining.map({ (0...604_800).contains($0) }) ?? true else {
+            return .error("invalid_request", status: 400)
+        }
         guard report.clusterID == cluster else { return .error("forbidden_cluster", status: 403) }
         guard report.version == 1 else { return .error("unsupported_version", status: 409) }
         let now = clock()
@@ -118,7 +152,11 @@ public actor ParticipantPresence {
             return ParticipantObservation(clusterID: $0.report.clusterID, nodeID: $0.report.nodeID,
                 nodeName: WitnessNodeName.normalized($0.report.nodeName), role: $0.report.role,
                 ageSeconds: age, fresh: age < Self.freshSeconds,
-                webUIURL: age < Self.freshSeconds ? ParticipantWebUI.normalizedURL($0.report.webUIURL) : nil)
+                webUIURL: age < Self.freshSeconds ? ParticipantWebUI.normalizedURL($0.report.webUIURL) : nil,
+                powerSource: $0.report.powerSource, externalPower: $0.report.externalPower,
+                batteryPercent: $0.report.batteryPercent,
+                batteryTimeRemaining: $0.report.batteryTimeRemaining,
+                sessionEnding: $0.report.sessionEnding)
         }.sorted { ($0.clusterID, $0.nodeID) < ($1.clusterID, $1.nodeID) }
     }
 

@@ -1,5 +1,33 @@
 # Development log and next steps
 
+## 2026-10-12 — SwiftBot planned session-end handoff
+
+- Participant presence can carry an optional `sessionEnding` flag. Ruru's Known
+  Servers view displays a fresh system logout/power-off notice; it remains an
+  ephemeral observation and does not affect lease authority.
+- SwiftBot listens for macOS's workspace will-power-off notification. During
+  app termination it cancels periodic presence, reports the notice, drains and
+  saves local work, then releases the Ruru lease through the existing route.
+  Failed drain/save skips early release so the normal lease deadline applies.
+- Updated the typed RuruClient and API/operations documentation. Debug builds
+  of both Ruru and SwiftBot passed, and `git diff --check` is clean. Tests were
+  not rerun after this lifecycle extension; live logout/power-off remains
+  unexercised.
+
+## 2026-10-12 — Participant UPS telemetry contract
+
+- Added optional power-source, external-power, battery percentage and estimated
+  remaining-time fields to participant presence v1 and its typed RuruClient API.
+  Reports replace prior snapshots, numeric ranges are bounded, and the fields
+  remain ephemeral display metadata independent of lease and authority state.
+- Updated integration/OpenAPI documentation and real-server client conformance
+  coverage. SwiftBot's power-source reader and participant-card UI are being
+  handled in the parallel integration lane; no live UPS or production service
+  was accessed for this contract change.
+- Claude reported 153 Ruru and 926 SwiftBot tests passing for the UPS integration
+  before this shutdown flag was added. The current Debug builds also pass; no
+  physical UPS state was exercised.
+
 ## 2026-10-12 — Transport diagnostic foundation and client contract coverage
 
 - Added a bounded, read-only transport diagnostic backend. It independently

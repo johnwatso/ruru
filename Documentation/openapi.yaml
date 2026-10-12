@@ -39,6 +39,14 @@ paths:
                     bytes. No credentials, non-root paths, queries or fragments.
                     Omission clears the prior address; stale reports lose their
                     URL. Display only, with no reachability check.
+                powerSource:
+                  type: [string, "null"]
+                  enum: [ac, ups, battery, unknown, null]
+                  description: Optional self-reported power source; display only.
+                externalPower: { type: [boolean, "null"], description: Optional power connection state; null means unknown. }
+                batteryPercent: { type: [integer, "null"], minimum: 0, maximum: 100, description: Optional battery percentage. }
+                batteryTimeRemaining: { type: [integer, "null"], minimum: 0, maximum: 604800, description: Optional estimated seconds remaining, capped at seven days. }
+                sessionEnding: { type: [boolean, "null"], description: True when the participant received a system logout or power-off request; informational and ephemeral. }
       responses:
         "200":
           description: Contact accepted; not an ownership grant

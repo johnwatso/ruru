@@ -200,7 +200,7 @@ Feature-detect `participantPresence` version 1 in `GET /v1/service`. Send
 `POST /v1/participants/report` every 15 seconds with the service bearer token:
 
 ```json
-{"version":1,"clusterID":"swiftbot","nodeID":"stable-backup-id","nodeName":"Backup Mac","role":"standby","webUIURL":"https://failover.example.com"}
+{"version":1,"clusterID":"swiftbot","nodeID":"stable-backup-id","nodeName":"Backup Mac","role":"standby","webUIURL":"https://failover.example.com","powerSource":"ups","externalPower":false,"batteryPercent":87,"batteryTimeRemaining":3600}
 ```
 
 Roles are `active`, `standby`, `worker` or `unknown` and are self-reported; Ruru
@@ -218,6 +218,23 @@ when the website is disabled or no public HTTPS address is configured; omission
 clears the previous address. Older clients can continue omitting this field,
 and older Ruru versions ignore it.
 
+The optional `powerSource` (`ac`, `ups`, `battery` or `unknown`),
+`externalPower`, `batteryPercent` (0–100) and `batteryTimeRemaining` (seconds,
+at most seven days) fields report a local power snapshot. Omit unavailable
+values; each new report replaces the prior snapshot, so omission clears an old
+reading. Out-of-range numeric readings reject the report. These fields are
+self-reported display telemetry, retained with the report's freshness age, and
+do not affect ownership, lease deadlines or authority readiness. RuruClient
+exposes them as optional `reportPresence` parameters.
+
+`sessionEnding` is an optional, ephemeral indicator. SwiftBot sets it when
+macOS requests logout or power-off; Ruru shows “Logout or shutdown requested”
+while the participant report is fresh. SwiftBot then stops new work, drains
+active work and releases its lease through the normal lease route. The notice
+itself does not release or transfer ownership. If the drain cannot complete,
+SwiftBot leaves the lease to expire. A later report without this field clears
+the indicator.
+
 Failover and recovery Discord embeds include a **Web UI** website link only from
 the current lease owner's fresh report, matched by service and stable node ID.
 The address is self-reported, never probed, and does not prove reachability or
@@ -231,7 +248,7 @@ leaving the remaining listener capacity available for leases. Service tokens
 authenticate a trusted group, not the individual claimed node ID. Public
 `/health` and policy reads do not register participants.
 
-RuruClient exposes `reportPresence(role:webUIURL:)`; call it in a separate reporting loop
+RuruClient exposes `reportPresence(role:webUIURL:powerSource:externalPower:batteryPercent:batteryTimeRemaining:sessionEnding:)`; call it in a separate reporting loop
 and check `describe().supports("participantPresence")` before using it. Old
 clients retain lease compatibility; they cannot show standby presence until
 updated. Updated SwiftBot feature-detects, rechecking once per minute, and ignores

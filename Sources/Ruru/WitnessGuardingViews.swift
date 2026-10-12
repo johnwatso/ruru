@@ -103,12 +103,37 @@ private struct WitnessGuardedServiceDetails: View {
         }
     }
 
+    private static func powerLabel(_ observation: ParticipantObservation) -> (text: String, symbol: String, color: Color)? {
+        guard let source = observation.powerSource, source != .unknown else { return nil }
+        let onBattery = observation.externalPower == false
+        let percent = observation.batteryPercent
+        if source == .ups && onBattery {
+            let detail = percent.map { " · \($0)%" } ?? ""
+            return ("UPS on battery\(detail)", "bolt.trianglebadge.exclamationmark", .orange)
+        }
+        if source == .ups {
+            let detail = percent.map { " · \($0)%" } ?? ""
+            return ("UPS\(detail)", "bolt.shield", .green)
+        }
+        if source == .battery && onBattery {
+            let detail = percent.map { " · \($0)%" } ?? ""
+            return ("On battery\(detail)", "battery.25percent", percent.map({ $0 <= 20 }) == true ? .red : .orange)
+        }
+        if source == .battery {
+            let detail = percent.map { " · \($0)%" } ?? ""
+            return ("Charging\(detail)", "battery.100percent.bolt", .green)
+        }
+        return ("AC power", "powerplug", .green)
+    }
+
     private func serverAccessibilityLabel(_ node: String) -> String {
         var parts = [model.nodeDisplayName(for: node,
             reportedName: model.reportedName(for: node, clusterID: service.clusterID), clusterID: service.clusterID)]
         if lease?.ownerNodeID == node && (lease?.remainingSeconds ?? 0) > 0 { parts.append("Current owner") }
         if let observation = model.participant(for: node, clusterID: service.clusterID) {
             parts.append(observation.fresh ? presenceLabel(observation.role) : "Contact stale")
+            if observation.fresh, observation.sessionEnding == true { parts.append("System logout or shutdown requested") }
+            if observation.fresh, let power = Self.powerLabel(observation) { parts.append(power.text) }
             parts.append("Last seen \(Int(observation.ageSeconds)) seconds ago")
         } else { parts.append("Presence unknown") }
         if preference.preferredPrimaryNodeID == node { parts.append("Preferred Primary") }
@@ -216,6 +241,14 @@ private struct WitnessGuardedServiceDetails: View {
                                         Label(observation.fresh ? presenceLabel(observation.role) : "Contact stale",
                                               systemImage: observation.fresh ? "checkmark.circle" : "clock")
                                             .font(.caption).foregroundStyle(observation.fresh ? Color.green : Color.secondary)
+                                        if observation.fresh, observation.sessionEnding == true {
+                                            Label("Logout or shutdown requested", systemImage: "power")
+                                                .font(.caption).foregroundStyle(.orange)
+                                        }
+                                        if observation.fresh, let powerLabel = Self.powerLabel(observation) {
+                                            Label(powerLabel.text, systemImage: powerLabel.symbol)
+                                                .font(.caption).foregroundStyle(powerLabel.color)
+                                        }
                                         Text("Last seen \(Int(observation.ageSeconds))s ago").font(.caption).foregroundStyle(.secondary)
                                     } else {
                                         Text("Presence unknown").font(.caption).foregroundStyle(.secondary)

@@ -47,6 +47,11 @@ public enum RuruError: Error, Equatable, Sendable {
     case transport(String)
 }
 
+/// A participant's self-reported power source for display in Ruru.
+public enum RuruPowerSource: String, Encodable, Sendable {
+    case ac, ups, battery, unknown
+}
+
 /// The service description returned by `GET /v1/service`.
 public struct RuruServiceDescription: Decodable, Sendable, Equatable {
     public struct Capability: Decodable, Sendable, Equatable {
@@ -129,7 +134,10 @@ public actor RuruLeaseClient {
 
     /// Call every 15 seconds, independently of lease acquisition/renewal.
     /// Discover `participantPresence` first; a report never grants ownership.
-    public func reportPresence(role: ParticipantRole = .unknown, webUIURL: URL? = nil) async throws {
+    public func reportPresence(role: ParticipantRole = .unknown, webUIURL: URL? = nil,
+                               powerSource: RuruPowerSource? = nil, externalPower: Bool? = nil,
+                               batteryPercent: Int? = nil, batteryTimeRemaining: Int? = nil,
+                               sessionEnding: Bool? = nil) async throws {
         struct Report: Encodable {
             let version = 1
             let clusterID: String
@@ -137,9 +145,17 @@ public actor RuruLeaseClient {
             let nodeName: String?
             let role: ParticipantRole
             let webUIURL: String?
+            let powerSource: RuruPowerSource?
+            let externalPower: Bool?
+            let batteryPercent: Int?
+            let batteryTimeRemaining: Int?
+            let sessionEnding: Bool?
         }
         let body = try JSONEncoder().encode(Report(clusterID: configuration.clusterID,
-            nodeID: configuration.nodeID, nodeName: configuration.nodeName, role: role, webUIURL: webUIURL?.absoluteString))
+            nodeID: configuration.nodeID, nodeName: configuration.nodeName, role: role,
+            webUIURL: webUIURL?.absoluteString, powerSource: powerSource, externalPower: externalPower,
+            batteryPercent: batteryPercent, batteryTimeRemaining: batteryTimeRemaining,
+            sessionEnding: sessionEnding))
         let data = try await send("/v1/participants/report", body: body)
         struct Reply: Decodable { let version: Int; let accepted: Bool }
         guard let reply = try? JSONDecoder().decode(Reply.self, from: data), reply.version == 1, reply.accepted else {
