@@ -9,6 +9,7 @@ struct RuruAlertPreferences: Codable, Equatable {
     var serviceDown = true
     var failover = true
     var authorityProblems = true
+    var participantStatus = false
 
     init() {}
     init(from decoder: Decoder) throws {
@@ -19,11 +20,16 @@ struct RuruAlertPreferences: Codable, Equatable {
         serviceDown = try values.decodeIfPresent(Bool.self, forKey: .serviceDown) ?? defaults.serviceDown
         failover = try values.decodeIfPresent(Bool.self, forKey: .failover) ?? defaults.failover
         authorityProblems = try values.decodeIfPresent(Bool.self, forKey: .authorityProblems) ?? defaults.authorityProblems
+        participantStatus = try values.decodeIfPresent(Bool.self, forKey: .participantStatus) ?? defaults.participantStatus
     }
 }
 
 struct RuruAlert: Equatable {
-    enum Kind: Equatable { case serviceDown, serviceRecovered, failover, authorityProblem, authorityRecovered, pairingRequest, test }
+    enum Kind: Equatable {
+        case serviceDown, serviceRecovered, failover, authorityProblem, authorityRecovered
+        case participantOnBattery, participantLowBattery, participantPowerRestored, participantSessionEnding
+        case pairingRequest, test
+    }
     enum Severity: Equatable { case critical, warning, resolved, info }
 
     /// Display names only; never include credentials or internal alert keys.
@@ -43,8 +49,9 @@ struct RuruAlert: Equatable {
 
     var severity: Severity {
         switch kind {
-        case .serviceDown, .authorityProblem: .critical
-        case .failover: .warning
+        case .serviceDown, .authorityProblem, .participantLowBattery: .critical
+        case .failover, .participantOnBattery, .participantSessionEnding: .warning
+        case .participantPowerRestored: .resolved
         case .serviceRecovered, .authorityRecovered: .resolved
         case .pairingRequest, .test: .info
         }
@@ -55,9 +62,102 @@ struct RuruAlert: Equatable {
         case .serviceDown, .serviceRecovered: preferences.serviceDown
         case .failover: preferences.failover
         case .authorityProblem, .authorityRecovered: preferences.authorityProblems
+        case .participantOnBattery, .participantLowBattery, .participantPowerRestored, .participantSessionEnding:
+            preferences.participantStatus
         case .pairingRequest, .test: true
         }
     }
+}
+
+/// Display-only participant categories. Their history is durable but never
+/// becomes ownership events or influences who may act for a service.
+enum ParticipantActivityKind: String, Equatable {
+    case onBattery, lowBattery, powerRestored, sessionEnding
+
+    var title: String {
+        switch self {
+        case .onBattery: "UPS on battery"
+        case .lowBattery: "Battery low"
+        case .powerRestored: "Power restored"
+        case .sessionEnding: "Session ending soon"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .onBattery: "bolt.trianglebadge.exclamationmark"
+        case .lowBattery: "battery.0percent"
+        case .powerRestored: "powerplug"
+        case .sessionEnding: "bolt.shield"
+        }
+    }
+}
+
+struct ParticipantActivityTransition {
+    let clusterID: String
+    let nodeID: String
+    let nodeName: String
+    let date: Date
+    let kind: ParticipantActivityKind
+    let detail: String
+}
+
+/// Detects edges in fresh, self-reported participant telemetry. The first
+/// observation establishes a baseline so opening Ruru doesn't invent an alert.
+struct ParticipantAlertMonitor {
+    private struct State {
+        var externalPower: Bool?
+        var batteryPercent: Int?
+        var sessionEnding: Bool?
+    }
+    private var states: [String: State] = [:]
+
+    mutating func observe(_ observations: [ParticipantObservation], serviceNames: [String: String], at now: Date)
+        -> (alerts: [RuruAlert], events: [ParticipantActivityTransition]) {
+        var alerts: [RuruAlert] = []
+        var events: [ParticipantActivityTransition] = []
+        let fresh = observations.filter(\.fresh)
+        let seen = Set(fresh.map { "\($0.clusterID)|\($0.nodeID)" })
+        for observation in fresh.sorted(by: {
+            $0.clusterID == $1.clusterID ? $0.nodeID < $1.nodeID : $0.clusterID < $1.clusterID
+        }) {
+            let key = "\(observation.clusterID)|\(observation.nodeID)"
+            let prior = states[key]
+            let node = observation.nodeName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? observation.nodeID
+            let service = serviceNames[observation.clusterID] ?? observation.clusterID
+            func append(_ kind: ParticipantActivityKind, _ alertKind: RuruAlert.Kind, _ detail: String) {
+                events.append(.init(clusterID: observation.clusterID, nodeID: observation.nodeID,
+                                    nodeName: node, date: now, kind: kind, detail: detail))
+                alerts.append(.init(kind: alertKind, key: "participant|\(alertKind)|\(key)",
+                                    title: "\(node): \(kind.title)", detail: "\(service) · \(detail)"))
+            }
+            if let prior {
+                if observation.powerSource == .ups, prior.externalPower == true, observation.externalPower == false {
+                    append(.onBattery, .participantOnBattery, "The UPS is supplying power.")
+                }
+                if let percent = observation.batteryPercent, percent <= 20,
+                   prior.batteryPercent.map({ $0 > 20 }) == true, observation.externalPower != true {
+                    append(.lowBattery, .participantLowBattery, "Battery is at \(percent)%.")
+                }
+                if prior.externalPower == false, observation.externalPower == true {
+                    append(.powerRestored, .participantPowerRestored, "External power is connected again.")
+                }
+                if prior.sessionEnding != true, observation.sessionEnding == true {
+                    append(.sessionEnding, .participantSessionEnding, "The participant reports a planned session end.")
+                }
+            }
+            states[key] = State(externalPower: observation.externalPower,
+                                batteryPercent: observation.batteryPercent,
+                                sessionEnding: observation.sessionEnding)
+        }
+        // Participants are bounded per service by ParticipantPresence; prune
+        // departed keys so this edge cache remains bounded as configurations change.
+        states = states.filter { seen.contains($0.key) }
+        return (alerts, events)
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 /// Turns successive observations into alerts. Pure and deterministic: the
@@ -194,6 +294,10 @@ enum RuruDiscordWebhook {
         case .failover: ("🔄", "Ruru • Guarding")
         case .authorityProblem: ("⚠️", "Ruru • System")
         case .authorityRecovered: ("✅", "Ruru • System")
+        case .participantOnBattery: ("🔋", "Ruru • Participant status")
+        case .participantLowBattery: ("🪫", "Ruru • Participant status")
+        case .participantPowerRestored: ("🔌", "Ruru • Participant status")
+        case .participantSessionEnding: ("⚡", "Ruru • Participant status")
         case .pairingRequest: ("🔔", "Ruru • Pairing")
         case .test: ("✅", "Ruru • Test notification")
         }

@@ -6,9 +6,11 @@ public actor LeaseStore {
     /// Default grant length. Each service may choose its own within `leaseDurationRange`.
     public static let leaseDuration: Double = 30
     public static let leaseDurationRange: ClosedRange<Double> = 10...300
-    /// Per-service history kept on disk, and the newest shown per service.
+    /// Per-service ownership history kept on disk, and the newest shown per service.
     static let eventsKeptPerService = 256
     static let eventsShownPerService = 64
+    /// Informational participant activity is retained separately from ownership.
+    public static let participantEventsKeptPerService = 256
     private let database: DuckDBDatabase
     private let instanceLock: DatabaseInstanceLock
     private let legacyLock: DatabaseInstanceLock
@@ -33,6 +35,9 @@ public actor LeaseStore {
             return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
         }
         let quarantine = try database.open { connection in
+            // Additive, non-authoritative activity history migration. It must
+            // never change lease rows, terms, or restart quarantine.
+            try database.execute(connection, "CREATE TABLE IF NOT EXISTS participant_events (id BIGINT PRIMARY KEY, time DOUBLE NOT NULL, kind VARCHAR NOT NULL, cluster VARCHAR NOT NULL, node VARCHAR NOT NULL, node_name VARCHAR NOT NULL, detail VARCHAR NOT NULL)")
             // Databases created before per-service lease lengths granted 30 seconds.
             try database.execute(connection, "ALTER TABLE leases ADD COLUMN IF NOT EXISTS duration DOUBLE DEFAULT 30")
             let leases = try connection.query("SELECT cluster, owner, term, expires, duration FROM leases")
@@ -50,6 +55,7 @@ public actor LeaseStore {
             // empty replacements for missing durable state.
             _ = try connection.query("SELECT id, time, action, cluster, node, term FROM events LIMIT 0")
             _ = try connection.query("SELECT cluster, node, name FROM node_names LIMIT 0")
+            _ = try connection.query("SELECT id, time, kind, cluster, node, node_name, detail FROM participant_events LIMIT 0")
             return longest
         }
         self.database = database
@@ -154,7 +160,46 @@ public actor LeaseStore {
                     action: try history.string(2, row: row), nodeID: try history.string(3, row: row),
                     term: try history.integer(4, row: row), nodeName: WitnessNodeName.normalized(history[5].cast(to: String.self)[row])))
             }
-            return WitnessSnapshot(recoverySeconds: max(0, recoveringUntil - now), leases: leases, events: events)
+            let participantRows = try connection.query("SELECT id, time, kind, cluster, node, node_name, detail FROM (SELECT *, row_number() OVER (PARTITION BY cluster ORDER BY id DESC) AS position FROM participant_events) activity WHERE position <= \(Self.eventsShownPerService) ORDER BY id DESC")
+            var participantActivity: [ParticipantActivityRecord] = []
+            for row in 0..<participantRows.rowCount {
+                participantActivity.append(ParticipantActivityRecord(
+                    id: try participantRows.integer(0, row: row), clusterID: try participantRows.string(3, row: row),
+                    nodeID: try participantRows.string(4, row: row), nodeName: try participantRows.string(5, row: row),
+                    time: Date(timeIntervalSince1970: try participantRows.number(1, row: row)),
+                    kind: try participantRows.string(2, row: row), detail: try participantRows.string(6, row: row)))
+            }
+            return WitnessSnapshot(recoverySeconds: max(0, recoveringUntil - now), leases: leases,
+                                   events: events, participantActivity: participantActivity)
+        }
+    }
+
+    /// Persist a participant transition as informational history. This API
+    /// enforces bounds even though the caller uses report-derived identifiers.
+    public func recordParticipantActivity(clusterID: String, nodeID: String, nodeName: String,
+                                          kind: String, detail: String, at date: Foundation.Date = Foundation.Date()) throws -> ParticipantActivityRecord {
+        let allowedKinds: Set<String> = ["onBattery", "lowBattery", "powerRestored", "sessionEnding"]
+        guard !clusterID.isEmpty, clusterID.utf8.count <= 128,
+              !nodeID.isEmpty, nodeID.utf8.count <= 128,
+              allowedKinds.contains(kind), date.timeIntervalSince1970.isFinite,
+              let safeName = WitnessNodeName.normalized(nodeName),
+              !detail.isEmpty, detail.utf8.count <= 1024,
+              detail.rangeOfCharacter(from: .controlCharacters) == nil else {
+            throw WitnessError.invalidConfiguration
+        }
+        return try database.open { connection in
+            let nextID = try connection.query("SELECT COALESCE(MAX(id), 0)+1 FROM participant_events").integer(0)
+            _ = try database.query(connection, "INSERT INTO participant_events VALUES (?, ?, ?, ?, ?, ?, ?)") {
+                try $0.bind(nextID, at: 1)
+                try $0.bind(date.timeIntervalSince1970, at: 2); try $0.bind(kind, at: 3)
+                try $0.bind(clusterID, at: 4); try $0.bind(nodeID, at: 5)
+                try $0.bind(safeName, at: 6); try $0.bind(detail, at: 7)
+            }
+            _ = try database.query(connection, "DELETE FROM participant_events WHERE cluster=? AND id NOT IN (SELECT id FROM participant_events WHERE cluster=? ORDER BY id DESC LIMIT \(Self.participantEventsKeptPerService))") {
+                try $0.bind(clusterID, at: 1); try $0.bind(clusterID, at: 2)
+            }
+            return ParticipantActivityRecord(id: nextID, clusterID: clusterID, nodeID: nodeID,
+                nodeName: safeName, time: date, kind: kind, detail: detail)
         }
     }
 
@@ -196,7 +241,17 @@ public actor LeaseStore {
                 names.append(.init(clusterID: try nameRows.string(0, row: row), nodeID: try nameRows.string(1, row: row),
                                    name: try nameRows.string(2, row: row)))
             }
-            let snapshot = LeaseSnapshot(createdAt: Date(), leases: leases, events: events, nodeNames: names)
+            let participantRows = try connection.query("SELECT id, time, kind, cluster, node, node_name, detail FROM participant_events ORDER BY id")
+            var participantEvents: [LeaseSnapshot.ParticipantEvent] = []
+            for row in 0..<participantRows.rowCount {
+                participantEvents.append(.init(id: try participantRows.integer(0, row: row),
+                    time: Date(timeIntervalSince1970: try participantRows.number(1, row: row)),
+                    kind: try participantRows.string(2, row: row), clusterID: try participantRows.string(3, row: row),
+                    nodeID: try participantRows.string(4, row: row), nodeName: try participantRows.string(5, row: row),
+                    detail: try participantRows.string(6, row: row)))
+            }
+            let snapshot = LeaseSnapshot(createdAt: Date(), leases: leases, events: events, nodeNames: names,
+                                         participantEvents: participantEvents)
             try snapshot.validate()
             return snapshot
         }

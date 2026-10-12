@@ -43,6 +43,7 @@ struct DuckDBDatabase: Sendable {
             CREATE TABLE leases (cluster VARCHAR PRIMARY KEY, owner VARCHAR NOT NULL, term BIGINT NOT NULL, expires DOUBLE NOT NULL, duration DOUBLE NOT NULL DEFAULT 30);
             CREATE TABLE events (id BIGINT PRIMARY KEY, time DOUBLE NOT NULL, action VARCHAR NOT NULL, cluster VARCHAR NOT NULL, node VARCHAR NOT NULL, term BIGINT NOT NULL);
             CREATE TABLE node_names (cluster VARCHAR NOT NULL, node VARCHAR NOT NULL, name VARCHAR NOT NULL, PRIMARY KEY (cluster, node));
+            CREATE TABLE participant_events (id BIGINT PRIMARY KEY, time DOUBLE NOT NULL, kind VARCHAR NOT NULL, cluster VARCHAR NOT NULL, node VARCHAR NOT NULL, node_name VARCHAR NOT NULL, detail VARCHAR NOT NULL);
             """)
     }
 }

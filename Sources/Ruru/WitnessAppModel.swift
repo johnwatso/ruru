@@ -16,6 +16,7 @@ final class WitnessAppModel: ObservableObject {
     private let pairing = PairingDesk()
     private let participants = ParticipantPresence()
     @Published private(set) var participantObservations: [ParticipantObservation] = []
+    @Published private(set) var participantActivity: [ParticipantActivityRecord] = []
     @Published private(set) var pairingCodes: [PairingDesk.Code] = []
     @Published private(set) var pairingRequests: [PairingDesk.Request] = []
     /// Servers approved this session, by cluster ID, for the setup assistant.
@@ -38,6 +39,7 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var discordConfigured = false
     @Published private(set) var alertDeliveryError: String?
     private var alertMonitor = RuruAlertMonitor()
+    private var participantAlertMonitor = ParticipantAlertMonitor()
     private let alertDelivery = RuruAlertDelivery()
     private var discordWebhook: URL?
 
@@ -105,6 +107,9 @@ final class WitnessAppModel: ObservableObject {
             }
             if ProcessInfo.processInfo.arguments.contains("--preview-authority-error") {
                 loadPreviewAuthorityError()
+            }
+            if ProcessInfo.processInfo.arguments.contains("--preview-ups-battery") {
+                loadPreviewUPSBattery()
             }
             return
         }
@@ -254,6 +259,24 @@ final class WitnessAppModel: ObservableObject {
     private func loadPreviewAuthorityError() {
         state = .failed
         error = "The database could not be opened. Check storage permissions and disk space."
+    }
+
+    private func loadPreviewUPSBattery() {
+        state = .running
+        listenerPort = UInt16(configuration.port)
+        participantObservations = [
+            .init(clusterID: previewCluster, nodeID: "home-mac", nodeName: "Home Mac", role: .active,
+                  ageSeconds: 3, fresh: true, powerSource: .ups, externalPower: false,
+                  batteryPercent: 50, batteryTimeRemaining: 300),
+            .init(clusterID: previewCluster, nodeID: "backup-mac", nodeName: "Backup Mac", role: .standby,
+                  ageSeconds: 6, fresh: true, powerSource: .ups, externalPower: true,
+                  batteryPercent: 100, batteryTimeRemaining: nil)
+        ]
+        snapshot = WitnessSnapshot(recoverySeconds: 0,
+            leases: [LeaseStatus(clusterID: previewCluster, ownerNodeID: "home-mac", term: 42,
+                                  remainingSeconds: 28, ownerNodeName: "Home Mac")],
+            events: [WitnessEvent(clusterID: previewCluster, id: 1, time: Date().addingTimeInterval(-300),
+                                   action: "Acquired", nodeID: "home-mac", term: 42, nodeName: "Home Mac")])
     }
 
     func lease(for clusterID: String) -> LeaseStatus? { snapshot?.leases.first { $0.clusterID == clusterID } }
@@ -958,6 +981,7 @@ final class WitnessAppModel: ObservableObject {
         }
         do {
             snapshot = try await store?.snapshot()
+            participantActivity = snapshot?.participantActivity ?? []
             if let failure = await server?.failure() {
                 state = .failed
                 serviceStartedAt = nil
@@ -1214,7 +1238,27 @@ final class WitnessAppModel: ObservableObject {
             }, uniquingKeysWith: { first, _ in first }),
             services: Dictionary(configuration.services.map { ($0.clusterID, $0.name) }, uniquingKeysWith: { first, _ in first }),
             releases: Set((snapshot?.events ?? []).filter { $0.action == "Released" }.map { "\($0.clusterID)|\($0.id)" }))
-        var alerts = alertMonitor.observe(observation, at: Date())
+        let now = Date()
+        var alerts = alertMonitor.observe(observation, at: now)
+        let participantTransitions = participantAlertMonitor.observe(
+            participantObservations,
+            serviceNames: Dictionary(configuration.guardedServices.map { ($0.clusterID, $0.name) },
+                                     uniquingKeysWith: { first, _ in first }),
+            at: now)
+        alerts.append(contentsOf: participantTransitions.alerts)
+        for transition in participantTransitions.events {
+            guard let store else { continue }
+            do {
+                let record = try await store.recordParticipantActivity(
+                    clusterID: transition.clusterID, nodeID: transition.nodeID,
+                    nodeName: transition.nodeName, kind: transition.kind.rawValue,
+                    detail: transition.detail, at: transition.date)
+                participantActivity.insert(record, at: 0)
+                participantActivity = Array(participantActivity.prefix(128))
+            } catch {
+                alertDeliveryError = "Participant activity could not be saved to DuckDB."
+            }
+        }
         for request in pairingRequests where !announcedPairings.contains(request.id) {
             announcedPairings.insert(request.id)
             let server = request.nodeName ?? request.nodeID

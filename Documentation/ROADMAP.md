@@ -1,5 +1,19 @@
 # Development log and next steps
 
+## 2026-10-12 — Participant power alerts and ephemeral Activity
+
+- Added edge-triggered participant telemetry alerts for UPS transfer to battery,
+  battery crossing 20%, external power restoration and planned session ending.
+  The first fresh report establishes a baseline to avoid startup false positives;
+  participant alerts are opt-in in Settings → Alerts.
+- Added a bounded Participant Activity feed to Overview and Activity, backed by
+  a dedicated DuckDB table with 256 records retained per service. These records
+  remain distinct from ownership history and do not affect lease authority;
+  portable backups now include them while older v1 backups remain readable.
+  Restart detection remains deferred until boot/version metadata is available
+  from the client integration.
+- No client-facing report contract or tests were changed.
+
 ## 2026-10-12 — SwiftBot planned session-end handoff
 
 - Participant presence can carry an optional `sessionEnding` flag. Ruru's Known

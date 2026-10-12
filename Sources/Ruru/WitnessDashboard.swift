@@ -310,6 +310,11 @@ private struct WitnessInternetPage: View {
 private struct WitnessActivityPage: View {
     @EnvironmentObject private var model: WitnessAppModel
     @State private var search = ""
+    private var participantEvents: [ParticipantActivityRecord] {
+        model.participantActivity.filter {
+            search.isEmpty || "\(model.serviceName(for: $0.clusterID)) \($0.nodeName) \($0.nodeID) \($0.displayTitle) \($0.detail)".localizedCaseInsensitiveContains(search)
+        }
+    }
     private var events: [WitnessEvent] {
         (model.snapshot?.events ?? []).filter {
             search.isEmpty || "\(model.serviceName(for: $0.clusterID)) \($0.clusterID) \($0.action) \($0.nodeID) \(model.nodeDisplayName(for: $0.nodeID, reportedName: $0.nodeName, clusterID: $0.clusterID)) \($0.term)".localizedCaseInsensitiveContains(search)
@@ -326,6 +331,20 @@ private struct WitnessActivityPage: View {
                         .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear filter")
                 }
             }.padding(12).consoleRowGroup()
+            ConsoleSection(title: "Participant Activity", accessory: { Text("\(participantEvents.count) events") }, content: {
+                if participantEvents.isEmpty {
+                    ConsoleEmptyState(symbol: search.isEmpty ? "bolt" : "magnifyingglass",
+                        title: search.isEmpty ? "No participant events yet" : "No matching events",
+                        detail: "UPS, power, battery, and planned session changes appear here.")
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(participantEvents) { event in
+                            ParticipantActivityRow(event: event)
+                            if event.id != participantEvents.last?.id { Divider().padding(.leading, 42) }
+                        }
+                    }
+                }
+            })
             ConsoleSection(title: "Ownership History", accessory: { Text("\(events.count) events") }, content: {
                 if events.isEmpty {
                     ConsoleEmptyState(symbol: search.isEmpty ? "clock.arrow.circlepath" : "magnifyingglass",
@@ -348,6 +367,32 @@ private struct WitnessActivityPage: View {
         }.padding(.horizontal, 36).padding(.top, 32).padding(.bottom, 40)
             .frame(maxWidth: 1120, alignment: .leading).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
+}
+
+struct ParticipantActivityRow: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    let event: ParticipantActivityRecord
+    var compact = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: event.displayKind?.symbol ?? "bolt.circle")
+                .foregroundStyle(event.displayKind == .lowBattery || event.displayKind == .onBattery ? Color.orange : Color.accentColor)
+                .font(.system(size: 16, weight: .medium)).frame(width: 22).padding(.top, 3)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(event.displayTitle).font(.callout.weight(.medium))
+                Text("\(model.serviceName(for: event.clusterID)) · \(event.nodeName) · \(event.detail)")
+                    .font(.callout).foregroundStyle(.secondary).lineLimit(compact ? 1 : nil)
+                    .help("Node ID: \(event.nodeID)").textSelection(.enabled)
+                Text(event.time.formatted(date: .abbreviated, time: .standard)).font(.caption).foregroundStyle(.tertiary)
+            }
+        }.padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private extension ParticipantActivityRecord {
+    var displayKind: ParticipantActivityKind? { ParticipantActivityKind(rawValue: kind) }
+    var displayTitle: String { displayKind?.title ?? "Participant update" }
 }
 
 struct WitnessEventRow: View {

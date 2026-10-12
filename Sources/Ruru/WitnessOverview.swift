@@ -231,15 +231,21 @@ struct WitnessOverview: View {
         ConsoleSection(title: "Recent Activity", accessory: {
             Button("View All") { onNavigate(.activity) }.buttonStyle(.borderless)
         }, content: {
-            if let events = model.snapshot?.events, !events.isEmpty {
+            let ownershipEvents = Array((model.snapshot?.events ?? []).prefix(2))
+            let participantEvents = Array(model.participantActivity.prefix(2))
+            if participantEvents.isEmpty && ownershipEvents.isEmpty {
+                ConsoleEmptyState(symbol: "clock", title: "No transfers yet", detail: "Ownership changes appear here as your servers connect.")
+            } else {
                 VStack(spacing: 0) {
-                    ForEach(events.prefix(3)) { event in
+                    ForEach(participantEvents) { event in
+                        ParticipantActivityRow(event: event, compact: true)
+                        Divider().padding(.leading, 42)
+                    }
+                    ForEach(ownershipEvents) { event in
                         WitnessEventRow(event: event, compact: true)
-                        if event.id != events.prefix(3).last?.id { Divider().padding(.leading, 42) }
+                        if event.id != ownershipEvents.last?.id { Divider().padding(.leading, 42) }
                     }
                 }
-            } else {
-                ConsoleEmptyState(symbol: "clock", title: "No transfers yet", detail: "Ownership changes appear here as your servers connect.")
             }
         })
     }

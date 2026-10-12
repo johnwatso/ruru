@@ -29,6 +29,9 @@ Failover/recovery embeds can link to the current owner's self-reported HTTPS
 Web UI origin from a fresh participant report. Matching uses service and stable
 node ID; display names never determine alert ownership. Addresses are ephemeral,
 credential-free and unprobed, independently of resource catalogue opt-in.
+Fresh UPS, battery and planned-session transitions are also edge-triggered;
+their alert category is opt-in. A bounded DuckDB participant activity history
+is separate from ownership history and is never an authority input.
 
 ## Coordinator direction
 

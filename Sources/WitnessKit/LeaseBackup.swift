@@ -5,7 +5,7 @@ import Foundation
 /// use only its terms and history; they never revive ownership or deadlines.
 public struct LeaseSnapshot: Codable, Equatable, Sendable {
     public static let currentFormat = "dev.ruruapp.ruru.lease-snapshot"
-    public static let currentVersion = 1
+    public static let currentVersion = 2
 
     public struct Lease: Codable, Equatable, Sendable {
         public let clusterID: String
@@ -28,20 +28,48 @@ public struct LeaseSnapshot: Codable, Equatable, Sendable {
         public let name: String
     }
 
+    public struct ParticipantEvent: Codable, Equatable, Sendable {
+        public let id: Int64
+        public let time: Date
+        public let kind: String
+        public let clusterID: String
+        public let nodeID: String
+        public let nodeName: String
+        public let detail: String
+    }
+
     public let format: String
     public let version: Int
     public let createdAt: Date
     public let leases: [Lease]
     public let events: [Event]
     public let nodeNames: [NodeName]
+    public let participantEvents: [ParticipantEvent]
 
-    init(createdAt: Date, leases: [Lease], events: [Event], nodeNames: [NodeName]) {
+    init(createdAt: Date, leases: [Lease], events: [Event], nodeNames: [NodeName],
+         participantEvents: [ParticipantEvent] = []) {
         format = Self.currentFormat
         version = Self.currentVersion
         self.createdAt = createdAt
         self.leases = leases
         self.events = events
         self.nodeNames = nodeNames
+        self.participantEvents = participantEvents
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case format, version, createdAt, leases, events, nodeNames, participantEvents
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        format = try values.decode(String.self, forKey: .format)
+        version = try values.decode(Int.self, forKey: .version)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        leases = try values.decode([Lease].self, forKey: .leases)
+        events = try values.decode([Event].self, forKey: .events)
+        nodeNames = try values.decode([NodeName].self, forKey: .nodeNames)
+        participantEvents = try values.decodeIfPresent([ParticipantEvent].self, forKey: .participantEvents) ?? []
     }
 
     public var highestTerm: Int64 { leases.map(\.term).max() ?? 0 }
@@ -50,18 +78,25 @@ public struct LeaseSnapshot: Codable, Equatable, Sendable {
         func identifier(_ value: String, allowEmpty: Bool = false) -> Bool {
             (allowEmpty || !value.isEmpty) && value.utf8.count <= 128
         }
-        guard format == Self.currentFormat, version == Self.currentVersion else { throw LeaseRestoreError.unsupportedSnapshot }
+        guard format == Self.currentFormat, (1...Self.currentVersion).contains(version) else { throw LeaseRestoreError.unsupportedSnapshot }
         guard leases.count <= 1024, events.count <= 32 * LeaseStore.eventsKeptPerService, nodeNames.count <= 4096,
               Set(leases.map(\.clusterID)).count == leases.count,
               Set(events.map(\.id)).count == events.count,
               Set(nodeNames.map { [$0.clusterID, $0.nodeID] }).count == nodeNames.count,
+              participantEvents.count <= 32 * LeaseStore.participantEventsKeptPerService,
+              Set(participantEvents.map(\.id)).count == participantEvents.count,
               leases.allSatisfy({ identifier($0.clusterID) && identifier($0.ownerNodeID, allowEmpty: true)
                   && LeaseDatabaseSetup.validTerm($0.term) }),
               events.allSatisfy({ $0.id > 0 && identifier($0.clusterID) && identifier($0.nodeID)
                   && $0.action.utf8.count <= 32 && $0.time.timeIntervalSince1970.isFinite
                   && LeaseDatabaseSetup.validTerm($0.term) }),
               nodeNames.allSatisfy({ identifier($0.clusterID) && identifier($0.nodeID)
-                  && WitnessNodeName.normalized($0.name) == $0.name }) else {
+                  && WitnessNodeName.normalized($0.name) == $0.name }),
+              participantEvents.allSatisfy({ $0.id > 0 && identifier($0.clusterID) && identifier($0.nodeID)
+                  && WitnessNodeName.normalized($0.nodeName) == $0.nodeName
+                  && ["onBattery", "lowBattery", "powerRestored", "sessionEnding"].contains($0.kind)
+                  && $0.time.timeIntervalSince1970.isFinite && !$0.detail.isEmpty
+                  && $0.detail.utf8.count <= 1024 && $0.detail.rangeOfCharacter(from: .controlCharacters) == nil }) else {
             throw LeaseRestoreError.invalidSnapshot
         }
     }
@@ -208,6 +243,14 @@ public enum LeaseRestore {
                         try $0.bind(event.id, at: 1); try $0.bind(event.time.timeIntervalSince1970, at: 2)
                         try $0.bind(event.action, at: 3); try $0.bind(event.clusterID, at: 4)
                         try $0.bind(event.nodeID, at: 5); try $0.bind(event.term, at: 6)
+                    }
+                }
+                for event in snapshot.participantEvents {
+                    _ = try database.query(connection, "INSERT INTO participant_events VALUES (?, ?, ?, ?, ?, ?, ?)") {
+                        try $0.bind(event.id, at: 1); try $0.bind(event.time.timeIntervalSince1970, at: 2)
+                        try $0.bind(event.kind, at: 3); try $0.bind(event.clusterID, at: 4)
+                        try $0.bind(event.nodeID, at: 5); try $0.bind(event.nodeName, at: 6)
+                        try $0.bind(event.detail, at: 7)
                     }
                 }
                 for name in snapshot.nodeNames {

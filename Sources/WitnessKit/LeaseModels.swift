@@ -68,6 +68,24 @@ public struct WitnessEvent: Identifiable, Sendable {
     }
 }
 
+/// Durable display history for self-reported participant telemetry. These
+/// records are informational only and never participate in lease decisions.
+public struct ParticipantActivityRecord: Identifiable, Sendable {
+    public let id: Int64
+    public let clusterID: String
+    public let nodeID: String
+    public let nodeName: String
+    public let time: Date
+    public let kind: String
+    public let detail: String
+
+    public init(id: Int64, clusterID: String, nodeID: String, nodeName: String,
+                time: Date, kind: String, detail: String) {
+        self.id = id; self.clusterID = clusterID; self.nodeID = nodeID
+        self.nodeName = nodeName; self.time = time; self.kind = kind; self.detail = detail
+    }
+}
+
 /// Cosmetic metadata only. Ownership always uses the unchanged node ID and term.
 public enum WitnessNodeName {
     public static func normalized(_ value: String?) -> String? {
@@ -82,9 +100,12 @@ public struct WitnessSnapshot: Sendable {
     public let recoverySeconds: Double
     public let leases: [LeaseStatus]
     public let events: [WitnessEvent]
+    public let participantActivity: [ParticipantActivityRecord]
 
-    public init(recoverySeconds: Double, leases: [LeaseStatus], events: [WitnessEvent]) {
+    public init(recoverySeconds: Double, leases: [LeaseStatus], events: [WitnessEvent],
+                participantActivity: [ParticipantActivityRecord] = []) {
         self.recoverySeconds = recoverySeconds; self.leases = leases; self.events = events
+        self.participantActivity = participantActivity
     }
 }
 

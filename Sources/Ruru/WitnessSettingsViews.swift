@@ -598,10 +598,14 @@ private struct WitnessAlertSettings: View {
                 Text("Ruru has a problem")
                 Text("The listener stops, Internet Access drops, or a snapshot can’t be saved.")
             }
+            Toggle(isOn: $preferences.participantStatus) {
+                Text("A participant reports a power or session change")
+                Text("UPS power loss, low battery, restored power, or a planned session end.")
+            }
         } header: {
             Text("Alert Me When")
         } footer: {
-            Text("Ruru also tells you when each problem is resolved. Planned releases, stopping the service, and the wait after a restart never alert.")
+            Text("Ruru also tells you when each problem is resolved. Participant status alerts are opt-in. Planned releases, stopping the service, and the wait after a restart never alert.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
         Section {
