@@ -1,7 +1,7 @@
 import Foundation
 import UserNotifications
 
-/// Sends alerts to macOS notifications and, when configured, a Discord webhook.
+/// Sends alerts to macOS notifications and optional external destinations.
 /// Repeats of the same alert within a minute are dropped so a flapping server
 /// cannot flood a channel. The webhook URL is a secret and is never logged.
 @MainActor
@@ -15,9 +15,9 @@ final class RuruAlertDelivery {
         return URLSession(configuration: configuration)
     }()
 
-    /// Returns a description of the last Discord failure, if any.
-    func deliver(_ alerts: [RuruAlert], preferences: RuruAlertPreferences, webhook: URL?) async -> String? {
-        var failure: String?
+    /// Returns destination-specific failures without preventing other deliveries.
+    func deliver(_ alerts: [RuruAlert], preferences: RuruAlertPreferences, webhook: URL?, notifyID: String = "", notifyToken: String? = nil) async -> String? {
+        var failures: [String] = []
         let now = Date()
         for alert in alerts where alert.isEnabled(in: preferences) {
             let identity = "\(alert.kind)|\(alert.key)"
@@ -26,10 +26,14 @@ final class RuruAlertDelivery {
             if preferences.notifications { await notify(alert) }
             if preferences.discord || alert.kind == .test, let webhook {
                 do { try await post(alert, to: webhook, at: now) }
-                catch { failure = error.localizedDescription }
+                catch { failures.append("Discord: \(error.localizedDescription)") }
+            }
+            if (preferences.notify || alert.kind == .test), let notifyToken, !notifyID.isEmpty {
+                do { try await post(alert, toNotifyID: notifyID, token: notifyToken) }
+                catch { failures.append("Notify!: \(error.localizedDescription)") }
             }
         }
-        return failure
+        return failures.isEmpty ? nil : failures.joined(separator: "\n")
     }
 
     private func notify(_ alert: RuruAlert) async {
@@ -57,6 +61,17 @@ final class RuruAlertDelivery {
             throw RuruBackup.Failure(status == 429
                 ? "Discord is rate-limiting this webhook. Alerts will resume shortly."
                 : "Discord rejected the alert (HTTP \(status)). Check the webhook still exists.")
+        }
+    }
+
+    private func post(_ alert: RuruAlert, toNotifyID id: String, token: String) async throws {
+        let request = try RuruNotify.request(for: alert, id: id, token: token)
+        let (_, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw RuruBackup.Failure(status == 429
+                ? "Notify! is rate-limiting alerts. They will resume shortly."
+                : "Notify! rejected the alert (HTTP \(status)). Check the destination and token.")
         }
     }
 }

@@ -71,6 +71,8 @@ struct WitnessConfiguration: Codable, Equatable {
     var showInDock = false
     var tunnel = WitnessTunnelSettings()
     var alerts = RuruAlertPreferences()
+    /// Notify! destination is not secret; its matching token lives in Keychain.
+    var notifyID = ""
     /// Every configured service, in display order. A fresh install has none.
     var services: [GuardedService] = []
     // Keyed by stable service metadata ID, so a removed/re-added service cannot
@@ -133,7 +135,7 @@ struct WitnessConfiguration: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case setup, bindAddress, port, publicEndpoint, startAutomatically, showInDock, tunnel, alerts, services, servicePrimaryPreferences, serviceCoordinationPolicies
+        case setup, bindAddress, port, publicEndpoint, startAutomatically, showInDock, tunnel, alerts, notifyID, services, servicePrimaryPreferences, serviceCoordinationPolicies
     }
 
     init(from decoder: Decoder) throws {
@@ -145,6 +147,7 @@ struct WitnessConfiguration: Codable, Equatable {
         showInDock = try values.decodeIfPresent(Bool.self, forKey: .showInDock) ?? false
         tunnel = try values.decodeIfPresent(WitnessTunnelSettings.self, forKey: .tunnel) ?? WitnessTunnelSettings()
         alerts = try values.decodeIfPresent(RuruAlertPreferences.self, forKey: .alerts) ?? RuruAlertPreferences()
+        notifyID = try values.decodeIfPresent(String.self, forKey: .notifyID) ?? ""
         setup = try values.decodeIfPresent(RuruSetupState.self, forKey: .setup) ?? RuruSetupState()
         services = try values.decode([GuardedService].self, forKey: .services)
         serviceCoordinationPolicies = try values.decodeIfPresent([String: CoordinationPolicy].self, forKey: .serviceCoordinationPolicies) ?? [:]
@@ -152,6 +155,7 @@ struct WitnessConfiguration: Codable, Equatable {
     }
 
     var isValid: Bool {
+        guard notifyID.isEmpty || RuruNotify.validID(notifyID) == notifyID else { return false }
         let services = guardedServices
         guard Set(serviceCoordinationPolicies.keys).isSubset(of: Set(services.map(\.id))),
               serviceCoordinationPolicies.values.allSatisfy(\.isValid) else { return false }

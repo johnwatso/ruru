@@ -581,6 +581,7 @@ private struct WitnessAlertSettings: View {
     @EnvironmentObject private var model: WitnessAppModel
     @Binding var preferences: RuruAlertPreferences
     @State private var settingUpDiscord = false
+    @State private var settingUpNotify = false
     @State private var sending = false
     @State private var failure: String?
 
@@ -634,11 +635,36 @@ private struct WitnessAlertSettings: View {
                     Text("Post alerts to a channel with a webhook.")
                 }
             }
+            if model.notifyConfigured {
+                Toggle(isOn: $preferences.notify) {
+                    Text("Notify!")
+                    Text("Sends alerts to the saved device or group.")
+                }
+                LabeledContent("Notify! destination") {
+                    HStack {
+                        Text(model.configuration.notifyID).foregroundStyle(.secondary)
+                        Button("Replace…") { settingUpNotify = true }
+                        Button("Remove", role: .destructive) {
+                            Task {
+                                do { try await model.removeNotifyDestination() }
+                                catch { failure = error.localizedDescription }
+                            }
+                        }
+                    }
+                }
+            } else {
+                LabeledContent {
+                    Button("Set Up…") { settingUpNotify = true }
+                } label: {
+                    Text("Notify!")
+                    Text("Send alerts to a Notify! device or group.")
+                }
+            }
             LabeledContent {
                 Button(sending ? "Sending…" : "Send Test") {
                     sending = true
                     Task { await model.sendTestAlert(); sending = false }
-                }.disabled(sending || !(preferences.notifications || model.discordConfigured))
+                }.disabled(sending || !(preferences.notifications || model.discordConfigured || model.notifyConfigured))
             } label: {
                 Text("Test")
                 Text("Sends one alert to each destination.")
@@ -649,6 +675,7 @@ private struct WitnessAlertSettings: View {
         }
         .disabled(!model.backupAvailable)
         .sheet(isPresented: $settingUpDiscord) { WitnessDiscordSetupSheet().environmentObject(model) }
+        .sheet(isPresented: $settingUpNotify) { WitnessNotifySetupSheet().environmentObject(model) }
     }
 
     private func warning(_ text: String) -> some View {
@@ -657,6 +684,47 @@ private struct WitnessAlertSettings: View {
         } icon: {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         }
+    }
+}
+
+private struct WitnessNotifySetupSheet: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var id = ""
+    @State private var token = ""
+    @State private var saving = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextField("Device or group ID", text: $id)
+                    SecureField("Token", text: $token)
+                    if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+                } header: {
+                    Text("Notify! Destination")
+                } footer: {
+                    Text("Copy the ID and token from the Notify! app. Ruru verifies them before saving; the token stays in macOS Keychain. Test sends one sample notification.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped).scrollDisabled(true).fixedSize(horizontal: false, vertical: true)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(saving ? "Verifying…" : "Save") {
+                    saving = true
+                    Task {
+                        do { try await model.setNotifyDestination(id: id, token: token); dismiss() }
+                        catch { self.error = error.localizedDescription; saving = false }
+                    }
+                }
+                .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                .disabled(RuruNotify.validID(id) == nil || RuruNotify.validToken(token) == nil || saving)
+            }.padding(16)
+        }.frame(width: 480)
     }
 }
 

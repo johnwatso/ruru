@@ -37,11 +37,13 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var snapshotError: String?
     private var snapshotTask: Task<Void, Never>?
     @Published private(set) var discordConfigured = false
+    @Published private(set) var notifyConfigured = false
     @Published private(set) var alertDeliveryError: String?
     private var alertMonitor = RuruAlertMonitor()
     private var participantAlertMonitor = ParticipantAlertMonitor()
     private let alertDelivery = RuruAlertDelivery()
     private var discordWebhook: URL?
+    private var notifyToken: String?
 
     @Published private(set) var internetStatus = WitnessInternetStatus()
     @Published private(set) var internetBusy = false
@@ -119,6 +121,8 @@ final class WitnessAppModel: ObservableObject {
             discordWebhook = (try? WitnessKeychain.read(RuruDiscordWebhook.keychainAccount)).flatMap { $0 }
                 .flatMap(RuruDiscordWebhook.validated)
             discordConfigured = discordWebhook != nil
+            notifyToken = (try? WitnessKeychain.read(RuruNotify.keychainAccount)).flatMap { $0 }
+            notifyConfigured = notifyToken != nil && RuruNotify.validID(configuration.notifyID) != nil
             try WitnessStorage.checkAuthorityPresent()
             store = try LeaseStore(databaseURL: WitnessStorage.databaseURL)
             try WitnessStorage.recordAuthorityCreated()
@@ -1270,7 +1274,8 @@ final class WitnessAppModel: ObservableObject {
         }
         announcedPairings.formIntersection(pairingRequests.map(\.id))
         guard !alerts.isEmpty else { return }
-        if let failure = await alertDelivery.deliver(alerts, preferences: configuration.alerts, webhook: discordWebhook) {
+        if let failure = await alertDelivery.deliver(alerts, preferences: configuration.alerts, webhook: discordWebhook,
+                                                     notifyID: configuration.notifyID, notifyToken: notifyToken) {
             alertDeliveryError = failure
         }
     }
@@ -1301,6 +1306,35 @@ final class WitnessAppModel: ObservableObject {
         try await saveConfiguration(draft)
     }
 
+    /// Verifies the Notify! destination before storing its token in Keychain.
+    func setNotifyDestination(id: String, token: String) async throws {
+        guard !preview else { throw WitnessStorage.ConfigurationError.invalid }
+        guard let identifier = RuruNotify.validID(id), let secret = RuruNotify.validToken(token) else {
+            throw RuruBackup.Failure("Enter a valid Notify! device/group ID and token.")
+        }
+        try await RuruNotify.validate(id: identifier, token: secret)
+        try WitnessKeychain.save(secret, account: RuruNotify.keychainAccount)
+        notifyToken = secret
+        notifyConfigured = true
+        alertDeliveryError = nil
+        var draft = configuration
+        draft.notifyID = identifier
+        draft.alerts.notify = true
+        try await saveConfiguration(draft)
+    }
+
+    func removeNotifyDestination() async throws {
+        guard !preview else { return }
+        try WitnessKeychain.delete(RuruNotify.keychainAccount)
+        notifyToken = nil
+        notifyConfigured = false
+        alertDeliveryError = nil
+        var draft = configuration
+        draft.notifyID = ""
+        draft.alerts.notify = false
+        try await saveConfiguration(draft)
+    }
+
     /// Sends one test alert to every configured destination.
     func sendTestAlert() async {
         guard !preview else { return }
@@ -1308,6 +1342,8 @@ final class WitnessAppModel: ObservableObject {
                               detail: "You'll be told here when a service goes down or fails over.")
         var preferences = configuration.alerts
         preferences.discord = discordWebhook != nil
-        alertDeliveryError = await alertDelivery.deliver([alert], preferences: preferences, webhook: discordWebhook)
+        preferences.notify = notifyConfigured
+        alertDeliveryError = await alertDelivery.deliver([alert], preferences: preferences, webhook: discordWebhook,
+                                                        notifyID: configuration.notifyID, notifyToken: notifyToken)
     }
 }

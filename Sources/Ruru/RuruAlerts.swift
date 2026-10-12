@@ -6,6 +6,7 @@ import WitnessKit
 struct RuruAlertPreferences: Codable, Equatable {
     var notifications = true
     var discord = false
+    var notify = false
     var serviceDown = true
     var failover = true
     var authorityProblems = true
@@ -17,10 +18,74 @@ struct RuruAlertPreferences: Codable, Equatable {
         let defaults = Self()
         notifications = try values.decodeIfPresent(Bool.self, forKey: .notifications) ?? defaults.notifications
         discord = try values.decodeIfPresent(Bool.self, forKey: .discord) ?? defaults.discord
+        notify = try values.decodeIfPresent(Bool.self, forKey: .notify) ?? defaults.notify
         serviceDown = try values.decodeIfPresent(Bool.self, forKey: .serviceDown) ?? defaults.serviceDown
         failover = try values.decodeIfPresent(Bool.self, forKey: .failover) ?? defaults.failover
         authorityProblems = try values.decodeIfPresent(Bool.self, forKey: .authorityProblems) ?? defaults.authorityProblems
         participantStatus = try values.decodeIfPresent(Bool.self, forKey: .participantStatus) ?? defaults.participantStatus
+    }
+}
+
+/// Notify! push API. The endpoint is fixed to the official service; tokens are
+/// never persisted in configuration or included in errors/logs.
+enum RuruNotify {
+    static let keychainAccount = "notify-token"
+    private static let baseURL = URL(string: "https://push.getnotifyapp.com")!
+
+    static func validID(_ text: String) -> String? {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (6...32).contains(value.utf8.count),
+              value.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
+        return value
+    }
+
+    static func validToken(_ text: String) -> String? {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (8...256).contains(value.utf8.count),
+              value.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
+        return value
+    }
+
+    static func validate(id: String, token: String, using session: URLSession = .shared) async throws {
+        guard let identifier = validID(id), let secret = validToken(token),
+              var components = URLComponents(url: baseURL.appendingPathComponent("link"), resolvingAgainstBaseURL: false) else {
+            throw RuruBackup.Failure("Enter a valid Notify! device or group ID and token.")
+        }
+        components.queryItems = [URLQueryItem(name: "id", value: identifier), URLQueryItem(name: "token", value: secret)]
+        guard let url = components.url else { throw RuruBackup.Failure("Notify! setup could not be validated.") }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              body["success"] as? Bool == true else {
+            throw RuruBackup.Failure("Notify! could not verify that ID and token. Check them and try again.")
+        }
+    }
+
+    static func payload(for alert: RuruAlert) throws -> Data {
+        try JSONSerialization.data(withJSONObject: [
+            "title": String(alert.title.prefix(256)),
+            "text": String(alert.detail.prefix(4_000)),
+            "groupType": "ruru"
+        ], options: [.sortedKeys])
+    }
+
+    static func request(for alert: RuruAlert, id: String, token: String) throws -> URLRequest {
+        guard let identifier = validID(id), let secret = validToken(token),
+              var components = URLComponents(url: baseURL.appendingPathComponent("notify-json").appendingPathComponent(identifier),
+                                             resolvingAgainstBaseURL: false) else {
+            throw RuruBackup.Failure("Notify! is not configured with a valid ID and token.")
+        }
+        components.queryItems = [URLQueryItem(name: "token", value: secret)]
+        guard let url = components.url else { throw RuruBackup.Failure("Notify! could not prepare the alert.") }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Ruru", forHTTPHeaderField: "User-Agent")
+        request.httpBody = try payload(for: alert)
+        return request
     }
 }
 

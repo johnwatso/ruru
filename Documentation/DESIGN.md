@@ -56,9 +56,10 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
   Settings and Overview actions open the same window without changing console
   navigation. Closing either window leaves the menu bar service running.
 - Settings → Alerts groups "Alert Me When" toggles (service down, failover,
-  Ruru problems) and "Deliver To" (macOS notifications, Discord with Set Up…/
-  Replace…/Remove, Send Test). The Discord URL is entered in a sheet with a
-  secure field and kept in Keychain.
+  Ruru problems, participant power/session status) and "Deliver To" (macOS
+  notifications, Discord and Notify! with Set Up…/Replace…/Remove, Send Test).
+  Discord's webhook URL and Notify!'s token are entered in secure setup sheets
+  and kept in Keychain; Notify!'s destination ID is saved with preferences.
 - Show a lease like a one-time code (Passwords' verification code): the
   ownership term in large monospaced digits grouped in threes, rolling with a
   numeric transition when it changes, beside a countdown ring for the current

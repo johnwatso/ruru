@@ -1,5 +1,14 @@
 # Development log and next steps
 
+## 2026-10-12 — Notify! alert destination
+
+- Added Notify! as an optional alert destination beside macOS notifications and
+  Discord. Device/group ID is validated with Notify! and saved in preferences;
+  the token is verified before being stored in Keychain.
+- Uses the fixed Notify! push API origin, sends the existing alert title/detail,
+  and includes Notify! setup, replace/remove, enable/disable and test-send flows.
+- No routing-rule builder or lease/client protocol changes.
+
 ## 2026-10-12 — Participant power alerts and ephemeral Activity
 
 - Added edge-triggered participant telemetry alerts for UPS transfer to battery,
