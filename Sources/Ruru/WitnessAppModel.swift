@@ -419,8 +419,12 @@ final class WitnessAppModel: ObservableObject {
             for service in configuration.guardedServices where serviceCredentials[service.clusterID] == nil {
                 serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
             }
+            let appBundle = Bundle.main
+            let authorityVersion = appBundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            let authorityBuild = appBundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
             let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue, pairing: pairing,
-                                               participants: participants, operationalStatus: operationalStatus)
+                                               participants: participants, operationalStatus: operationalStatus,
+                                               authorityVersion: authorityVersion, authorityBuild: authorityBuild)
             self.server = server
             listenerPort = try await server.start(bindAddress: configuration.bindAddress, port: UInt16(configuration.port))
             state = .running

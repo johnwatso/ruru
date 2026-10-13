@@ -98,8 +98,11 @@ final class RuruClientTests: XCTestCase {
     }
 
     func testDescribeReportsCapabilities() async throws {
-        StubProtocol.replies = [(200, #"{"version":1,"authority":"Ruru","clusterID":"bot","leaseSeconds":60,"recoverySeconds":0,"capabilities":{"lease":{"version":1,"enabled":true},"coordination":{"version":1,"enabled":false}},"lease":null}"#)]
+        StubProtocol.replies = [(200, #"{"version":1,"authority":"Ruru","authorityVersion":"0.2.0","authorityBuild":"2026100615","clusterID":"bot","leaseSeconds":60,"recoverySeconds":0,"capabilities":{"lease":{"version":1,"enabled":true},"coordination":{"version":1,"enabled":false}},"lease":null}"#)]
         let description = try await client().describe()
+        XCTAssertEqual(description.authority, "Ruru")
+        XCTAssertEqual(description.authorityVersion, "0.2.0")
+        XCTAssertEqual(description.authorityBuild, "2026100615")
         XCTAssertEqual(description.leaseSeconds, 60)
         XCTAssertTrue(description.supports("lease"))
         XCTAssertFalse(description.supports("coordination"))

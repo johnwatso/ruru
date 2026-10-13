@@ -118,16 +118,21 @@ struct WitnessRouter: Sendable {
     let pairing: PairingDesk
     let participants: ParticipantPresence
     let operationalStatus: OperationalStatusRegistry
+    private let authorityVersion: String?
+    private let authorityBuild: String?
     private let policies: [String: WitnessServicePolicy]
     private let leaseSeconds: [String: Double]
 
-    init(store: LeaseStore, clusterID: String, token: String) throws {
-        try self.init(store: store, services: [WitnessServiceCredential(clusterID: clusterID, token: token)])
+    init(store: LeaseStore, clusterID: String, token: String, authorityVersion: String? = nil,
+         authorityBuild: String? = nil) throws {
+        try self.init(store: store, services: [WitnessServiceCredential(clusterID: clusterID, token: token)],
+                      authorityVersion: authorityVersion, authorityBuild: authorityBuild)
     }
 
     init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil,
          pairing: PairingDesk? = nil, participants: ParticipantPresence? = nil,
-         operationalStatus: OperationalStatusRegistry? = nil) throws {
+         operationalStatus: OperationalStatusRegistry? = nil, authorityVersion: String? = nil,
+         authorityBuild: String? = nil) throws {
         authorization = try WitnessAuthorization(services: services)
         self.services = services
         self.store = store
@@ -135,6 +140,8 @@ struct WitnessRouter: Sendable {
         self.pairing = pairing ?? PairingDesk()
         self.participants = try participants ?? ParticipantPresence(services: services)
         self.operationalStatus = try operationalStatus ?? OperationalStatusRegistry(services: services)
+        self.authorityVersion = authorityVersion
+        self.authorityBuild = authorityBuild
         policies = Dictionary(uniqueKeysWithValues: services.map {
             ($0.clusterID, WitnessServicePolicy(clusterID: $0.clusterID, preference: $0.primaryPreference))
         })
@@ -164,7 +171,9 @@ struct WitnessRouter: Sendable {
             do {
                 let status = try await store.status(for: cluster)
                 let body = try JSONEncoder().encode(WitnessServiceDescription(service: service, lease: status.lease,
-                                                                             recoverySeconds: status.recoverySeconds))
+                                                                             recoverySeconds: status.recoverySeconds,
+                                                                             authorityVersion: authorityVersion,
+                                                                             authorityBuild: authorityBuild))
                 return LeaseReply(status: 200, body: body)
             } catch { return .error("authority_unavailable", status: 503) }
         }

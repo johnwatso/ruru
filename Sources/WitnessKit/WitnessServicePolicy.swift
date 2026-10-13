@@ -67,15 +67,24 @@ public struct WitnessServiceDescription: Codable, Equatable, Sendable {
 
     public let version: Int
     public let authority: String
+    /// The Ruru application release that is serving this response. This is
+    /// diagnostic metadata, not a compatibility gate; use capabilities for
+    /// feature negotiation.
+    public let authorityVersion: String?
+    /// The build number for `authorityVersion`, when the hosting app provides it.
+    public let authorityBuild: String?
     public let clusterID: String
     public let leaseSeconds: Double
     public let recoverySeconds: Double
     public let capabilities: [String: Capability]
     public let lease: Lease?
 
-    init(service: WitnessServiceCredential, lease: LeaseStatus?, recoverySeconds: Double) {
+    init(service: WitnessServiceCredential, lease: LeaseStatus?, recoverySeconds: Double,
+         authorityVersion: String?, authorityBuild: String?) {
         version = 1
         authority = "Ruru"
+        self.authorityVersion = authorityVersion
+        self.authorityBuild = authorityBuild
         clusterID = service.clusterID
         leaseSeconds = service.leaseSeconds
         self.recoverySeconds = recoverySeconds

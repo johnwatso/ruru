@@ -147,7 +147,7 @@ final class WitnessHTTPTests: XCTestCase {
             WitnessServiceCredential(clusterID: "bot", token: token, leaseSeconds: 60),
             WitnessServiceCredential(clusterID: "media", token: other,
                                      coordinationPolicy: .init(enabled: true, allowedOrigins: ["https://media.example.com"]))
-        ])
+        ], authorityVersion: "0.2.0", authorityBuild: "2026100615")
         let describe = { (token: String?) in
             HTTPRequest(method: "GET", path: "/v1/service", headers: token.map { ["authorization": "Bearer " + $0] } ?? [:], body: Data())
         }
@@ -157,6 +157,8 @@ final class WitnessHTTPTests: XCTestCase {
         XCTAssertEqual(empty.status, 200)
         var description = try JSONDecoder().decode(WitnessServiceDescription.self, from: empty.body)
         XCTAssertEqual(description.clusterID, "bot")
+        XCTAssertEqual(description.authorityVersion, "0.2.0")
+        XCTAssertEqual(description.authorityBuild, "2026100615")
         XCTAssertEqual(description.leaseSeconds, 60)
         XCTAssertNil(description.lease)
         XCTAssertEqual(description.capabilities["lease"]?.version, 1)

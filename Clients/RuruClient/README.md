@@ -83,6 +83,10 @@ The package follows semantic versioning. Patch releases preserve public API and
 wire compatibility; minor releases may add source-compatible API; major
 releases may break source compatibility. Ruru's lease routes and JSON contract
 remain compatible as described in the integration guide and OpenAPI document.
+`RuruServiceDescription.authorityVersion` and `.authorityBuild` identify the
+serving Ruru app release for logs or support screens. They are optional so
+clients remain compatible with older authorities, and they are not a substitute
+for capability detection.
 
 Every RuruClient change must keep its unit suite and Ruru's real-server client
 conformance tests passing. A client release is tagged at the Ruru repository

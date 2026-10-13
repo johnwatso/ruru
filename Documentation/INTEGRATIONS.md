@@ -138,9 +138,12 @@ Send JSON over HTTPS with `Authorization: Bearer <service token>`:
   `{"released":true}`. Release never decreases the term.
 - `GET /v1/service` describes the caller's service: `clusterID`, `leaseSeconds`,
   `recoverySeconds`, versioned `capabilities` (`lease`, `primaryPreference`,
-  `coordination`, `participantPresence`) and the current `lease` (owner, term, remaining seconds).
-  Feature-detect from `capabilities` rather than assuming a version. It is also
-  a safe status endpoint for monitoring tools, scoped to one service's token.
+  `coordination`, `participantPresence`, `operationalStatus`) and the current
+  `lease` (owner, term, remaining seconds). `authorityVersion` and
+  `authorityBuild` identify the running Ruru app release for diagnostics; they
+  are not protocol compatibility numbers. Feature-detect from `capabilities`
+  rather than assuming an app or protocol version. It is also a safe status
+  endpoint for monitoring tools, scoped to one service's token.
 - 503 `authority_recovering` means Ruru restarted (or was restored) and is
   waiting out every lease it could have granted. Retry after a short delay.
 - 401 means a missing or wrong token; 403 means the token belongs to another

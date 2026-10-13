@@ -10,6 +10,8 @@ public actor WitnessHTTPServer {
     public nonisolated let pairing: PairingDesk
     public nonisolated let participants: ParticipantPresence
     public nonisolated let operationalStatus: OperationalStatusRegistry
+    private let authorityVersion: String?
+    private let authorityBuild: String?
     private let queue = DispatchQueue(label: "dev.ruruapp.ruru.http", qos: .utility)
     private var listener: NWListener?
     private var listenerID = UUID()
@@ -25,30 +27,39 @@ public actor WitnessHTTPServer {
         var coordination = false
     }
 
-    public init(store: LeaseStore, clusterID: String, token: String) throws {
-        router = try WitnessRouter(store: store, clusterID: clusterID, token: token)
+    public init(store: LeaseStore, clusterID: String, token: String, authorityVersion: String? = nil,
+                authorityBuild: String? = nil) throws {
+        router = try WitnessRouter(store: store, clusterID: clusterID, token: token,
+                                   authorityVersion: authorityVersion, authorityBuild: authorityBuild)
         catalogue = router.catalogue
         pairing = router.pairing
         participants = router.participants
         operationalStatus = router.operationalStatus
+        self.authorityVersion = authorityVersion
+        self.authorityBuild = authorityBuild
     }
 
     public init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil,
                 pairing: PairingDesk? = nil, participants: ParticipantPresence? = nil,
-                operationalStatus: OperationalStatusRegistry? = nil) throws {
+                operationalStatus: OperationalStatusRegistry? = nil, authorityVersion: String? = nil,
+                authorityBuild: String? = nil) throws {
         router = try WitnessRouter(store: store, services: services, catalogue: catalogue, pairing: pairing, participants: participants,
-                                  operationalStatus: operationalStatus)
+                                  operationalStatus: operationalStatus, authorityVersion: authorityVersion,
+                                  authorityBuild: authorityBuild)
         self.catalogue = router.catalogue
         self.pairing = router.pairing
         self.participants = router.participants
         self.operationalStatus = router.operationalStatus
+        self.authorityVersion = authorityVersion
+        self.authorityBuild = authorityBuild
     }
 
     /// Changes admission only; the database, lease deadlines and listener stay alive.
     public func configureServices(_ services: [WitnessServiceCredential]) async throws {
         guard !configuringServices else { throw WitnessError.invalidConfiguration }
         let updated = try WitnessRouter(store: router.store, services: services, catalogue: catalogue, pairing: pairing, participants: participants,
-                                        operationalStatus: operationalStatus)
+                                        operationalStatus: operationalStatus, authorityVersion: authorityVersion,
+                                        authorityBuild: authorityBuild)
         configuringServices = true
         defer { configuringServices = false }
         try await catalogue.configureServices(services)

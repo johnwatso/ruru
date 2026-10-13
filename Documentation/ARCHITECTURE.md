@@ -20,7 +20,9 @@ cluster ID, Keychain token (`service-<id>`), lease length and display names.
 There is no built-in service; `kind` (SwiftBot or Other app) is only a template
 for the icon and pairing instructions, and SwiftBot keeps its own app icon.
 `GET /v1/service` lets a client discover its service's capabilities, lease
-length and current lease with its own token. `Clients/RuruClient` is the
+length and current lease with its own token. It includes the serving Ruru app's
+marketing version and build as optional diagnostic metadata; clients negotiate
+compatibility from versioned capabilities, not the app release. `Clients/RuruClient` is the
 reference Swift client; its conformance tests run against the real server.
 Alerts (`RuruAlerts.swift`) watch each poll for services whose owner stops
 renewing, failovers and authority problems, and deliver them to macOS
@@ -65,6 +67,12 @@ also include an optional `nodeName` for display. Older requests remain valid.
 Success returns `ownerNodeID`, `term`, `expiresInSeconds`; release returns
 `{"released":true}`. Errors return a machine-readable `error` with
 400/401/403/409/503 status. JSON field names match SwiftBot's `MeshWitnessClient`.
+
+`GET /v1/service` has its own stable discovery contract. Its optional
+`authorityVersion` and `authorityBuild` fields track the serving Ruru app
+release, while its `version` and individual capability versions govern wire
+compatibility. A patch-level Ruru release therefore does not falsely advertise
+a protocol break.
 
 `POST /v1/service/policy` is a separate, read-only authenticated route for the
 configured service's Preferred Primary and preference revision. It never

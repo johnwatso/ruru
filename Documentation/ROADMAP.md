@@ -1,5 +1,16 @@
 # Development log and next steps
 
+## 2026-10-13 — Authority release identity in discovery
+
+- `GET /v1/service` now returns optional `authorityVersion` and
+  `authorityBuild`, populated from Ruru's app bundle. `RuruClient` exposes
+  both fields so consuming apps can display or log the exact authority release.
+- The stable discovery/protocol version and individual capability versions stay
+  independent of the app release. Clients must still feature-detect rather than
+  treating an app patch as a wire-protocol change.
+- Validation is limited to focused Debug Xcode tests; no Release universal
+  build or Intel execution was performed for this metadata-only addition.
+
 ## 2026-10-13 — Phase 1: operational-status.v1
 
 - Added a generic, versioned `operationalStatus` capability and the separate

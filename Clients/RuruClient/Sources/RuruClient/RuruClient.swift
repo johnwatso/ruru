@@ -81,6 +81,11 @@ public struct RuruServiceDescription: Decodable, Sendable, Equatable {
         public let remainingSeconds: Double
     }
     public let version: Int
+    public let authority: String
+    /// Ruru's marketing version, for diagnostic display only.
+    public let authorityVersion: String?
+    /// Ruru's build number, for diagnostic display only.
+    public let authorityBuild: String?
     public let clusterID: String
     public let leaseSeconds: Double
     public let recoverySeconds: Double
