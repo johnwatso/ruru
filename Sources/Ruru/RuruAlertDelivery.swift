@@ -1,4 +1,5 @@
 import Foundation
+import RuruAlerting
 import UserNotifications
 
 /// Sends alerts to macOS notifications and optional external destinations.
@@ -34,6 +35,48 @@ final class RuruAlertDelivery {
             }
         }
         return failures.isEmpty ? nil : failures.joined(separator: "\n")
+    }
+
+    /// Where an alert can go right now.
+    struct Credentials: Sendable {
+        var webhook: URL?
+        var notifyID: String
+        var notifyToken: String?
+    }
+
+    /// Delivers one alert to one destination for an alert rule and reports the outcome.
+    /// Rules choose destinations themselves, so this applies no preference gate and no
+    /// repeat suppression; the rule engine owns cooldowns. Nothing here throws.
+    func send(_ alert: RuruAlert, to destination: AlertDestination, credentials: Credentials) async -> DeliveryOutcome {
+        switch destination {
+        case .macOS:
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            if settings.authorizationStatus == .denied {
+                return DeliveryOutcome(destination: .macOS, ok: false,
+                                       message: "macOS notifications are turned off for Ruru in System Settings → Notifications.")
+            }
+            await notify(alert)
+            return DeliveryOutcome(destination: .macOS, ok: true)
+        case .discord:
+            guard let webhook = credentials.webhook else {
+                return DeliveryOutcome(destination: .discord, ok: false, message: "Discord isn't set up.")
+            }
+            do { try await post(alert, to: webhook, at: Date()); return DeliveryOutcome(destination: .discord, ok: true) }
+            catch { return failure(.discord, error) }
+        case .notify:
+            guard let token = credentials.notifyToken, !credentials.notifyID.isEmpty else {
+                return DeliveryOutcome(destination: .notify, ok: false, message: "Notify! isn't set up.")
+            }
+            do { try await post(alert, toNotifyID: credentials.notifyID, token: token); return DeliveryOutcome(destination: .notify, ok: true) }
+            catch { return failure(.notify, error) }
+        }
+    }
+
+    private func failure(_ destination: AlertDestination, _ error: Error) -> DeliveryOutcome {
+        let message = error.localizedDescription
+        // Network problems and rate limits are worth one more try; a rejected webhook is not.
+        let transient = error is URLError || message.contains("rate-limiting")
+        return DeliveryOutcome(destination: destination, ok: false, message: message, retryable: transient)
     }
 
     private func notify(_ alert: RuruAlert) async {

@@ -1,5 +1,6 @@
 import AppKit
 import ServiceManagement
+import RuruAlerting
 import SwiftUI
 import WitnessKit
 
@@ -7,8 +8,12 @@ import WitnessKit
 final class WitnessAppModel: ObservableObject {
     enum ServiceState: String { case stopped = "Stopped", starting = "Starting", running = "Running", failed = "Unavailable" }
 
-    @Published private(set) var configuration = WitnessConfiguration()
+    @Published private(set) var configuration = WitnessConfiguration() {
+        didSet { alertingInputsChanged() }
+    }
     @Published var selectedPage: WitnessPage? = .overview
+    /// A service Overview asked Guarding to open; Guarding consumes it when it appears.
+    var pendingGuardedServiceID: String?
     @Published private(set) var state: ServiceState = .stopped
     @Published private(set) var coordinationLocations: [CoordinationLocation] = []
     @Published private(set) var coordinationEnrollments: [CoordinationEnrollment] = []
@@ -16,7 +21,7 @@ final class WitnessAppModel: ObservableObject {
     private let pairing = PairingDesk()
     private let participants = ParticipantPresence()
     private let operationalStatus = OperationalStatusRegistry()
-    private let monitor = MonitorEngine()
+    private let monitor = MonitorEngine(networkAvailable: { NetworkPathGate.shared.isAvailable })
     @Published private(set) var participantObservations: [ParticipantObservation] = []
     @Published private(set) var operationalObservations: [OperationalStatusObservation] = []
     @Published private(set) var participantActivity: [ParticipantActivityRecord] = []
@@ -50,6 +55,27 @@ final class WitnessAppModel: ObservableObject {
     private var participantAlertMonitor = ParticipantAlertMonitor()
     private var operationalAlertMonitor = OperationalAlertMonitor()
     private let alertDelivery = RuruAlertDelivery()
+    /// Legacy-path alerts waiting for delivery. Delivery runs on its own task so
+    /// a slow destination never delays the refresh loop or anything lease related.
+    private var pendingLegacyAlerts: [RuruAlert] = []
+    private var legacyDeliveryTask: Task<Void, Never>?
+    private var monitoringTask: Task<Void, Never>?
+    /// Rule-based alerting. Independent of the lease authority: it has its own
+    /// storage, queue and delivery, and starts even when authority storage fails.
+    private var alertService: AlertService?
+    @Published private(set) var alertSnapshot = AlertSnapshot()
+    /// True when alert rules decide notifications. False only if rules couldn't be
+    /// saved, in which case the earlier fixed alert settings keep working.
+    @Published private(set) var alertRulesActive = false
+    private var alertEngineReady = false
+    private var ownershipTransferMonitor = OwnershipTransferMonitor()
+    private var lastAlertSync: AlertSync?
+    private struct AlertSync: Equatable {
+        var capabilities: AlertCapabilities
+        var monitors: Set<String>
+        var allMonitors: Set<String>
+        var services: Set<String>
+    }
     private var discordWebhook: URL?
     private var notifyToken: String?
 
@@ -73,6 +99,7 @@ final class WitnessAppModel: ObservableObject {
     init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--preview") ||
          ProcessInfo.processInfo.arguments.contains("--preview-screenshots") ||
          ProcessInfo.processInfo.arguments.contains("--preview-activity") ||
+         ProcessInfo.processInfo.arguments.contains("--preview-alerts") ||
          Bundle.main.object(forInfoDictionaryKey: "RuruScreenshotPreview") as? Bool == true) {
         self.preview = preview
         if preview {
@@ -91,6 +118,13 @@ final class WitnessAppModel: ObservableObject {
                 loadScreenshotPreview()
                 loadPreviewActivity()
                 loadPreviewMonitoring()
+                return
+            }
+            if ProcessInfo.processInfo.arguments.contains("--preview-alerts") {
+                loadScreenshotPreview()
+                loadPreviewMonitoring()
+                loadPreviewAlerts()
+                selectedPage = .alerts
                 return
             }
             if ProcessInfo.processInfo.arguments.contains("--preview-screenshots") ||
@@ -142,12 +176,16 @@ final class WitnessAppModel: ObservableObject {
             discordConfigured = discordWebhook != nil
             notifyToken = (try? WitnessKeychain.read(RuruNotify.keychainAccount)).flatMap { $0 }
             notifyConfigured = notifyToken != nil && RuruNotify.validID(configuration.notifyID) != nil
+            // Monitoring does not depend on the lease authority: it starts first, and
+            // keeps running even when authority storage fails to open below.
+            let monitor = monitor, targets = configuration.monitorTargets
+            Task { await monitor.configure(targets) }
+            beginMonitoring()
+            startAlerting()
             try WitnessStorage.checkAuthorityPresent()
             store = try LeaseStore(databaseURL: WitnessStorage.databaseURL)
             try WitnessStorage.recordAuthorityCreated()
             beginSnapshots()
-            let monitor = monitor, targets = configuration.monitorTargets
-            Task { await monitor.configure(targets) }
             for service in configuration.guardedServices {
                 serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
             }
@@ -306,6 +344,69 @@ final class WitnessAppModel: ObservableObject {
         if let pick = try? RuruServiceIcons.pick(from: URL(fileURLWithPath: "/System/Applications/Calculator.app")) {
             setServiceIcon(pick.png, for: targets[4].id)
         }
+    }
+
+    /// Display-only fixture for the Alerts page: default rules, one customised rule, an
+    /// open incident, an incident left unverified by a restart, and delivery history.
+    private func loadPreviewAlerts() {
+        let now = Date()
+        // More than one guarded service, so per-service rules and targets can be tried.
+        configuration.services += [
+            GuardedService(id: "00000000-0000-4000-8000-000000000002", name: "Media Library", clusterID: "media", kind: .custom),
+            GuardedService(id: "00000000-0000-4000-8000-000000000003", name: "Home Automation", clusterID: "home", kind: .custom)
+        ]
+        var file = AlertRulesFile()
+        AlertTemplates.provision(into: &file, capabilities: .init(monitoring: true, guarding: true, internetAccess: true),
+                                 legacy: .defaults)
+        var rules = file.rules
+        if let index = rules.firstIndex(where: { $0.trigger == .monitorUnavailable }) {
+            rules[index].notifyOnRecovery = true
+            rules[index].cooldownSeconds = 900
+        }
+        rules.append(AlertRule(name: "NAS latency", trigger: .monitorSlow, scope: AlertScope(ids: [configuration.monitorTargets[0].id]),
+                               threshold: .failedChecks(3), limit: 30))
+        rules.append(AlertRule(name: "Media Library failover", trigger: .failoverCompleted,
+                               scope: AlertScope(ids: ["00000000-0000-4000-8000-000000000002"]), severity: .warning))
+        rules.append(AlertRule(name: "Home Automation unreachable", trigger: .primaryUnreachable,
+                               scope: AlertScope(ids: ["00000000-0000-4000-8000-000000000003"]), threshold: .after(60),
+                               cooldownSeconds: 900, repeatSeconds: 1_800))
+        rules.append(AlertRule(name: "Build Mac offline", trigger: .monitorUnavailable,
+                               scope: AlertScope(ids: [configuration.monitorTargets[3].id]), threshold: .after(300),
+                               repeatSeconds: 1_800, quietHours: QuietHours(startMinute: 22 * 60, endMinute: 7 * 60)))
+        let site = SubjectRef(source: .monitoring, kind: "monitor", id: configuration.monitorTargets[3].id, name: "Build Mac SSH")
+        let media = SubjectRef(source: .monitoring, kind: "monitor", id: configuration.monitorTargets[4].id, name: "Media server")
+        let monitorRule = rules.first { $0.trigger == .monitorUnavailable }!
+        let incidents = [
+            AlertIncident(ruleID: monitorRule.id, ruleName: monitorRule.name, trigger: .monitorUnavailable, subject: site,
+                          severity: .critical, basis: .ruruObserved, title: "Build Mac SSH is unreachable",
+                          detail: "build-mac.local:22: Connection refused", openedAt: now.addingTimeInterval(-600),
+                          lastNotifiedAt: now.addingTimeInterval(-600), notificationCount: 1, noticeOutstanding: true),
+            AlertIncident(ruleID: monitorRule.id, ruleName: monitorRule.name, trigger: .monitorUnavailable, subject: media,
+                          severity: .critical, basis: .ruruObserved, verification: .unverified,
+                          title: "Media server is unreachable", detail: "http://192.168.1.30:8096/health: HTTP 503",
+                          openedAt: now.addingTimeInterval(-7_200), lastNotifiedAt: now.addingTimeInterval(-7_200),
+                          notificationCount: 1, noticeOutstanding: true)
+        ]
+        var history: [AlertHistoryEntry] = []
+        func entry(_ id: Int64, _ ago: Double, _ kind: AlertHistoryEntry.Kind, _ title: String, _ subject: String,
+                   _ severity: AlertSeverity, deliveries: [DeliveryOutcome] = [], suppressed: String? = nil) {
+            history.append(AlertHistoryEntry(id: id, time: now.addingTimeInterval(-ago), ruleID: monitorRule.id, ruleName: monitorRule.name,
+                                             trigger: .monitorUnavailable, subjectName: subject, kind: kind, title: title,
+                                             detail: "", severity: severity, suppressedReason: suppressed, deliveries: deliveries))
+        }
+        let ok = DeliveryOutcome(destination: .macOS, ok: true), discord = DeliveryOutcome(destination: .discord, ok: true)
+        entry(6, 600, .opened, "Build Mac SSH is unreachable", "Build Mac SSH", .critical, deliveries: [ok, discord])
+        entry(5, 3_000, .recovered, "Company website is reachable again", "Company website", .info, deliveries: [ok, discord])
+        entry(4, 3_400, .opened, "Company website is unreachable", "Company website", .critical,
+              deliveries: [ok, DeliveryOutcome(destination: .discord, ok: false, message: "Discord rejected the alert (HTTP 404)")])
+        entry(3, 7_200, .opened, "Media server is unreachable", "Media server", .critical, deliveries: [ok, discord])
+        entry(2, 9_000, .opened, "Router is unreachable", "Router", .critical, suppressed: "cooldown")
+        var snapshot = AlertSnapshot()
+        snapshot.started = true; snapshot.revision = 1
+        snapshot.rules = rules; snapshot.openIncidents = incidents; snapshot.history = history.sorted { $0.time > $1.time }
+        snapshot.lastTriggered = [monitorRule.id: now.addingTimeInterval(-600)]
+        alertSnapshot = snapshot
+        alertRulesActive = true
     }
 
     private func loadPreviewTransportError() {
@@ -729,6 +830,8 @@ final class WitnessAppModel: ObservableObject {
         shuttingDown = true
         pollTask?.cancel()
         snapshotTask?.cancel()
+        monitoringTask?.cancel()
+        legacyDeliveryTask?.cancel()
         await monitor.stop()
         await internetAccess.stop()
         await server?.stop()
@@ -1025,6 +1128,180 @@ final class WitnessAppModel: ObservableObject {
         beginPolling()
     }
 
+    /// Publishes monitor results independently of the authority poll loop.
+    private func beginMonitoring() {
+        monitoringTask?.cancel()
+        monitoringTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.refreshMonitoring()
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            }
+        }
+    }
+
+    private func refreshMonitoring() async {
+        guard !preview, !shuttingDown else { return }
+        monitorStates = await monitor.snapshot()
+        let observations = await monitor.drainObservations()
+        let transitions = await monitor.drainTransitions()
+        guard alertEngineReady else { return }
+        if alertRulesActive, let alertService {
+            let now = Date()
+            if !observations.isEmpty {
+                await alertService.recordMonitoring(observations.map {
+                    RollupSample(targetID: $0.targetID, time: $0.result.time, ok: $0.result.ok,
+                                 inconclusive: $0.result.inconclusive, latencyMilliseconds: $0.result.latencyMilliseconds)
+                })
+                await alertService.ingest(observations.flatMap { [RuruAlertSignals.monitor($0, at: now), RuruAlertSignals.monitorLatency($0, at: now)] })
+            }
+            await alertService.tick()
+            let snapshot = await alertService.snapshot()
+            if snapshot.revision != alertSnapshot.revision { alertSnapshot = snapshot }
+        } else {
+            // Earlier fixed-toggle alerts, used only if rules could not be saved.
+            var alerts: [RuruAlert] = []
+            for transition in transitions where transition.change.status != .unknown {
+                let down = transition.change.status == .down
+                alerts.append(RuruAlert(kind: down ? .monitorDown : .monitorRecovered,
+                                        key: "monitor|\(transition.targetID)|\(down ? "down" : "up")",
+                                        title: down ? "\(transition.name) is unreachable" : "\(transition.name) is reachable again",
+                                        detail: down ? "\(transition.address): \(transition.change.detail)" : transition.address,
+                                        context: .init(service: "Monitoring")))
+            }
+            enqueueLegacyDelivery(alerts)
+        }
+    }
+
+    // MARK: Alert engine
+
+    private var alertCapabilities: AlertCapabilities {
+        AlertCapabilities(monitoring: !configuration.monitorTargets.isEmpty, guarding: !configuration.services.isEmpty,
+                          internetAccess: configuration.tunnel.isConfigured)
+    }
+
+    private var legacyAlertPreferences: LegacyAlertPreferences {
+        let alerts = configuration.alerts
+        return LegacyAlertPreferences([.serviceDown: alerts.serviceDown, .failover: alerts.failover,
+                                       .authorityProblems: alerts.authorityProblems, .participantStatus: alerts.participantStatus,
+                                       .operationalStatus: alerts.operationalStatus, .monitoring: alerts.monitoring])
+    }
+
+    /// Destinations that are set up and switched on in Settings.
+    var enabledAlertDestinations: Set<AlertDestination> {
+        var destinations: Set<AlertDestination> = []
+        if configuration.alerts.notifications { destinations.insert(.macOS) }
+        if configuration.alerts.discord, discordConfigured { destinations.insert(.discord) }
+        if configuration.alerts.notify, notifyConfigured { destinations.insert(.notify) }
+        return destinations
+    }
+
+    private func startAlerting() {
+        let directory = WitnessStorage.directory
+        let delivery = alertDelivery
+        let service = AlertService(.init(
+            rulesURL: directory.appendingPathComponent("alert-rules.json"),
+            databaseURL: directory.appendingPathComponent("Alerts", isDirectory: true).appendingPathComponent("alerts.duckdb"),
+            transport: RuruAlertTransport(delivery: delivery, credentials: { [weak self] in
+                RuruAlertDelivery.Credentials(webhook: self?.discordWebhook, notifyID: self?.configuration.notifyID ?? "",
+                                              notifyToken: self?.notifyToken)
+            }),
+            enabledDestinations: { [weak self] in await MainActor.run { self?.enabledAlertDestinations ?? [] } }))
+        alertService = service
+        let capabilities = alertCapabilities, legacy = legacyAlertPreferences
+        let monitors = Set(configuration.monitorTargets.filter(\.enabled).map(\.id))
+        let allMonitors = Set(configuration.monitorTargets.map(\.id))
+        let services = Set(configuration.services.map(\.id))
+        Task { [weak self] in
+            let report = await service.start(capabilities: capabilities, legacy: legacy)
+            guard let self, !self.shuttingDown else { return }
+            self.alertRulesActive = report.rulesActive
+            self.lastAlertSync = AlertSync(capabilities: capabilities, monitors: monitors, allMonitors: allMonitors, services: services)
+            if report.rulesActive {
+                await service.pruneSubjects(source: .monitoring, kind: "monitor", keeping: monitors)
+                await service.forgetMonitoringHistory(keeping: allMonitors)
+                await service.pruneSubjects(source: .guarding, kind: "service", keeping: services)
+                await service.pruneGroups(source: .operationalStatus, keeping: services)
+            }
+            self.alertSnapshot = await service.snapshot()
+            self.alertEngineReady = true
+            if report.rulesActive, self.store != nil, capabilities.guarding {
+                await service.ingest([AlertSignal(
+                    trigger: .authorityRestarted, subject: RuruAlertSubjects.authority, shape: .event,
+                    title: "Ruru restarted", detail: "Ruru started and is waiting out any earlier leases before granting ownership.",
+                    basis: .ruruObserved, observedAt: Date())])
+            }
+        }
+    }
+
+    /// Keeps default rules and open incidents in step with what is configured: a
+    /// newly added capability gets its default rules, and a removed or paused
+    /// monitor or service has its open incidents archived (not "recovered").
+    private func alertingInputsChanged() {
+        guard alertEngineReady, alertRulesActive, !preview, let service = alertService else { return }
+        let sync = AlertSync(capabilities: alertCapabilities,
+                             monitors: Set(configuration.monitorTargets.filter(\.enabled).map(\.id)),
+                             allMonitors: Set(configuration.monitorTargets.map(\.id)),
+                             services: Set(configuration.services.map(\.id)))
+        guard sync != lastAlertSync else { return }
+        lastAlertSync = sync
+        let legacy = legacyAlertPreferences
+        Task { [weak self] in
+            await service.provision(capabilities: sync.capabilities, legacy: legacy)
+            await service.pruneSubjects(source: .monitoring, kind: "monitor", keeping: sync.monitors)
+            await service.forgetMonitoringHistory(keeping: sync.allMonitors)
+            await service.pruneSubjects(source: .guarding, kind: "service", keeping: sync.services)
+            await service.pruneGroups(source: .operationalStatus, keeping: sync.services)
+            if let self { self.alertSnapshot = await service.snapshot() }
+        }
+    }
+
+    // MARK: Alert rules (used by the Alerts page)
+
+    func saveAlertRule(_ rule: AlertRule) async throws -> AlertRule {
+        guard let alertService else { throw AlertServiceError.notStarted }
+        let saved = try await alertService.saveRule(rule)
+        alertSnapshot = await alertService.snapshot()
+        return saved
+    }
+
+    func deleteAlertRule(_ id: UUID) async throws {
+        guard let alertService else { throw AlertServiceError.notStarted }
+        try await alertService.deleteRule(id)
+        alertSnapshot = await alertService.snapshot()
+    }
+
+    func setAlertRule(_ id: UUID, enabled: Bool) async throws {
+        guard let alertService else { throw AlertServiceError.notStarted }
+        try await alertService.setRuleEnabled(id, enabled)
+        alertSnapshot = await alertService.snapshot()
+    }
+
+    func addAlertRule(fromTemplate id: String) async throws -> AlertRule {
+        guard let alertService else { throw AlertServiceError.notStarted }
+        let rule = try await alertService.addRule(fromTemplate: id)
+        alertSnapshot = await alertService.snapshot()
+        return rule
+    }
+
+    func duplicateAlertRule(_ id: UUID) async throws -> AlertRule {
+        guard let alertService else { throw AlertServiceError.notStarted }
+        let rule = try await alertService.duplicateRule(id)
+        alertSnapshot = await alertService.snapshot()
+        return rule
+    }
+
+    func alertHistory(ruleID: UUID?) async -> [AlertHistoryEntry] {
+        await alertService?.history(ruleID: ruleID, limit: 100) ?? []
+    }
+
+    func alertIncidents(subjectKey: String?) async -> [AlertIncident] {
+        await alertService?.incidents(subjectKey: subjectKey, limit: 25) ?? []
+    }
+
+    func monitorUptime(_ targetID: String) async -> [(label: String, summary: UptimeSummary)] {
+        await alertService?.uptime(targetID: targetID) ?? []
+    }
+
     private func beginPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
@@ -1139,7 +1416,6 @@ final class WitnessAppModel: ObservableObject {
     }
 
     private func refresh() async {
-        if !preview { monitorStates = await monitor.snapshot() }
         participantObservations = await participants.snapshot().filter { observation in
             configuration.guardedServices.contains { $0.clusterID == observation.clusterID }
         }
@@ -1277,7 +1553,7 @@ final class WitnessAppModel: ObservableObject {
     }
 
     struct Attention: Identifiable {
-        enum Tier: String { case authority = "Authority", guarding = "Guarding", transport = "Transport", monitoring = "Monitoring" }
+        enum Tier: String { case authority = "Authority", guarding = "Guarding", transport = "Transport", monitoring = "Monitoring", alerts = "Alerts" }
         enum Action { case continueSetup, start, setupStorage, page(WitnessPage) }
         let id: String
         let tier: Tier
@@ -1320,14 +1596,16 @@ final class WitnessAppModel: ObservableObject {
                                actionTitle: "Continue Setup", action: .continueSetup), at: 0)
             return items
         }
-        if state == .stopped, !legacyStorageNeedsReplacement {
+        // Someone who only monitors never configured Guarding; its prompts would be noise.
+        let monitoringOnly = configuration.services.isEmpty && !configuration.monitorTargets.isEmpty
+        if state == .stopped, !legacyStorageNeedsReplacement, !monitoringOnly {
             items.append(.init(id: "stopped", tier: .authority, title: "Ruru is stopped",
                                detail: "Servers can’t take or keep ownership until it runs.",
                                health: .warning, actionTitle: "Start", action: .start))
         }
 
         // Transport tier
-        if !configuration.tunnel.isConfigured, !configuration.setup.localOnly {
+        if !configuration.tunnel.isConfigured, !configuration.setup.localOnly, !monitoringOnly {
             items.append(.init(id: "address", tier: .transport, title: "No public address",
                                detail: "Servers on other Macs can’t reach Ruru until Internet Access is set up.",
                                health: .warning, actionTitle: "Set Up", action: .page(.internet)))
@@ -1339,7 +1617,7 @@ final class WitnessAppModel: ObservableObject {
         }
 
         // Guarding tier — services
-        if configuration.services.isEmpty {
+        if configuration.services.isEmpty, !monitoringOnly {
             items.append(.init(id: "services", tier: .guarding, title: "No services yet",
                                detail: "Add an app such as SwiftBot, then pair its servers.",
                                health: .inactive, actionTitle: "Add Service", action: .page(.guarding)))
@@ -1350,6 +1628,19 @@ final class WitnessAppModel: ObservableObject {
                                title: "\(service.name) has no servers yet",
                                detail: "Pair its servers with a code from Connection Details.", health: .inactive,
                                actionTitle: "Pair", action: .page(.guarding)))
+        }
+
+        // Alerts tier — incidents Ruru can't currently show as healthy
+        let open = alertSnapshot.openIncidents
+        if !open.isEmpty {
+            let unverified = open.filter { $0.verification == .unverified }.count
+            let verified = open.count - unverified
+            items.append(.init(id: "alerts", tier: .alerts,
+                               title: open.count == 1 ? "1 open alert" : "\(open.count) open alerts",
+                               detail: unverified == 0 ? open.prefix(3).map(\.title).joined(separator: " · ")
+                                   : (verified == 0 ? "Ruru restarted and hasn't observed \(unverified == 1 ? "this" : "these") since. Not shown as healthy."
+                                      : "\(verified) active, \(unverified) unverified since Ruru restarted."),
+                               health: verified > 0 ? .error : .warning, actionTitle: "Alerts", action: .page(.alerts)))
         }
 
         // Monitoring tier — confirmed-down targets only
@@ -1405,7 +1696,7 @@ final class WitnessAppModel: ObservableObject {
     // MARK: Alerts
 
     private func evaluateAlerts() async {
-        guard !preview, !shuttingDown else { return }
+        guard !preview, !shuttingDown, alertEngineReady else { return }
         let leases = snapshot?.leases ?? []
         let observation = RuruAlertMonitor.Observation(
             serviceRunning: state == .running, recovering: isRecovering,
@@ -1458,20 +1749,43 @@ final class WitnessAppModel: ObservableObject {
                                     context: .init(service: service, server: server)))
         }
         announcedPairings.formIntersection(pairingRequests.map(\.id))
-        if !preview {
-            for transition in await monitor.drainTransitions() where transition.change.status != .unknown {
-                let down = transition.change.status == .down
-                alerts.append(RuruAlert(kind: down ? .monitorDown : .monitorRecovered,
-                                        key: "monitor|\(transition.targetID)|\(down ? "down" : "up")",
-                                        title: down ? "\(transition.name) is unreachable" : "\(transition.name) is reachable again",
-                                        detail: down ? "\(transition.address): \(transition.change.detail)" : transition.address,
-                                        context: .init(service: "Monitoring")))
-            }
+        guard alertRulesActive, let alertService else {
+            enqueueLegacyDelivery(alerts)
+            return
         }
+        // Rules decide what is notified. The detectors above stay as they were: they
+        // are read for their current conditions and events, never for delivery. Only
+        // Ruru's own built-in notices (pairing requests) bypass the rules.
+        let subjects = RuruAlertSubjects(services: configuration.guardedServices)
+        var signals = alertMonitor.conditionSignals(subjects: subjects, at: now)
+        signals += operationalAlertMonitor.conditionSignals(subjects: subjects, at: now)
+        signals += participantAlertMonitor.conditionSignals(subjects: subjects, at: now)
+        signals += alerts.compactMap { RuruAlertSignals.failover($0, subjects: subjects, at: now) }
+        signals += RuruAlertSignals.participantEvents(participantTransitions.events, subjects: subjects, at: now)
+        signals += RuruAlertSignals.ownership(
+            ownershipTransferMonitor.observe(owners: observation.owners, serving: alertMonitor.serving,
+                                             services: Set(subjects.services.keys)), subjects: subjects, at: now)
+        await alertService.ingest(signals)
+        enqueueLegacyDelivery(alerts.filter { $0.kind == .pairingRequest })
+    }
+
+    /// Hands alerts to a serial delivery task and returns immediately.
+    private func enqueueLegacyDelivery(_ alerts: [RuruAlert]) {
         guard !alerts.isEmpty else { return }
-        if let failure = await alertDelivery.deliver(alerts, preferences: configuration.alerts, webhook: discordWebhook,
-                                                     notifyID: configuration.notifyID, notifyToken: notifyToken) {
-            alertDeliveryError = failure
+        pendingLegacyAlerts.append(contentsOf: alerts)
+        if pendingLegacyAlerts.count > 64 { pendingLegacyAlerts.removeFirst(pendingLegacyAlerts.count - 64) }
+        guard legacyDeliveryTask == nil else { return }
+        legacyDeliveryTask = Task { [weak self] in
+            while let self, !Task.isCancelled, !self.pendingLegacyAlerts.isEmpty {
+                let batch = self.pendingLegacyAlerts
+                self.pendingLegacyAlerts = []
+                if let failure = await self.alertDelivery.deliver(
+                    batch, preferences: self.configuration.alerts, webhook: self.discordWebhook,
+                    notifyID: self.configuration.notifyID, notifyToken: self.notifyToken) {
+                    self.alertDeliveryError = failure
+                }
+            }
+            self?.legacyDeliveryTask = nil
         }
     }
 

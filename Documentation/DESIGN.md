@@ -55,9 +55,16 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
   the saved value. The app menu’s Settings command (⌘,), menu bar
   Settings and Overview actions open the same window without changing console
   navigation. Closing either window leaves the menu bar service running.
-- Settings → Alerts groups "Alert Me When" toggles (service down, failover,
-  Ruru problems, participant power/session status) and "Deliver To" (macOS
+- Alerts is a three-pane page (rules list, editor, inspector) in console surfaces:
+  a searchable list with icon, name, summary and switch; an editor with When /
+  Then / Recovery / Advanced that adapts to the trigger (events show no threshold
+  or recovery); and a status/history/preview inspector that becomes a popover
+  below about 1,080 pt of detail width. History lists open incidents (unverified
+  ones in orange, never green) and per-destination delivery results.
+- Settings → Alerts links to Alerts for rules and groups "Deliver To" (macOS
   notifications, Discord and Notify! with Set Up…/Replace…/Remove, Send Test).
+  If rules cannot be saved it shows the earlier "Alert Me When" toggles (service
+  down, failover, Ruru problems, participant power/session status).
   Discord's webhook URL and Notify!'s token are entered in secure setup sheets
   and kept in Keychain; Notify!'s destination ID is saved with preferences.
 - Show a lease like a one-time code (Passwords' verification code): the
@@ -111,17 +118,28 @@ newer Liquid Glass controls.
 
 ## Overview composition
 
-Match SwiftBot's `ConsoleOverviewView` and `HostSummaryCard`: the real 108pt app
-icon with a live status dot, app name/status/environment, and version/node/uptime
-facts. Put named issue review actions at the foot of the summary. Follow with
-equal service cards (Guarding, Monitoring, Internet Access, Activity, Alerts), using
-SwiftBot's 168pt minimum width and a 2×2 fallback. Quick Actions and a read-only
-System inspector share equal card heights when side by side, with spare space
-below the shorter card's content. They stack at natural heights when narrow; Recent
-Activity follows as one newest-first feed (ownership and server reports merged, five
-compact rows with live relative times). Keep the full catalog and individual ownership in Guarding.
-Uptime is display-only and uses the monotonic service start instant. Use native
-Sequoia button styles in place of SwiftBot's macOS 26 glass controls.
+Top to bottom: header (Overview, More menu, Start/Stop, Guarding); a compact Ruru
+card; four equal summary cards; Guarded Services; full-width Recent Activity.
+
+- The Ruru card is about Ruru only: app icon, name, status badge, "Running on
+  <Mac> · Uptime …" and one authority line derived from service state (normal,
+  stopped, starting/recovering, requires attention). A held lease never counts
+  as authority health. Actionable issues (finish setup, pairing, no public
+  address, tunnel or monitoring failures) follow inside the card with their fix.
+- Summary cards (Guarding, Internet Access, Activity, Monitoring) use SwiftBot's
+  168pt minimum width with a 2×2 fallback and open their page. Monitoring counts
+  enabled targets, reports failing checks as incidents, and shows neutral text
+  when there are no targets, all are paused, or no check has finished yet.
+- Guarded Services is a compact table (Service, Ownership, Participants, Status)
+  that collapses to two-line rows when narrow. Rows open that service's details in
+  Guarding; Manage Services opens the list. Status keeps lease ownership, contact
+  and application-reported readiness apart: Ready/Synchronising/Outdated/Degraded
+  only from a fresh operational report, Contact stale, Unowned, Recovering, or
+  plain "Owned" (neutral) when a lease is held and nothing else is known.
+  Participants counts known nodes, which includes historical ones.
+- Recent Activity is the merged newest-first feed (five rows).
+- System facts (computer, architecture, memory, macOS, version, storage) live in
+  Settings → General → System, not on Overview. Alert settings live in Settings.
 
 ## Guarding
 

@@ -119,6 +119,65 @@ final class MonitoringTests: XCTestCase {
         XCTAssertTrue(snapshot.isEmpty)
         await engine.stop()
     }
+
+    // MARK: Inconclusive checks and observations
+
+    func testInconclusiveChecksNeverCountTowardOrClearAFailure() {
+        var state = MonitorState()
+        XCTAssertNil(state.record(MonitorResult(ok: true, detail: "OK"), failureThreshold: 2))
+        XCTAssertNil(state.record(MonitorResult(ok: false, detail: "Down"), failureThreshold: 2))
+        XCTAssertNil(state.record(MonitorResult(ok: false, detail: "No network", inconclusive: true), failureThreshold: 2))
+        XCTAssertEqual(state.consecutiveFailures, 1, "An inconclusive check is neither a failure nor a success")
+        XCTAssertEqual(state.status, .up)
+        let change = state.record(MonitorResult(ok: false, detail: "Down"), failureThreshold: 2)
+        XCTAssertEqual(change?.status, .down)
+        XCTAssertNil(state.record(MonitorResult(ok: false, detail: "No network", inconclusive: true), failureThreshold: 2))
+        XCTAssertEqual(state.status, .down, "Losing local connectivity does not recover a confirmed outage")
+        XCTAssertEqual(state.uptime ?? 0, 1.0 / 3.0, accuracy: 0.0001, "Inconclusive checks are excluded from uptime")
+    }
+
+    func testFailuresWithoutANetworkOrAfterAWakeGapAreInconclusive() {
+        let failure = MonitorResult(ok: false, detail: "Timed out")
+        XCTAssertTrue(MonitorEngine.classify(failure, networkAvailable: false, late: false).inconclusive)
+        XCTAssertTrue(MonitorEngine.classify(failure, networkAvailable: true, late: true).inconclusive)
+        XCTAssertEqual(MonitorEngine.classify(failure, networkAvailable: true, late: false), failure)
+        let success = MonitorResult(ok: true, detail: "OK")
+        XCTAssertEqual(MonitorEngine.classify(success, networkAvailable: false, late: true), success,
+                       "A success is trusted regardless of local conditions")
+        XCTAssertFalse(MonitorEngine.isLate(lateness: .seconds(2)))
+        XCTAssertTrue(MonitorEngine.isLate(lateness: .seconds(40)))
+    }
+
+    func testEnginePublishesEveryCheckAsAnObservation() async throws {
+        let outcomes = OutcomeQueue([false, false, true])
+        let available = AvailabilityFlag(true)
+        let engine = MonitorEngine(prober: { _ in await outcomes.next() }, networkAvailable: { available.value })
+        let target = MonitorTarget(name: "Site", kind: .http, url: "https://example.com", failureThreshold: 2, enabled: false)
+        await engine.configure([target]) // disabled: no background loop races the explicit checks
+        await engine.checkNow(target.id)
+        available.value = false
+        await engine.checkNow(target.id)
+        available.value = true
+        await engine.checkNow(target.id)
+        let seen = await engine.drainObservations()
+        XCTAssertEqual(seen.map(\.result.inconclusive), [false, true, false])
+        XCTAssertEqual(seen.map(\.consecutiveFailures), [1, 1, 0])
+        XCTAssertEqual(seen.last?.status, .up)
+        XCTAssertEqual(seen.first?.failureThreshold, 2)
+        let drained = await engine.drainObservations()
+        XCTAssertTrue(drained.isEmpty)
+        await engine.stop()
+    }
+}
+
+private final class AvailabilityFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag: Bool
+    init(_ value: Bool) { flag = value }
+    var value: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return flag }
+        set { lock.lock(); flag = newValue; lock.unlock() }
+    }
 }
 
 private actor OutcomeQueue {

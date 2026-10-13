@@ -1,3 +1,4 @@
+import RuruAlerting
 import SwiftUI
 import WitnessKit
 
@@ -51,7 +52,16 @@ extension WitnessAppModel {
                     service: "Monitoring", node: target.address)
             }
         }
-        return Array((ownership + reports + monitoring).sorted { $0.time > $1.time }.prefix(limit))
+        // Alert rules that record Activity add what was raised and recovered. A monitor's own
+        // up/down transitions are already listed above as observations, so they aren't repeated.
+        let alerts: [ActivityFeedItem] = clusterID != nil ? [] : alertSnapshot.history
+            .filter { $0.showInActivity && $0.suppressedReason == nil && $0.kind != .suppressed && $0.trigger != .monitorUnavailable }
+            .prefix(limit).map { entry in
+                ActivityFeedItem(id: "alert-\(entry.id)-\(entry.time.timeIntervalSince1970)", time: entry.time,
+                                 symbol: entry.kindSymbol, tint: entry.tint, title: entry.title, service: "Alerts",
+                                 node: entry.ruleName)
+            }
+        return Array((ownership + reports + monitoring + alerts).sorted { $0.time > $1.time }.prefix(limit))
     }
 }
 
@@ -75,7 +85,7 @@ struct ActivityFeedList: View {
                     }
                     Spacer(minLength: 12)
                     Text(item.time, format: .relative(presentation: .numeric, unitsStyle: .abbreviated))
-                        .font(.caption).foregroundStyle(.tertiary).monospacedDigit()
+                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         .help(item.time.formatted(date: .abbreviated, time: .standard))
                 }
                 .padding(.vertical, 8).accessibilityElement(children: .combine)

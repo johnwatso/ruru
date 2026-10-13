@@ -27,6 +27,11 @@ struct WitnessGuardingPage: View {
                 .frame(maxWidth: 1120, alignment: .leading).frame(maxWidth: .infinity)
         }
         .sheet(isPresented: $adding) { WitnessAddServiceSheet().environmentObject(model) }
+        .onAppear {
+            guard let id = model.pendingGuardedServiceID else { return }
+            model.pendingGuardedServiceID = nil
+            if model.configuration.guardedServices.contains(where: { $0.id == id }) { selectedID = id }
+        }
     }
 }
 
@@ -477,6 +482,29 @@ extension WitnessAppModel {
         if state != .running { return state.rawValue }
         if isRecovering { return "Recovering" }
         return (lease(for: clusterID)?.remainingSeconds ?? 0) > 0 ? "Guarding" : "Waiting for owner"
+    }
+    /// Concise Overview status. Lease ownership, participant contact and
+    /// application-reported readiness are kept distinct: a held lease alone is
+    /// reported as "Owned", never as healthy.
+    func overviewStatus(for clusterID: String) -> (text: String, health: WitnessHealth) {
+        if state != .running { return (state == .stopped ? "Authority stopped" : state.rawValue, serviceHealth) }
+        if isRecovering { return ("Recovering", .warning) }
+        guard (lease(for: clusterID)?.remainingSeconds ?? 0) > 0, let owner = lease(for: clusterID)?.ownerNodeID else {
+            return ("Unowned", .inactive)
+        }
+        if let report = operationalStatus(for: owner, clusterID: clusterID), report.fresh {
+            switch report.state {
+            case .ready: return ("Ready", .healthy)
+            case .synchronizing: return ("Synchronising", .warning)
+            case .outdated: return ("Outdated", .warning)
+            case .degraded: return ("Degraded", .warning)
+            case .unknown: break
+            }
+        }
+        if let contact = participant(for: owner, clusterID: clusterID), !contact.fresh {
+            return ("Contact stale", .warning)
+        }
+        return ("Owned", .inactive)
     }
     func guardHealth(for clusterID: String) -> WitnessHealth {
         if state != .running || isRecovering { return serviceHealth }

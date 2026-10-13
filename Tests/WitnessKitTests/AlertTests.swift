@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import RuruAlerting
 @testable import WitnessKit
 
 final class AlertTests: XCTestCase {
@@ -234,5 +235,153 @@ final class AlertTests: XCTestCase {
             total += name.utf16.count + value.utf16.count
         }
         XCTAssertLessThanOrEqual(total, 6_000)
+    }
+}
+
+// MARK: Signals for the rule engine
+
+final class AlertSignalTests: XCTestCase {
+    private let start = Date(timeIntervalSince1970: 1_800_000_000)
+    private let service = GuardedService(id: "11111111-1111-4111-8111-111111111111", name: "SwiftBot", clusterID: "bot", kind: .swiftBot)
+
+    private var subjects: RuruAlertSubjects { RuruAlertSubjects(services: [service]) }
+
+    private func observe(_ owners: [String: String], running: Bool = true, recovering: Bool = false,
+                         tunnel: String? = nil) -> RuruAlertMonitor.Observation {
+        .init(serviceRunning: running, recovering: recovering, serviceFailure: nil, tunnelError: tunnel, snapshotError: nil,
+              owners: owners.mapValues { .init(nodeID: $0, name: $0) }, services: ["bot": "SwiftBot"], releases: [])
+    }
+
+    private func unreachable(_ signals: [AlertSignal]) -> AlertSignal? { signals.first { $0.trigger == .primaryUnreachable } }
+
+    func testOwnerLossIsAConditionThatStartsAtTheLossNotAtTheGracePeriod() {
+        var monitor = RuruAlertMonitor()
+        _ = monitor.observe(observe(["bot": "Home Mac"]), at: start)
+        _ = monitor.observe(observe([:]), at: start + 1)
+        let signal = unreachable(monitor.conditionSignals(subjects: subjects, at: start + 5))
+        guard case .condition(.active(let evidence)) = signal?.shape else { return XCTFail("Expected an active condition") }
+        XCTAssertEqual(evidence.since, start + 1, "The rule's own duration, not a fixed grace period, decides when to alert")
+        XCTAssertEqual(signal?.basis, .authoritativeLease)
+        XCTAssertEqual(signal?.subject.id, service.id, "Rules target the stable service ID")
+        XCTAssertEqual(signal?.subject.kind, "service")
+        // A takeover within the grace period clears the condition and is a failover.
+        let alerts = monitor.observe(observe(["bot": "Backup Mac"]), at: start + 8)
+        XCTAssertEqual(alerts.map(\.kind), [.failover])
+        guard case .condition(.clear) = unreachable(monitor.conditionSignals(subjects: subjects, at: start + 8))?.shape else {
+            return XCTFail("Expected the condition to clear")
+        }
+        let failover = RuruAlertSignals.failover(alerts[0], subjects: subjects, at: start + 8)
+        XCTAssertEqual(failover?.trigger, .failoverCompleted)
+        XCTAssertEqual(failover?.subject.id, service.id)
+        XCTAssertEqual(failover?.shape, .event)
+    }
+
+    func testOwnershipIsNeverJudgedWhileStoppedOrInRestartQuarantine() {
+        var monitor = RuruAlertMonitor()
+        _ = monitor.observe(observe(["bot": "Home Mac"]), at: start)
+        _ = monitor.observe(observe([:], recovering: true), at: start + 1)
+        guard case .condition(.inconclusive) = unreachable(monitor.conditionSignals(subjects: subjects, at: start + 2))?.shape else {
+            return XCTFail("Quarantine is not evidence about ownership")
+        }
+        _ = monitor.observe(observe([:], running: false), at: start + 3)
+        guard case .condition(.inconclusive) = unreachable(monitor.conditionSignals(subjects: subjects, at: start + 4))?.shape else {
+            return XCTFail("A stopped service is not evidence about ownership")
+        }
+    }
+
+    func testAuthorityProblemsAreContinuousReadingsThatClearWhenResolved() {
+        var monitor = RuruAlertMonitor()
+        _ = monitor.observe(observe([:], tunnel: "Connector exited"), at: start)
+        var signals = monitor.conditionSignals(subjects: subjects, at: start + 1)
+        let tunnel = signals.first { $0.trigger == .internetAccessDown }
+        guard case .condition(.active(let evidence)) = tunnel?.shape else { return XCTFail() }
+        XCTAssertEqual(evidence.since, start)
+        XCTAssertEqual(tunnel?.detail, "Connector exited")
+        XCTAssertEqual(tunnel?.basis, .ruruObserved)
+        guard case .condition(.clear) = signals.first(where: { $0.trigger == .serviceStopped })?.shape else { return XCTFail() }
+        _ = monitor.observe(observe([:]), at: start + 30)
+        signals = monitor.conditionSignals(subjects: subjects, at: start + 31)
+        guard case .condition(.clear) = signals.first(where: { $0.trigger == .internetAccessDown })?.shape else { return XCTFail() }
+    }
+
+    func testReadinessConditionsDistinguishReportedFromObservedAndIgnoreNodesThatNeverWereReady() {
+        var monitor = OperationalAlertMonitor()
+        func report(_ state: OperationalState, fresh: Bool = true) -> OperationalStatusObservation {
+            OperationalStatusObservation(clusterID: "bot", nodeID: "backup", nodeName: "Backup Mac", state: state,
+                                         components: [], ageSeconds: fresh ? 1 : 100, fresh: fresh)
+        }
+        let standby = ParticipantObservation(clusterID: "bot", nodeID: "backup", nodeName: "Backup Mac", role: .standby, ageSeconds: 1, fresh: true)
+        _ = monitor.observe([report(.synchronizing)], participants: [standby], owners: [], serviceNames: ["bot": "SwiftBot"], at: start)
+        XCTAssertTrue(monitor.conditionSignals(subjects: subjects, at: start).filter { $0.trigger == .nodeDegraded }.isEmpty,
+                      "A node that was never ready is not a degradation")
+        _ = monitor.observe([report(.ready)], participants: [standby], owners: ["bot"], serviceNames: ["bot": "SwiftBot"], at: start + 10)
+        _ = monitor.observe([report(.degraded)], participants: [standby], owners: ["bot"], serviceNames: ["bot": "SwiftBot"], at: start + 20)
+        var signals = monitor.conditionSignals(subjects: subjects, at: start + 21)
+        let degraded = signals.first { $0.trigger == .nodeDegraded }
+        XCTAssertEqual(degraded?.basis, .applicationReported)
+        XCTAssertEqual(degraded?.subject.groupID, service.id)
+        XCTAssertFalse(degraded?.detail.contains("SwiftBot reported") == true, "Generic signals carry application-neutral wording")
+        let impaired = signals.first { $0.trigger == .protectionImpaired }
+        guard case .condition(.active) = impaired?.shape else { return XCTFail("Primary owns, no ready standby") }
+        XCTAssertEqual(impaired?.basis, .ruruObserved)
+        // The report goes stale: Ruru's own observation, not the application's claim.
+        _ = monitor.observe([report(.ready, fresh: false)], participants: [standby], owners: ["bot"], serviceNames: ["bot": "SwiftBot"], at: start + 90)
+        signals = monitor.conditionSignals(subjects: subjects, at: start + 91)
+        XCTAssertEqual(signals.first { $0.trigger == .nodeDegraded }?.basis, .ruruObserved)
+        _ = monitor.observe([report(.ready)], participants: [standby], owners: ["bot"], serviceNames: ["bot": "SwiftBot"], at: start + 100)
+        signals = monitor.conditionSignals(subjects: subjects, at: start + 101)
+        guard case .condition(.clear) = signals.first(where: { $0.trigger == .nodeDegraded })?.shape else { return XCTFail() }
+        guard case .condition(.clear) = signals.first(where: { $0.trigger == .protectionImpaired })?.shape else { return XCTFail() }
+    }
+
+    func testOwnershipTransfersIncludePlannedHandoffsButNotRestartsOrQuarantine() {
+        var monitor = OwnershipTransferMonitor()
+        let home = RuruAlertMonitor.Owner(nodeID: "home", name: "Home Mac"), backup = RuruAlertMonitor.Owner(nodeID: "backup", name: "Backup Mac")
+        XCTAssertTrue(monitor.observe(owners: ["bot": home], serving: true, services: ["bot"]).isEmpty, "The first observation is a baseline")
+        XCTAssertTrue(monitor.observe(owners: [:], serving: true, services: ["bot"]).isEmpty, "Released")
+        XCTAssertTrue(monitor.observe(owners: ["bot": backup], serving: false, services: ["bot"]).isEmpty, "Quarantine says nothing")
+        let transfer = monitor.observe(owners: ["bot": backup], serving: true, services: ["bot"])
+        XCTAssertEqual(transfer, [.init(clusterID: "bot", from: "Home Mac", to: "Backup Mac")])
+        let signals = RuruAlertSignals.ownership(transfer, subjects: subjects, at: start)
+        XCTAssertEqual(signals.first?.trigger, .ownershipTransferred)
+        XCTAssertEqual(signals.first?.basis, .authoritativeLease)
+        XCTAssertTrue(monitor.observe(owners: ["bot": backup], serving: true, services: ["bot"]).isEmpty, "Once per transfer")
+    }
+
+    func testMonitorObservationsBecomeEvidenceNeverGuesses() {
+        let target = MonitorTarget(name: "Site", kind: .http, url: "https://example.com", failureThreshold: 3)
+        func observation(_ result: MonitorResult, status: MonitorStatus, failures: Int) -> MonitorObservation {
+            MonitorObservation(targetID: target.id, name: target.name, address: target.address, kind: .http, result: result,
+                               status: status, consecutiveFailures: failures, failureThreshold: 3, intervalSeconds: 60,
+                               timeoutSeconds: 10, change: nil)
+        }
+        let failing = RuruAlertSignals.monitor(observation(MonitorResult(ok: false, detail: "HTTP 503"), status: .up, failures: 1), at: start)
+        guard case .condition(.active(let evidence)) = failing.shape else { return XCTFail() }
+        XCTAssertFalse(evidence.confirmed, "One failure is below the monitor's own threshold")
+        XCTAssertEqual(evidence.failures, 1)
+        XCTAssertGreaterThanOrEqual(evidence.maxGap, 190)
+        let confirmed = RuruAlertSignals.monitor(observation(MonitorResult(ok: false, detail: "HTTP 503"), status: .down, failures: 3), at: start)
+        guard case .condition(.active(let sure)) = confirmed.shape else { return XCTFail() }
+        XCTAssertTrue(sure.confirmed)
+        let unknown = RuruAlertSignals.monitor(observation(MonitorResult(ok: false, detail: "No network", inconclusive: true), status: .down, failures: 3), at: start)
+        XCTAssertEqual(unknown.shape, .condition(.inconclusive))
+        let healthy = RuruAlertSignals.monitor(observation(MonitorResult(ok: true, latencyMilliseconds: 12, detail: "HTTP 200"), status: .up, failures: 0), at: start)
+        XCTAssertEqual(healthy.shape, .condition(.clear))
+        XCTAssertEqual(healthy.subject.id, target.id)
+        XCTAssertEqual(healthy.trigger, .monitorUnavailable)
+    }
+
+    func testRuleNotificationsCarrySeverityAndEvidenceIntoEveryDestination() throws {
+        let note = OutgoingNotification(entryID: 7, ruleID: UUID(), ruleName: "R", trigger: .primaryUnreachable, kind: .recovered,
+                                        title: "SwiftBot is back", body: "Backup Mac now owns SwiftBot.", severity: .critical,
+                                        basis: .authoritativeLease, subjectName: "SwiftBot", groupName: nil, choice: .followSettings)
+        let alert = RuruAlertTransport.alert(for: note)
+        XCTAssertEqual(alert.severity, .resolved, "A recovery is green whatever the rule's severity")
+        XCTAssertTrue(alert.isEnabled(in: RuruAlertPreferences()), "Rules, not fixed toggles, decide")
+        let json = try JSONSerialization.jsonObject(with: RuruDiscordWebhook.payload(for: alert, at: start)) as? [String: Any]
+        let embed = (json?["embeds"] as? [[String: Any]])?.first
+        XCTAssertEqual((embed?["footer"] as? [String: String])?["text"], "Ruru • Alerts • Authoritative lease record")
+        XCTAssertEqual(embed?["color"] as? Int, 0x30A46C)
+        XCTAssertNotNil(try? RuruNotify.payload(for: alert))
     }
 }

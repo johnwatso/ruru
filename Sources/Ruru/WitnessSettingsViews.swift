@@ -114,6 +114,18 @@ struct WitnessSettingsView: View {
             Text("Reports exclude credentials, endpoints, URLs and raw error text. They use Ruru’s existing bounded ownership history and current observations only.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
+        Section {
+            let host = RuruHostInfo.current
+            LabeledContent("Computer", value: host.computerName)
+            LabeledContent("Architecture", value: host.architecture)
+            LabeledContent("Memory", value: host.memory)
+            LabeledContent("macOS", value: host.operatingSystem)
+            LabeledContent("Ruru", value: "\(host.version) (\(host.build))")
+            LabeledContent("Storage", value: model.legacyStorageNeedsReplacement ? "SQLite · setup required" : "DuckDB")
+        } header: {
+            Text("System")
+        }
+        .textSelection(.enabled)
         if let error {
             Section { warning("Settings could not be saved: " + error) }
         }
@@ -580,42 +592,63 @@ private struct WitnessRestoreSheet: View {
 private struct WitnessAlertSettings: View {
     @EnvironmentObject private var model: WitnessAppModel
     @Binding var preferences: RuruAlertPreferences
+    @Environment(\.openWindow) private var openWindow
     @State private var settingUpDiscord = false
     @State private var settingUpNotify = false
     @State private var sending = false
     @State private var failure: String?
 
     var body: some View {
-        Section {
-            Toggle(isOn: $preferences.serviceDown) {
-                Text("A service goes down")
-                Text("Its owner stops renewing and no other server takes over within 15 seconds.")
+        if model.alertRulesActive {
+            Section {
+                LabeledContent {
+                    Button("Open Alerts") {
+                        model.selectedPage = .alerts
+                        openWindow(id: "witness")
+                        NSApplication.shared.activate()
+                    }
+                } label: {
+                    Text("Alert rules")
+                    Text("Choose what triggers a notification, when, and how often. Ruru adds sensible defaults as you set up monitoring and guarding.")
+                }
+            } header: {
+                Text("What Alerts You")
+            } footer: {
+                Text("Rules decide what is sent. The destinations below apply to every rule unless a rule chooses its own.")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
-            Toggle(isOn: $preferences.failover) {
-                Text("A service fails over")
-                Text("Ownership moves to another server without a planned release.")
+        } else {
+            Section {
+                Toggle(isOn: $preferences.serviceDown) {
+                    Text("A service goes down")
+                    Text("Its owner stops renewing and no other server takes over within 15 seconds.")
+                }
+                Toggle(isOn: $preferences.failover) {
+                    Text("A service fails over")
+                    Text("Ownership moves to another server without a planned release.")
+                }
+                Toggle(isOn: $preferences.authorityProblems) {
+                    Text("Ruru has a problem")
+                    Text("The listener stops, Internet Access drops, or a snapshot can’t be saved.")
+                }
+                Toggle(isOn: $preferences.participantStatus) {
+                    Text("A participant reports a power or session change")
+                    Text("UPS power loss, low battery, restored power, or a planned session end.")
+                }
+                Toggle(isOn: $preferences.operationalStatus) {
+                    Text("Operational readiness or failover protection changes")
+                    Text("SwiftBot-reported readiness and Ruru-observed standby protection changes.")
+                }
+                Toggle(isOn: $preferences.monitoring) {
+                    Text("A monitored target goes down")
+                    Text("A Monitoring target fails its checks, or comes back.")
+                }
+            } header: {
+                Text("Alert Me When")
+            } footer: {
+                Text("Ruru also tells you when each problem is resolved. Participant status alerts are opt-in. Planned releases, stopping the service, and the wait after a restart never alert.")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
-            Toggle(isOn: $preferences.authorityProblems) {
-                Text("Ruru has a problem")
-                Text("The listener stops, Internet Access drops, or a snapshot can’t be saved.")
-            }
-            Toggle(isOn: $preferences.participantStatus) {
-                Text("A participant reports a power or session change")
-                Text("UPS power loss, low battery, restored power, or a planned session end.")
-            }
-            Toggle(isOn: $preferences.operationalStatus) {
-                Text("Operational readiness or failover protection changes")
-                Text("SwiftBot-reported readiness and Ruru-observed standby protection changes.")
-            }
-            Toggle(isOn: $preferences.monitoring) {
-                Text("A monitored target goes down")
-                Text("A Monitoring target fails its checks, or comes back.")
-            }
-        } header: {
-            Text("Alert Me When")
-        } footer: {
-            Text("Ruru also tells you when each problem is resolved. Participant status alerts are opt-in. Planned releases, stopping the service, and the wait after a restart never alert.")
-                .font(.footnote).foregroundStyle(.secondary)
         }
         Section {
             Toggle("macOS notifications", isOn: $preferences.notifications)

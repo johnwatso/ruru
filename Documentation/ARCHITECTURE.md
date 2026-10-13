@@ -45,6 +45,29 @@ operator even while the current owner remains healthy; recovery produces a
 separate resolved alert. These observations and delivery failures never affect
 the lease route, term, output permission, or promotion decision.
 
+## Monitoring and alerts
+
+Ruru's capabilities are Guarding, Coordination, Monitoring, Alerts, Activity and
+Internet Access. Monitoring and Alerts work with no guarded service configured and
+are never a dependency of Guarding: they start independently of the lease
+authority, use their own storage, and are never awaited by lease code.
+
+Producers (the monitor engine, ownership, readiness, participant and authority
+detectors) publish application-neutral `AlertSignal`s: an *event* at a point in time, or the current
+*condition* (active, clear, or inconclusive) with the kind of evidence behind it — an authoritative lease
+record, Ruru's own observation, or an application's report. The `RuruAlerting`
+framework decides what deserves a notification: rules choose a trigger, target,
+threshold, destinations, recovery behaviour, cooldown, quiet hours and severity.
+Conditions open one incident that is deduplicated, persisted, recovered by fresh
+observations only, and announced on recovery only if it was announced when it opened.
+After a restart, open incidents return *unverified* and stay open until fresh
+evidence verifies or recovers them. Incidents closed without evidence (rule disabled or
+removed, target removed or paused) are archived, which is not recovery.
+Delivery uses a bounded per-destination dispatcher over the existing macOS, Discord and
+Notify! senders. Rules are `alert-rules.json`; incidents, history and monitoring
+rollups are `Alerts/alerts.duckdb`, a separate bounded DuckDB file that is set aside, never
+deleted, if damaged. A failure in any of this cannot touch leases, terms, fencing or quarantine.
+
 ## Coordinator direction
 
 Ruru's intended direction is a general service coordinator, with lease guarding

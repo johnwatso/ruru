@@ -77,10 +77,18 @@ public struct MonitorResult: Equatable, Sendable {
     public let latencyMilliseconds: Int?
     /// Short, secret-free explanation such as "HTTP 503" or "Connection refused".
     public let detail: String
+    /// The check could not establish whether the target is up, for example because
+    /// this Mac had no network or the check ran late after sleep. It is neither a
+    /// success nor a confirmed failure and never counts toward a failure threshold.
+    public let inconclusive: Bool
 
-    public init(time: Date = Date(), ok: Bool, latencyMilliseconds: Int? = nil, detail: String) {
-        self.time = time; self.ok = ok; self.latencyMilliseconds = latencyMilliseconds; self.detail = detail
+    public init(time: Date = Date(), ok: Bool, latencyMilliseconds: Int? = nil, detail: String, inconclusive: Bool = false) {
+        self.time = time; self.ok = ok && !inconclusive; self.latencyMilliseconds = latencyMilliseconds
+        self.detail = detail; self.inconclusive = inconclusive
     }
+
+    /// A confirmed failure: the check ran with working local conditions and failed.
+    public var isFailure: Bool { !ok && !inconclusive }
 }
 
 public enum MonitorStatus: String, Sendable { case unknown, up, down }
@@ -112,6 +120,9 @@ public struct MonitorState: Equatable, Sendable {
     public mutating func record(_ result: MonitorResult, failureThreshold: Int) -> MonitorChange? {
         history.append(result)
         if history.count > Self.historyLimit { history.removeFirst(history.count - Self.historyLimit) }
+        // An inconclusive check is kept for display but neither confirms nor
+        // clears a failure, so a local outage cannot look like a remote one.
+        if result.inconclusive { return nil }
         consecutiveFailures = result.ok ? 0 : consecutiveFailures + 1
 
         let next: MonitorStatus
@@ -128,10 +139,11 @@ public struct MonitorState: Equatable, Sendable {
         return wasKnown || next == .down ? change : nil
     }
 
-    /// Share of recorded checks that succeeded, 0...1, or nil with no history.
+    /// Share of conclusive recorded checks that succeeded, 0...1, or nil with none.
     public var uptime: Double? {
-        guard !history.isEmpty else { return nil }
-        return Double(history.filter(\.ok).count) / Double(history.count)
+        let conclusive = history.filter { !$0.inconclusive }
+        guard !conclusive.isEmpty else { return nil }
+        return Double(conclusive.filter(\.ok).count) / Double(conclusive.count)
     }
 }
 
@@ -213,7 +225,9 @@ public enum MonitorProbe {
             let ok = (200..<400).contains(http.statusCode)
             return MonitorResult(ok: ok, latencyMilliseconds: ok ? milliseconds : nil, detail: "HTTP \(http.statusCode)")
         } catch let error as URLError {
-            return MonitorResult(ok: false, detail: describe(error))
+            // Missing local connectivity says nothing about the target itself.
+            let local: Set<URLError.Code> = [.notConnectedToInternet, .dataNotAllowed, .internationalRoamingOff]
+            return MonitorResult(ok: false, detail: describe(error), inconclusive: local.contains(error.code))
         } catch {
             return MonitorResult(ok: false, detail: "Request failed")
         }
@@ -256,18 +270,80 @@ public struct MonitorTransition: Equatable, Sendable {
     public let change: MonitorChange
 }
 
+/// One finished check with the target's resulting confirmed status. Alerts and
+/// history consume these; they never influence leases or ownership.
+public struct MonitorObservation: Equatable, Sendable {
+    public let targetID: String
+    public let name: String
+    public let address: String
+    public let kind: MonitorTarget.Kind
+    public let result: MonitorResult
+    /// Confirmed status after this check; unchanged by inconclusive checks.
+    public let status: MonitorStatus
+    public let consecutiveFailures: Int
+    public let failureThreshold: Int
+    public let intervalSeconds: Int
+    public let timeoutSeconds: Int
+    public let change: MonitorChange?
+}
+
+/// Whether this Mac currently has a network path. Failures observed without one
+/// are inconclusive. Only a coarse yes/no is kept; nothing is probed.
+public final class NetworkPathGate: @unchecked Sendable {
+    public static let shared = NetworkPathGate()
+    private let monitor = NWPathMonitor()
+    private let lock = NSLock()
+    private var satisfied = true
+
+    public init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard let self else { return }
+            self.lock.lock(); self.satisfied = path.status == .satisfied; self.lock.unlock()
+        }
+        monitor.start(queue: DispatchQueue(label: "dev.ruruapp.ruru.network-path", qos: .utility))
+    }
+
+    public var isAvailable: Bool { lock.lock(); defer { lock.unlock() }; return satisfied }
+}
+
 /// Runs one bounded task per enabled target. At most `MonitorTarget.maxTargets`
 /// probes are ever in flight, each with its own timeout.
 public actor MonitorEngine {
     public typealias Prober = @Sendable (MonitorTarget) async -> MonitorResult
 
+    /// A check that starts this much later than scheduled suggests the Mac slept
+    /// or stalled; its failure is not trusted.
+    static let lateCheckSlack: Duration = .seconds(15)
+    static let observationLimit = 256
+
     private let prober: Prober
+    private let networkAvailable: @Sendable () -> Bool
+    private var observations: [MonitorObservation] = []
     private var targets: [String: MonitorTarget] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
     private var states: [String: MonitorState] = [:]
     private var pending: [MonitorTransition] = []
 
-    public init(prober: @escaping Prober = { await MonitorProbe.run($0) }) { self.prober = prober }
+    public init(prober: @escaping Prober = { await MonitorProbe.run($0) },
+                networkAvailable: @escaping @Sendable () -> Bool = { true }) {
+        self.prober = prober
+        self.networkAvailable = networkAvailable
+    }
+
+    /// Decides whether a failed check can be trusted. Pure, for testing.
+    static func classify(_ result: MonitorResult, networkAvailable: Bool, late: Bool) -> MonitorResult {
+        guard result.isFailure else { return result }
+        if !networkAvailable {
+            return MonitorResult(time: result.time, ok: false, detail: "This Mac has no network connection", inconclusive: true)
+        }
+        if late {
+            return MonitorResult(time: result.time, ok: false, detail: "Check ran late (Mac was asleep or busy)", inconclusive: true)
+        }
+        return result
+    }
+
+    /// `lateness` is how long after its scheduled start a check actually began.
+    static func isLate(lateness: Duration) -> Bool { lateness > lateCheckSlack }
 
     /// Applies the saved target list: new or changed targets restart, removed ones stop and lose history.
     public func configure(_ list: [MonitorTarget]) {
@@ -290,6 +366,13 @@ public actor MonitorEngine {
 
     public func snapshot() -> [String: MonitorState] { states }
 
+    /// Every finished check since the last call, oldest first. Bounded: a stalled
+    /// consumer loses the oldest observations rather than growing without limit.
+    public func drainObservations() -> [MonitorObservation] {
+        defer { observations = [] }
+        return observations
+    }
+
     /// Transitions since the last call, oldest first.
     public func drainTransitions() -> [MonitorTransition] {
         defer { pending = [] }
@@ -299,16 +382,23 @@ public actor MonitorEngine {
     /// Checks one target now, outside its schedule.
     public func checkNow(_ id: String) async {
         guard let target = targets[id] else { return }
-        let result = await prober(target)
+        let result = Self.classify(await prober(target), networkAvailable: networkAvailable(), late: false)
         record(result, for: target)
     }
 
     private func loop(_ target: MonitorTarget) async {
+        var scheduled = ContinuousClock.now
         while !Task.isCancelled {
-            let result = await prober(target)
+            let late = Self.isLate(lateness: ContinuousClock.now - scheduled)
+            let raw = await prober(target)
             if Task.isCancelled { return }
+            let result = Self.classify(raw, networkAvailable: networkAvailable(), late: late)
             record(result, for: target)
-            do { try await Task.sleep(for: .seconds(target.intervalSeconds)) } catch { return }
+            // Re-check soon after an inconclusive result instead of waiting a full
+            // interval, so a brief local interruption resolves quickly.
+            let wait = result.inconclusive ? min(target.intervalSeconds, 10) : target.intervalSeconds
+            scheduled = ContinuousClock.now + .seconds(wait)
+            do { try await Task.sleep(for: .seconds(wait)) } catch { return }
         }
     }
 
@@ -316,10 +406,17 @@ public actor MonitorEngine {
         // The target may have been edited or removed while the probe ran.
         guard targets[target.id] == target else { return }
         var state = states[target.id] ?? MonitorState()
-        if let change = state.record(result, failureThreshold: target.failureThreshold) {
+        let change = state.record(result, failureThreshold: target.failureThreshold)
+        if let change {
             pending.append(MonitorTransition(targetID: target.id, name: target.name, address: target.address, change: change))
             if pending.count > 64 { pending.removeFirst(pending.count - 64) }
         }
+        observations.append(MonitorObservation(
+            targetID: target.id, name: target.name, address: target.address, kind: target.kind, result: result,
+            status: state.status, consecutiveFailures: state.consecutiveFailures,
+            failureThreshold: target.failureThreshold, intervalSeconds: target.intervalSeconds,
+            timeoutSeconds: target.timeoutSeconds, change: change))
+        if observations.count > Self.observationLimit { observations.removeFirst(observations.count - Self.observationLimit) }
         states[target.id] = state
     }
 }

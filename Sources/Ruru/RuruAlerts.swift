@@ -1,4 +1,5 @@
 import Foundation
+import RuruAlerting
 import WitnessKit
 
 /// Which problems Ruru reports, and where. The Discord webhook URL itself is a
@@ -100,6 +101,8 @@ struct RuruAlert: Equatable {
         case pairingRequest, test
         case monitorDown, monitorRecovered
         case operationalDegraded, operationalRecovered, failoverProtectionImpaired, failoverProtectionRestored
+        /// Sent by an alert rule; its severity and footer come from the rule.
+        case rule
     }
     enum Severity: Equatable { case critical, warning, resolved, info }
 
@@ -117,14 +120,18 @@ struct RuruAlert: Equatable {
     let title: String
     let detail: String
     var context: Context? = nil
+    /// Set for rule notifications, which carry their own severity and evidence label.
+    var severityOverride: Severity? = nil
+    var basisLabel: String? = nil
 
     var severity: Severity {
-        switch kind {
+        if let severityOverride { return severityOverride }
+        return switch kind {
         case .serviceDown, .authorityProblem, .participantLowBattery, .failoverProtectionImpaired, .monitorDown: .critical
         case .failover, .participantOnBattery, .participantSessionEnding, .operationalDegraded: .warning
         case .participantPowerRestored, .operationalRecovered, .failoverProtectionRestored: .resolved
         case .serviceRecovered, .authorityRecovered, .monitorRecovered: .resolved
-        case .pairingRequest, .test: .info
+        case .pairingRequest, .test, .rule: .info
         }
     }
 
@@ -138,7 +145,7 @@ struct RuruAlert: Equatable {
         case .operationalDegraded, .operationalRecovered, .failoverProtectionImpaired, .failoverProtectionRestored:
             preferences.operationalStatus
         case .monitorDown, .monitorRecovered: preferences.monitoring
-        case .pairingRequest, .test: true
+        case .pairingRequest, .test, .rule: true
         }
     }
 }
@@ -229,6 +236,17 @@ struct OperationalAlertMonitor {
             }
         }
 
+        /// Application-neutral wording for rule notifications.
+        var neutralDetail: String {
+            switch self {
+            case .ready: "The application reported that readiness checks are complete."
+            case .synchronizing: "The application reported that synchronisation is in progress."
+            case .outdated: "The application reported that required data is out of date."
+            case .degraded: "The application reported a degraded operational condition."
+            case .unavailable: "Ruru observed that the operational report is stale or unavailable."
+            }
+        }
+
         var detail: String {
             switch self {
             case .ready: "SwiftBot reported that readiness checks are complete."
@@ -245,10 +263,11 @@ struct OperationalAlertMonitor {
         var nodeName: String
         var standby = false
         var wasReady = false
+        var changedAt = Date.distantPast
     }
 
     private var states: [String: State] = [:]
-    private var protectionImpaired: Set<String> = []
+    private var protectionImpaired: [String: Date] = [:]
 
     mutating func observe(_ observations: [OperationalStatusObservation], participants: [ParticipantObservation],
                           owners: Set<String>, serviceNames: [String: String], at now: Date)
@@ -266,7 +285,8 @@ struct OperationalAlertMonitor {
             let standby = roles[key] == .standby
             let prior = states[key]
             states[key] = State(condition: condition, nodeName: nodeName, standby: standby || prior?.standby == true,
-                                wasReady: condition == .ready || prior?.wasReady == true)
+                                wasReady: condition == .ready || prior?.wasReady == true,
+                                changedAt: prior?.condition == condition ? prior!.changedAt : now)
             guard prior?.condition != condition else { continue }
             events.append(.init(clusterID: observation.clusterID, nodeID: observation.nodeID, nodeName: nodeName,
                                 date: now, kind: condition.activityKind, detail: condition.detail))
@@ -291,7 +311,8 @@ struct OperationalAlertMonitor {
             let pieces = key.split(separator: "|", maxSplits: 1).map(String.init)
             guard pieces.count == 2 else { continue }
             let clusterID = pieces[0], nodeID = pieces[1]
-            states[key] = State(condition: .unavailable, nodeName: prior.nodeName, standby: prior.standby, wasReady: prior.wasReady)
+            states[key] = State(condition: .unavailable, nodeName: prior.nodeName, standby: prior.standby,
+                                wasReady: prior.wasReady, changedAt: now)
             events.append(.init(clusterID: clusterID, nodeID: nodeID, nodeName: prior.nodeName, date: now,
                                 kind: .operationalUnavailable, detail: Condition.unavailable.detail))
             if prior.condition == .ready {
@@ -306,7 +327,8 @@ struct OperationalAlertMonitor {
             let standbys = states.filter { key, state in key.hasPrefix(clusterID + "|") && state.standby && state.wasReady }
             let protected = !standbys.isEmpty && standbys.contains { $0.value.condition == .ready }
             let impaired = owners.contains(clusterID) && !standbys.isEmpty && !protected
-            if impaired, protectionImpaired.insert(clusterID).inserted {
+            if impaired, protectionImpaired[clusterID] == nil {
+                protectionImpaired[clusterID] = now
                 events.append(.init(clusterID: clusterID, nodeID: "ruru", nodeName: "Ruru", date: now,
                                     kind: .failoverProtectionImpaired,
                                     detail: "Ruru observed no previously-ready standby that is operationally ready."))
@@ -314,7 +336,7 @@ struct OperationalAlertMonitor {
                                     title: "\(service) failover protection is impaired",
                                     detail: "The Primary still owns the service, but no previously-ready standby is operationally ready.",
                                     context: .init(service: service)))
-            } else if !impaired, protectionImpaired.remove(clusterID) != nil {
+            } else if !impaired, protectionImpaired.removeValue(forKey: clusterID) != nil {
                 events.append(.init(clusterID: clusterID, nodeID: "ruru", nodeName: "Ruru", date: now,
                                     kind: .failoverProtectionRestored,
                                     detail: "Ruru observed an operationally ready standby."))
@@ -325,8 +347,55 @@ struct OperationalAlertMonitor {
             }
         }
         states = states.filter { key, _ in serviceNames[key.split(separator: "|", maxSplits: 1).first.map(String.init) ?? ""] != nil }
-        protectionImpaired.formIntersection(Set(serviceNames.keys))
+        protectionImpaired = protectionImpaired.filter { serviceNames[$0.key] != nil }
         return (alerts, events)
+    }
+
+    /// Current readiness of every node that has been ready, and failover protection
+    /// per service, as readings. A node that never became ready is not reported:
+    /// "was ready and is not" is the condition worth a notification. What the
+    /// application reported and what Ruru itself observed (a report gone stale)
+    /// carry different evidence labels.
+    func conditionSignals(subjects: RuruAlertSubjects, at now: Date) -> [AlertSignal] {
+        var signals: [AlertSignal] = []
+        for (key, state) in states.sorted(by: { $0.key < $1.key }) {
+            let pieces = key.split(separator: "|", maxSplits: 1).map(String.init)
+            guard pieces.count == 2, let subject = subjects.node(clusterID: pieces[0], nodeID: pieces[1], name: state.nodeName) else { continue }
+            let service = subject.groupName ?? pieces[0]
+            if state.condition == .ready {
+                signals.append(AlertSignal(
+                    trigger: .nodeDegraded, subject: subject, shape: .condition(.clear),
+                    title: "\(state.nodeName) is operationally ready",
+                    detail: "\(service) · The application reported that readiness checks are complete.",
+                    basis: .applicationReported, observedAt: now))
+            } else if state.wasReady {
+                let observed = state.condition == .unavailable
+                signals.append(AlertSignal(
+                    trigger: .nodeDegraded, subject: subject,
+                    shape: .condition(.active(.init(since: state.changedAt == .distantPast ? nil : state.changedAt,
+                                                    confirmed: true, maxGap: 30))),
+                    title: "\(state.nodeName) needs attention",
+                    detail: "\(service) · " + (observed ? "Ruru observed that the operational report is stale or unavailable."
+                                                       : state.condition.neutralDetail),
+                    basis: observed ? .ruruObserved : .applicationReported, observedAt: now))
+            }
+        }
+        for (clusterID, subject) in subjects.services.sorted(by: { $0.key < $1.key }) {
+            if let since = protectionImpaired[clusterID] {
+                signals.append(AlertSignal(
+                    trigger: .protectionImpaired, subject: subject,
+                    shape: .condition(.active(.init(since: since, confirmed: true, maxGap: 30))),
+                    title: "\(subject.name) failover protection is impaired",
+                    detail: "The Primary still owns the service, but no previously-ready standby is operationally ready.",
+                    basis: .ruruObserved, observedAt: now))
+            } else {
+                signals.append(AlertSignal(
+                    trigger: .protectionImpaired, subject: subject, shape: .condition(.clear),
+                    title: "\(subject.name) failover protection is restored",
+                    detail: "Ruru observed an operationally ready standby again.", basis: .ruruObserved, observedAt: now))
+            }
+        }
+        return signals
     }
 }
 
@@ -337,6 +406,11 @@ struct ParticipantAlertMonitor {
         var externalPower: Bool?
         var batteryPercent: Int?
         var sessionEnding: Bool?
+        var onBattery = false
+        var onBatterySince = Date.distantPast
+        var nodeName = ""
+        var clusterID = ""
+        var nodeID = ""
     }
     private var states: [String: State] = [:]
 
@@ -374,14 +448,166 @@ struct ParticipantAlertMonitor {
                     append(.sessionEnding, .participantSessionEnding, "The participant reports a planned session end.")
                 }
             }
+            let onBattery = observation.powerSource == .ups && observation.externalPower == false
             states[key] = State(externalPower: observation.externalPower,
                                 batteryPercent: observation.batteryPercent,
-                                sessionEnding: observation.sessionEnding)
+                                sessionEnding: observation.sessionEnding,
+                                onBattery: onBattery,
+                                onBatterySince: onBattery ? (prior?.onBattery == true ? prior!.onBatterySince : now) : .distantPast,
+                                nodeName: node, clusterID: observation.clusterID, nodeID: observation.nodeID)
         }
         // Participants are bounded per service by ParticipantPresence; prune
         // departed keys so this edge cache remains bounded as configurations change.
         states = states.filter { seen.contains($0.key) }
         return (alerts, events)
+    }
+
+    /// Whether each fresh participant is currently running on battery power. Only
+    /// participants reporting now are read; an absent one produces no reading.
+    func conditionSignals(subjects: RuruAlertSubjects, at now: Date) -> [AlertSignal] {
+        states.sorted(by: { $0.key < $1.key }).compactMap { _, state in
+            guard let subject = subjects.node(clusterID: state.clusterID, nodeID: state.nodeID, name: state.nodeName) else { return nil }
+            let service = subject.groupName ?? state.clusterID
+            if state.onBattery {
+                return AlertSignal(
+                    trigger: .participantOnBattery, subject: subject,
+                    shape: .condition(.active(.init(since: state.onBatterySince, confirmed: true, maxGap: 90))),
+                    title: "\(state.nodeName): UPS on battery", detail: "\(service) · The UPS is supplying power.",
+                    basis: .applicationReported, observedAt: now)
+            }
+            guard state.externalPower != nil else { return nil }
+            return AlertSignal(
+                trigger: .participantOnBattery, subject: subject, shape: .condition(.clear),
+                title: "\(state.nodeName): Power restored", detail: "\(service) · External power is connected again.",
+                basis: .applicationReported, observedAt: now)
+        }
+    }
+}
+
+/// Spots every change of owner, planned or not, from the leases Ruru itself holds.
+/// Failovers and outages are judged elsewhere; this only reports that ownership moved.
+struct OwnershipTransferMonitor {
+    struct Transfer: Equatable { let clusterID: String; let from: String; let to: String }
+    private var previous: [String: RuruAlertMonitor.Owner] = [:]
+
+    mutating func observe(owners: [String: RuruAlertMonitor.Owner], serving: Bool, services: Set<String>) -> [Transfer] {
+        // While not serving, or in restart quarantine, leases say nothing about owners.
+        guard serving else { return [] }
+        var transfers: [Transfer] = []
+        for (cluster, owner) in owners.sorted(by: { $0.key < $1.key }) where services.contains(cluster) {
+            if let before = previous[cluster], before.nodeID != owner.nodeID {
+                transfers.append(Transfer(clusterID: cluster, from: before.name, to: owner.name))
+            }
+            previous[cluster] = owner
+        }
+        previous = previous.filter { services.contains($0.key) }
+        return transfers
+    }
+}
+
+/// Stable identities for the things alerts are about. Ruru's guarded services are
+/// referred to by their metadata ID, never their protocol cluster ID or name.
+struct RuruAlertSubjects {
+    static let authority = SubjectRef(source: .authority, kind: "ruru", id: "ruru", name: "Ruru")
+
+    /// clusterID → the guarded service's subject.
+    var services: [String: SubjectRef] = [:]
+
+    init(services: [GuardedService] = []) {
+        for service in services {
+            self.services[service.clusterID] = SubjectRef(source: .guarding, kind: "service", id: service.id, name: service.name)
+        }
+    }
+
+    func node(clusterID: String, nodeID: String, name: String) -> SubjectRef? {
+        guard let service = services[clusterID] else { return nil }
+        return SubjectRef(source: .operationalStatus, kind: "node", id: "\(service.id)|\(nodeID)", name: name,
+                          groupID: service.id, groupName: service.name)
+    }
+
+    func monitor(_ target: MonitorTarget) -> SubjectRef {
+        SubjectRef(source: .monitoring, kind: "monitor", id: target.id, name: target.name)
+    }
+
+    func monitor(id: String, name: String) -> SubjectRef {
+        SubjectRef(source: .monitoring, kind: "monitor", id: id, name: name)
+    }
+}
+
+/// Translates what Ruru's producers already detect into application-neutral signals.
+enum RuruAlertSignals {
+    /// A failover detected by the ownership monitor.
+    static func failover(_ alert: RuruAlert, subjects: RuruAlertSubjects, at now: Date) -> AlertSignal? {
+        guard alert.kind == .failover, alert.key.hasPrefix("failover|"),
+              let subject = subjects.services[String(alert.key.dropFirst("failover|".count))] else { return nil }
+        return AlertSignal(trigger: .failoverCompleted, subject: subject, shape: .event, title: alert.title,
+                           detail: alert.detail, basis: .authoritativeLease, observedAt: now)
+    }
+
+    static func ownership(_ transfers: [OwnershipTransferMonitor.Transfer], subjects: RuruAlertSubjects, at now: Date) -> [AlertSignal] {
+        transfers.compactMap { transfer in
+            guard let subject = subjects.services[transfer.clusterID] else { return nil }
+            return AlertSignal(trigger: .ownershipTransferred, subject: subject, shape: .event,
+                               title: "\(subject.name) is now owned by \(transfer.to)", detail: "Previously \(transfer.from).",
+                               basis: .authoritativeLease, observedAt: now)
+        }
+    }
+
+    /// Low battery and planned session end are point-in-time reports.
+    static func participantEvents(_ transitions: [ParticipantActivityTransition], subjects: RuruAlertSubjects,
+                                  at now: Date) -> [AlertSignal] {
+        transitions.compactMap { transition in
+            let trigger: TriggerID
+            switch transition.kind {
+            case .lowBattery: trigger = .participantLowBattery
+            case .sessionEnding: trigger = .participantSessionEnding
+            default: return nil
+            }
+            guard let subject = subjects.node(clusterID: transition.clusterID, nodeID: transition.nodeID, name: transition.nodeName) else { return nil }
+            return AlertSignal(trigger: trigger, subject: subject, shape: .event,
+                               title: "\(transition.nodeName): \(transition.kind.title)",
+                               detail: "\(subject.groupName ?? "") · \(transition.detail)", basis: .applicationReported, observedAt: now)
+        }
+    }
+
+    /// A monitor's response time, for rules with a limit. A failed or inconclusive check has no
+    /// response time, so it is inconclusive here; the unavailable rule covers outages.
+    static func monitorLatency(_ observation: MonitorObservation, at now: Date) -> AlertSignal {
+        let subject = RuruAlertSubjects().monitor(id: observation.targetID, name: observation.name)
+        let result = observation.result
+        let maxGap = max(120, Double(observation.intervalSeconds * 3 + observation.timeoutSeconds))
+        guard result.ok, let latency = result.latencyMilliseconds else {
+            return AlertSignal(trigger: .monitorSlow, subject: subject, shape: .condition(.inconclusive), title: "", detail: "",
+                               basis: .ruruObserved, observedAt: now)
+        }
+        return AlertSignal(trigger: .monitorSlow, subject: subject, shape: .condition(.measurement(Double(latency), maxGap: maxGap)),
+                           title: "\(observation.name) is responding slowly",
+                           detail: "\(observation.address) responded in \(latency) ms", basis: .ruruObserved, observedAt: now,
+                           recoveryTitle: "\(observation.name) is responding normally",
+                           recoveryDetail: "\(observation.address) responded in \(latency) ms")
+    }
+
+    /// One check of a monitor. Failures and recoveries are readings of a condition:
+    /// a failing check is evidence, a passing check clears it, and a check that
+    /// could not tell (no network, ran late) neither confirms nor clears anything.
+    static func monitor(_ observation: MonitorObservation, at now: Date) -> AlertSignal {
+        let subject = RuruAlertSubjects().monitor(id: observation.targetID, name: observation.name)
+        let result = observation.result
+        let shape: AlertSignal.Shape
+        var title = "\(observation.name) is unreachable", detail = "\(observation.address): \(result.detail)"
+        if result.inconclusive {
+            shape = .condition(.inconclusive)
+        } else if result.ok {
+            shape = .condition(.clear)
+            title = "\(observation.name) is reachable again"; detail = observation.address
+        } else {
+            // Three checks plus a timeout without a result means this monitor stopped reporting.
+            let maxGap = max(120, Double(observation.intervalSeconds * 3 + observation.timeoutSeconds))
+            shape = .condition(.active(.init(failures: observation.consecutiveFailures,
+                                             confirmed: observation.status == .down, maxGap: maxGap)))
+        }
+        return AlertSignal(trigger: .monitorUnavailable, subject: subject, shape: shape, title: title, detail: detail,
+                           basis: .ruruObserved, observedAt: now)
     }
 }
 
@@ -417,16 +643,20 @@ struct RuruAlertMonitor {
 
     private var owners: [String: Owner] = [:]
     private var lost: [String: (owner: Owner, since: Date)] = [:]
-    private var down: Set<String> = []
+    private var down: [String: (owner: Owner, since: Date)] = [:]
     private var problems: [String: String] = [:]
+    private var problemSince: [String: Date] = [:]
     private var seenReleases: Set<String>?
+    /// Whether the last observation could judge ownership: serving, not in quarantine.
+    private(set) var serving = false
 
     mutating func observe(_ observation: Observation, at now: Date) -> [RuruAlert] {
-        var alerts = authorityAlerts(observation)
+        var alerts = authorityAlerts(observation, at: now)
+        serving = observation.serviceRunning && !observation.recovering
         // Ownership is only meaningful while serving and out of restart
         // quarantine; a stop or restart must not look like services failing.
         guard observation.serviceRunning, !observation.recovering else {
-            owners = [:]; lost = [:]; down = []
+            owners = [:]; lost = [:]; down = [:]
             seenReleases = observation.releases
             return alerts
         }
@@ -452,15 +682,15 @@ struct RuruAlertMonitor {
                                             context: .init(service: name, previousOwner: previous.name, currentOwner: current.name,
                                                            webUIURL: ParticipantWebUI.normalizedURL(current.webUIURL))))
                 }
-                if down.remove(cluster) != nil {
+                if down.removeValue(forKey: cluster) != nil {
                     alerts.append(RuruAlert(kind: .serviceRecovered, key: "down|" + cluster, title: "\(name) is back",
                                             detail: "\(current.name) now owns \(name).",
                                             context: .init(service: name, currentOwner: current.name,
                                                            webUIURL: ParticipantWebUI.normalizedURL(current.webUIURL))))
                 }
-            } else if let loss = lost[cluster], now.timeIntervalSince(loss.since) >= takeoverGrace, !down.contains(cluster) {
+            } else if let loss = lost[cluster], now.timeIntervalSince(loss.since) >= takeoverGrace, down[cluster] == nil {
                 lost[cluster] = nil
-                down.insert(cluster)
+                down[cluster] = loss
                 alerts.append(RuruAlert(kind: .serviceDown, key: "down|" + cluster, title: "\(name) is down",
                                         detail: "\(loss.owner.name) stopped renewing and no other server has taken over.",
                                         context: .init(service: name, previousOwner: loss.owner.name)))
@@ -468,11 +698,58 @@ struct RuruAlertMonitor {
         }
         owners = observation.owners.filter { observation.services[$0.key] != nil }
         lost = lost.filter { observation.services[$0.key] != nil }
-        down = down.filter { observation.services[$0] != nil }
+        down = down.filter { observation.services[$0.key] != nil }
         return alerts
     }
 
-    private mutating func authorityAlerts(_ observation: Observation) -> [RuruAlert] {
+    /// The current state of Ruru's own conditions and of each service's ownership, as
+    /// fresh readings for the alert engine. Authority problems are read every poll;
+    /// ownership is only judged while serving, since a stop or restart quarantine
+    /// says nothing about whether a service has lost its owner.
+    func conditionSignals(subjects: RuruAlertSubjects, at now: Date) -> [AlertSignal] {
+        var signals: [AlertSignal] = []
+        let authority: [(key: String, trigger: TriggerID, problem: String, resolved: String)] = [
+            ("listener", .serviceStopped, "Ruru's service stopped", "Ruru's service is running again"),
+            ("snapshot", .snapshotFailed, "Ruru could not save a snapshot", "Ruru saved a snapshot"),
+            ("tunnel", .internetAccessDown, "Ruru's Internet Access is down", "Ruru's Internet Access is back")
+        ]
+        for check in authority {
+            if let detail = problems[check.key] {
+                signals.append(AlertSignal(
+                    trigger: check.trigger, subject: RuruAlertSubjects.authority,
+                    shape: .condition(.active(.init(since: problemSince[check.key], confirmed: true, maxGap: 30))),
+                    title: check.problem, detail: detail, basis: .ruruObserved, observedAt: now))
+            } else {
+                signals.append(AlertSignal(
+                    trigger: check.trigger, subject: RuruAlertSubjects.authority, shape: .condition(.clear),
+                    title: check.resolved, detail: "Resolved.", basis: .ruruObserved, observedAt: now))
+            }
+        }
+        for (clusterID, subject) in subjects.services.sorted(by: { $0.key < $1.key }) {
+            let shape: AlertSignal.Shape
+            var title = "\(subject.name) is back", detail = "Ownership is normal."
+            if !serving {
+                shape = .condition(.inconclusive)
+            } else if let loss = lost[clusterID] ?? down[clusterID] {
+                signals.append(AlertSignal(
+                    trigger: .primaryUnreachable, subject: subject,
+                    shape: .condition(.active(.init(since: loss.since, confirmed: true, maxGap: 30))),
+                    title: "\(subject.name) is down",
+                    detail: "\(loss.owner.name) stopped renewing and no other server has taken over.",
+                    basis: .authoritativeLease, observedAt: now))
+                continue
+            } else {
+                if let owner = owners[clusterID] { detail = "\(owner.name) now owns \(subject.name)." }
+                shape = .condition(.clear)
+            }
+            title = "\(subject.name) is back"
+            signals.append(AlertSignal(trigger: .primaryUnreachable, subject: subject, shape: shape,
+                                       title: title, detail: detail, basis: .authoritativeLease, observedAt: now))
+        }
+        return signals
+    }
+
+    private mutating func authorityAlerts(_ observation: Observation, at now: Date) -> [RuruAlert] {
         let checks: [(key: String, problem: String, resolved: String, detail: String?)] = [
             ("listener", "Ruru's service stopped", "Ruru's service is running again", observation.serviceFailure),
             ("snapshot", "Ruru could not save a snapshot", "Ruru saved a snapshot", observation.snapshotError),
@@ -481,9 +758,11 @@ struct RuruAlertMonitor {
         var alerts: [RuruAlert] = []
         for check in checks {
             if let detail = check.detail, problems[check.key] != detail {
+                if problems[check.key] == nil { problemSince[check.key] = now }
                 problems[check.key] = detail
                 alerts.append(RuruAlert(kind: .authorityProblem, key: "authority|" + check.key, title: check.problem, detail: detail))
             } else if check.detail == nil, problems.removeValue(forKey: check.key) != nil {
+                problemSince[check.key] = nil
                 alerts.append(RuruAlert(kind: .authorityRecovered, key: "authority|" + check.key,
                                         title: check.resolved, detail: "Resolved."))
             }
@@ -535,6 +814,8 @@ enum RuruDiscordWebhook {
         case .monitorRecovered: ("✅", "Ruru • Monitoring")
         case .pairingRequest: ("🔔", "Ruru • Pairing")
         case .test: ("✅", "Ruru • Test notification")
+        case .rule:
+            (Self.icon(for: alert.severity), "Ruru • Alerts" + (alert.basisLabel.map { " • \($0)" } ?? ""))
         }
         let description: String
         if alert.context != nil {
@@ -580,6 +861,10 @@ enum RuruDiscordWebhook {
             "embeds": [embed]
         ]
         return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    }
+
+    private static func icon(for severity: RuruAlert.Severity) -> String {
+        switch severity { case .critical: "⛔"; case .warning: "⚠️"; case .resolved: "✅"; case .info: "ℹ️" }
     }
 
     /// Keep display names and error details from becoming Discord formatting.

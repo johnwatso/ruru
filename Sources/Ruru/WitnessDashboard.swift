@@ -2,7 +2,7 @@ import SwiftUI
 import WitnessKit
 
 enum WitnessPage: String, CaseIterable, Identifiable {
-    case overview = "Overview", guarding = "Guarding", coordination = "Coordination", monitoring = "Monitoring", internet = "Internet Access", activity = "Activity"
+    case overview = "Overview", guarding = "Guarding", coordination = "Coordination", monitoring = "Monitoring", alerts = "Alerts", internet = "Internet Access", activity = "Activity"
     var id: Self { self }
     var symbol: String {
         switch self {
@@ -10,6 +10,7 @@ enum WitnessPage: String, CaseIterable, Identifiable {
         case .guarding: "checkmark.shield"
         case .coordination: "square.stack.3d.up"
         case .monitoring: "waveform.path.ecg"
+        case .alerts: "bell.badge"
         case .internet: "globe"
         case .activity: "clock.arrow.circlepath"
         }
@@ -58,6 +59,8 @@ struct WitnessDashboard: View {
             WitnessCoordinationPage()
         case .monitoring:
             WitnessMonitoringPage()
+        case .alerts:
+            WitnessAlertsPage()
         case .internet:
             WitnessInternetPage(onSetup: { showInternet = true }, onConnect: { model.selectedPage = .guarding })
         case .activity:
@@ -475,19 +478,6 @@ extension WitnessAppModel {
         if total == 0 { return .inactive }
         let freshCount = coordinationLocations.filter(\.fresh).count
         return freshCount == total ? .healthy : .warning
-    }
-
-    var alertsStatusText: String {
-        if let alertDeliveryError { return "Delivery failed" }
-        var destinations: [String] = []
-        if configuration.alerts.notifications { destinations.append("macOS") }
-        if configuration.alerts.discord, discordConfigured { destinations.append("Discord") }
-        return destinations.isEmpty ? "Not configured" : destinations.joined(separator: " + ")
-    }
-    var alertsHealth: WitnessHealth {
-        if alertDeliveryError != nil { return .error }
-        if !configuration.alerts.notifications && !(configuration.alerts.discord && discordConfigured) { return .inactive }
-        return .healthy
     }
 }
 

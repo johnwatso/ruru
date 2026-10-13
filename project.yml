@@ -41,6 +41,17 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.ruruapp.ruru.kit
         DEFINES_MODULE: YES
         SKIP_INSTALL: YES
+  RuruAlerting:
+    type: framework
+    platform: macOS
+    sources: [Sources/RuruAlerting]
+    dependencies:
+      - package: DuckDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ruruapp.ruru.alerting
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
   Ruru:
     type: application
     platform: macOS
@@ -55,6 +66,7 @@ targets:
         buildPhase: resources
     dependencies:
       - target: WitnessKit
+      - target: RuruAlerting
       - package: Sparkle
         product: Sparkle
     info:
@@ -91,10 +103,13 @@ targets:
       - Sources/Ruru/RuruUpdateConfiguration.swift
       - Sources/Ruru/RuruBackup.swift
       - Sources/Ruru/RuruAlerts.swift
+      - Sources/Ruru/RuruAlertTransport.swift
+      - Sources/Ruru/RuruAlertDelivery.swift
       - Sources/Ruru/RuruServiceIcons.swift
       - Sources/Ruru/RuruDiagnostics.swift
     dependencies:
       - target: WitnessKit
+      - target: RuruAlerting
       # Conformance tests run the public client against the real server.
       - package: RuruClient
     settings:

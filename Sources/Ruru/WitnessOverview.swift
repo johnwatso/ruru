@@ -1,43 +1,26 @@
 import AppKit
 import SwiftUI
+import WitnessKit
 
-/// Ruru's local adaptation of SwiftBot's current console Overview.
+/// Ruru's local adaptation of SwiftBot's console Overview: Ruru's own state,
+/// four capability summaries, guarded services and recent activity.
 struct WitnessOverview: View {
     @EnvironmentObject private var model: WitnessAppModel
     @Environment(\.openSettings) private var openSettings
     let onNavigate: (WitnessPage) -> Void
     let onStop: () -> Void
     @State private var showingStorageSetup = false
-    @State private var availableServiceWidth: CGFloat = 0
-    private let host = WitnessOverviewHost.current
-
-    private var headline: String {
-        if model.isRecovering { return "Waiting for earlier ownership to expire." }
-        switch model.state {
-        case .running: return ""
-        case .starting: return "Starting the ownership service."
-        case .stopped: return "Ruru is stopped on this Mac."
-        case .failed: return "Ruru needs attention before it can run."
-        }
-    }
+    @State private var availableCardWidth: CGFloat = 0
+    @State private var availableTableWidth: CGFloat = 0
+    private let host = RuruHostInfo.current
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: 28) {
                 header.padding(.bottom, 4)
                 summary
-                services
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: 28) {
-                        quickActions.frame(minWidth: 280, maxWidth: .infinity)
-                        systemDetails.frame(minWidth: 340, maxWidth: .infinity)
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                    VStack(alignment: .leading, spacing: 32) {
-                        quickActions
-                        systemDetails
-                    }
-                }
+                summaryCards
+                guardedServices
                 recentActivity
             }
             .padding(.horizontal, 36).padding(.top, 32).padding(.bottom, 40)
@@ -61,7 +44,7 @@ struct WitnessOverview: View {
     }
 
     private var header: some View {
-        ConsolePageHeader(title: "Overview", subtitle: headline) {
+        ConsolePageHeader(title: "Overview", subtitle: "Ruru’s status, guarded services and recent activity at a glance.") {
             HStack(spacing: 12) {
                 Menu {
                     if model.state == .running {
@@ -89,155 +72,266 @@ struct WitnessOverview: View {
         }
     }
 
-    private var summary: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 26) {
-                    appIcon
-                    summaryIdentity.frame(minWidth: 320, maxWidth: .infinity, alignment: .leading)
-                }
-                VStack(alignment: .leading, spacing: 18) { appIcon; summaryIdentity }
-            }.padding(28)
+    // MARK: Ruru status
 
-            if !model.attentionItems.isEmpty {
+    /// Ruru's own operating condition, derived from authority state only. A held
+    /// lease or a healthy participant does not enter into it.
+    private var authority: (title: String, detail: String, health: WitnessHealth, symbol: String) {
+        switch model.state {
+        case .stopped:
+            return ("Authority stopped", "Ruru is not currently accepting lease requests.", .inactive, "pause.circle.fill")
+        case .starting:
+            return ("Authority starting", "Ruru is starting its services.", .inactive, "hourglass.circle.fill")
+        case .failed:
+            return ("Authority requires attention", model.error ?? "An issue has been detected that may affect authority operation.",
+                    .error, "exclamationmark.triangle.fill")
+        case .running:
+            if model.isRecovering {
+                return ("Authority starting", "Ruru is waiting for earlier leases to expire before granting ownership.",
+                        .warning, "hourglass.circle.fill")
+            }
+            let blockers = model.attentionItems.filter { $0.tier == .authority && $0.health != .inactive }
+            if let first = blockers.first {
+                return ("Authority requires attention", first.detail, first.health == .error ? .error : .warning,
+                        "exclamationmark.triangle.fill")
+            }
+            return ("Authority operating normally", "Ruru is running and accepting lease requests.", .healthy, "checkmark.circle.fill")
+        }
+    }
+
+    /// Issues beyond the authority line itself, each with the action that fixes it.
+    private var otherIssues: [WitnessAppModel.Attention] {
+        model.attentionItems.filter { $0.id != "recovery" && $0.id != "stopped" }
+    }
+
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .center, spacing: 20) {
+                appIcon
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 10) {
+                            Text("Ruru").font(.title.weight(.semibold))
+                            WitnessStatusBadge(text: model.statusText, health: model.serviceHealth)
+                        }
+                        identityLine
+                    }
+                    let authority = authority
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: authority.symbol).foregroundStyle(authority.health == .inactive ? Color.secondary : authority.health.tint)
+                            .font(.title3).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(authority.title).font(.headline)
+                            Text(authority.detail).font(.callout).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                Spacer(minLength: 0)
+            }
+            if !otherIssues.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(model.attentionItems) { item in
+                    ForEach(otherIssues) { item in
                         WitnessOverviewIssue(tier: item.tier.rawValue, title: item.title,
                                              detail: item.detail, health: item.health,
                                              reviewTitle: item.actionTitle) { perform(item.action) }
                     }
-                }.padding(.horizontal, 16).padding(.bottom, 16).padding(.top, -8)
-            } else {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    Text("No issues need attention").font(.callout).foregroundStyle(.secondary)
-                }.padding(.leading, 37).padding(.trailing, 28).padding(.bottom, 20).padding(.top, -8)
+                }
             }
-        }.consoleSurface(cornerRadius: 22)
+        }
+        .padding(22).frame(maxWidth: .infinity, alignment: .leading)
+        .consoleSurface(cornerRadius: 22)
     }
 
     private var appIcon: some View {
         Image(nsImage: NSApp.applicationIconImage)
-            .resizable().interpolation(.high).frame(width: 108, height: 108)
+            .resizable().interpolation(.high).frame(width: 76, height: 76)
             .accessibilityLabel("Ruru, \(model.statusText)")
     }
 
-    private var summaryIdentity: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 12) {
-                    Text("Ruru").font(.title.weight(.semibold))
-                    WitnessStatusBadge(text: model.statusText, health: model.serviceHealth)
-                }
-                Text("Service authority · \(host.buildChannel)").font(.title3).foregroundStyle(.secondary)
+    private var identityLine: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { _ in
+            let location = model.state == .running ? "Running on \(host.computerName)" : "On \(host.computerName)"
+            if model.state == .running, let started = model.serviceStartedAt {
+                let uptime = started.duration(to: .now).formatted(.units(allowed: [.days, .hours, .minutes], width: .narrow, maximumUnitCount: 3))
+                Text("\(location) · Uptime \(uptime)")
+            } else {
+                Text(location)
             }
-            HStack(alignment: .top, spacing: 24) {
-                fact("Version") { Text(host.version) }
-                Divider()
-                fact("Node") { Text(host.computerName).help(host.computerName) }
-                Divider()
-                fact("Uptime") {
-                    TimelineView(.periodic(from: .now, by: 30)) { _ in
-                        if let started = model.serviceStartedAt {
-                            Text(started.duration(to: .now).formatted(.units(allowed: [.days, .hours, .minutes], width: .narrow, maximumUnitCount: 3)))
-                                .monospacedDigit()
-                        } else { Text("—").foregroundStyle(.secondary) }
-                    }
-                }
-            }.fixedSize(horizontal: false, vertical: true)
         }
+        .font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
     }
 
-    private func fact<Value: View>(_ title: String, @ViewBuilder value: () -> Value) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.callout).foregroundStyle(.secondary)
-            value().font(.title3.weight(.medium)).lineLimit(1).truncationMode(.middle)
-        }.frame(maxWidth: .infinity, alignment: .leading).accessibilityElement(children: .combine)
-    }
+    // MARK: Summary cards
 
-    private var services: some View {
-        ConsoleSection(title: "Services", accessory: { Text(model.guardingSummary) }, content: {
-            Group {
-                if availableServiceWidth == 0 || availableServiceWidth >= 168 * 5 + 14 * 4 {
-                    HStack(alignment: .top, spacing: 14) { guardingCard; monitoringCard; internetCard; activityCard; alertsCard }
-                } else {
-                    Grid(horizontalSpacing: 14, verticalSpacing: 14) {
-                        GridRow { guardingCard; monitoringCard; internetCard }
-                        GridRow { activityCard; alertsCard }
-                    }
+    private var summaryCards: some View {
+        Group {
+            if availableCardWidth == 0 || availableCardWidth >= 168 * 4 + 14 * 3 {
+                HStack(alignment: .top, spacing: 14) { guardingCard; internetCard; activityCard; monitoringCard }
+            } else {
+                Grid(horizontalSpacing: 14, verticalSpacing: 14) {
+                    GridRow { guardingCard; internetCard }
+                    GridRow { activityCard; monitoringCard }
                 }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableServiceWidth = $0 }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableCardWidth = $0 }
+    }
+
+    private func plural(_ count: Int, _ noun: String) -> String { "\(count) \(noun)\(count == 1 ? "" : "s")" }
+
+    private var guardingCard: some View {
+        let owners = model.activeServiceCount
+        return WitnessServiceCard(title: "Guarding", symbol: "checkmark.shield",
+                                  status: plural(model.configuration.guardedServices.count, "service"),
+                                  detail: "\(owners) active owner\(owners == 1 ? "" : "s")",
+                                  health: owners > 0 ? .healthy : .inactive) { onNavigate(.guarding) }
+    }
+
+    private var internetCard: some View {
+        let endpoint = model.configuration.publicEndpoint
+        let connected = model.internetHealth == .healthy
+        let detail = endpoint.isEmpty ? "No public endpoint"
+            : connected ? "Public endpoint available\n\(endpoint)" : endpoint
+        return WitnessServiceCard(title: "Internet Access", symbol: "globe", brandAsset: "CloudflareLogo",
+                                  status: model.internetStateText, detail: detail,
+                                  health: model.internetHealth) { onNavigate(.internet) }
+    }
+
+    private var activityCard: some View {
+        let count = model.snapshot?.events.count ?? 0
+        return WitnessServiceCard(title: "Activity", symbol: "clock.arrow.circlepath",
+                                  status: plural(count, "recent event"),
+                                  detail: "Ownership transfers and releases", health: .inactive) { onNavigate(.activity) }
+    }
+
+    private var monitoringCard: some View {
+        let targets = model.configuration.monitorTargets
+        let active = targets.filter(\.enabled)
+        let states = active.map { model.monitorStates[$0.id]?.status ?? .unknown }
+        let failing = states.filter { $0 == .down }.count
+        let checked = states.filter { $0 != .unknown }.count
+        let status: String, detail: String, health: WitnessHealth
+        if targets.isEmpty {
+            (status, detail, health) = ("No endpoints", "Watch servers and addresses", .inactive)
+        } else if active.isEmpty {
+            (status, detail, health) = (plural(targets.count, "endpoint"), "All endpoints paused", .inactive)
+        } else if failing > 0 {
+            (status, detail, health) = (plural(active.count, "endpoint"),
+                                        "\(failing) \(failing == 1 ? "check" : "checks") failing\nActive incidents detected", .error)
+        } else if checked < active.count {
+            (status, detail, health) = (plural(active.count, "endpoint"), "Waiting for first checks", .inactive)
+        } else {
+            (status, detail, health) = (plural(active.count, "endpoint"), "All checks passing\nNo active incidents", .healthy)
+        }
+        return WitnessServiceCard(title: "Monitoring", symbol: "waveform.path.ecg", status: status,
+                                  detail: detail, health: health) { onNavigate(.monitoring) }
+    }
+
+    // MARK: Guarded services
+
+    private func open(_ service: GuardedService) {
+        model.pendingGuardedServiceID = service.id
+        onNavigate(.guarding)
+    }
+
+    private var guardedServices: some View {
+        ConsoleSection(title: "Guarded Services", padding: 18, accessory: {
+            Button("Manage Services") { onNavigate(.guarding) }.buttonStyle(.borderless).foregroundStyle(Color.accentColor)
+        }, content: {
+            let services = model.configuration.guardedServices
+            let wide = availableTableWidth == 0 || availableTableWidth >= 560
+            if services.isEmpty {
+                ConsoleEmptyState(symbol: "checkmark.shield", title: "No guarded services",
+                                  detail: "Add an app in Guarding to coordinate it with Ruru.")
+            } else {
+                VStack(spacing: 0) {
+                    if wide { tableHeader }
+                    ForEach(services) { service in
+                        Button { open(service) } label: { serviceRow(service, wide: wide) }
+                            .buttonStyle(.plain).accessibilityHint("Shows \(service.name) in Guarding")
+                        if service.id != services.last?.id { Divider() }
+                    }
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableTableWidth = $0 }
+            }
         })
     }
 
-    private var guardingCard: some View {
-        WitnessServiceCard(title: "Guarding", symbol: "server.rack", status: "\(model.configuration.guardedServices.count) \(model.configuration.guardedServices.count == 1 ? "service" : "services")",
-                           detail: "\(model.activeServiceCount) with an owner", health: model.activeServiceCount > 0 ? .healthy : .inactive) { onNavigate(.guarding) }
-    }
-    private var monitoringCard: some View {
-        let count = model.configuration.monitorTargets.count
-        let down = model.monitorDownCount
-        return WitnessServiceCard(title: "Monitoring", symbol: "waveform.path.ecg",
-                           status: count == 0 ? "No targets" : down > 0 ? "\(down) down" : "All up",
-                           detail: count == 0 ? "Watch servers and addresses" : "\(count) \(count == 1 ? "target" : "targets") monitored",
-                           health: count == 0 ? .inactive : down > 0 ? .error : .healthy) { onNavigate(.monitoring) }
-    }
-    private var internetCard: some View {
-        WitnessServiceCard(title: "Internet Access", symbol: "globe", brandAsset: "CloudflareLogo", status: model.internetStateText,
-                           detail: model.configuration.publicEndpoint.isEmpty ? "Choose a public address" : model.configuration.publicEndpoint,
-                           health: model.internetHealth) { onNavigate(.internet) }
-    }
-    private var activityCard: some View {
-        WitnessServiceCard(title: "Activity", symbol: "clock.arrow.circlepath", status: "\(model.snapshot?.events.count ?? 0) events",
-                           detail: "Ownership transfers and releases", health: .inactive) { onNavigate(.activity) }
+    private static let participantsWidth: CGFloat = 120
+    private static let statusWidth: CGFloat = 150
+
+    private var tableHeader: some View {
+        HStack(spacing: 12) {
+            Text("Service").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Ownership").frame(maxWidth: .infinity, alignment: .leading)
+            Text("Participants").frame(width: Self.participantsWidth, alignment: .leading)
+            Text("Status").frame(width: Self.statusWidth, alignment: .leading)
+            Color.clear.frame(width: 10)
+        }
+        .font(.caption.weight(.medium)).foregroundStyle(.secondary).padding(.bottom, 8)
+        .accessibilityHidden(true)
     }
 
-    private var quickActions: some View {
-        ConsoleSection("Quick Actions", padding: 14, headerInset: 10, fillsAvailableHeight: true) {
-            VStack(spacing: 0) {
-                ConsoleActionRow(title: "Manage Services", subtitle: "Ownership, servers and connection details", symbol: "checkmark.shield") { onNavigate(.guarding) }
-                Divider().padding(.leading, 42)
-                ConsoleActionRow(title: "Internet Access", subtitle: "Manage this Mac’s Cloudflare tunnel", symbol: "globe") { onNavigate(.internet) }
-                Divider().padding(.leading, 42)
-                ConsoleActionRow(title: "View Activity", subtitle: "Recent ownership transfers and releases", symbol: "doc.text.magnifyingglass") { onNavigate(.activity) }
+    private func owner(_ service: GuardedService) -> (name: String, owned: Bool) {
+        let name = model.guardOwner(for: service.clusterID)
+        return (name, (model.lease(for: service.clusterID)?.remainingSeconds ?? 0) > 0)
+    }
+
+    private func participants(_ service: GuardedService) -> String {
+        let count = model.knownNodes(for: service.clusterID).count
+        return count == 0 ? "None known" : "\(count) known \(count == 1 ? "node" : "nodes")"
+    }
+
+    @ViewBuilder private func serviceRow(_ service: GuardedService, wide: Bool) -> some View {
+        let status = model.overviewStatus(for: service.clusterID)
+        let owner = owner(service)
+        let ownership = HStack(spacing: 8) {
+            Image(systemName: owner.owned ? "desktopcomputer" : "circle.dashed").foregroundStyle(owner.owned ? Color.accentColor : .secondary)
+                .accessibilityHidden(true)
+            Text(owner.name).foregroundStyle(owner.owned ? .primary : .secondary).lineLimit(1).truncationMode(.tail)
+        }
+        let statusLabel = Label { Text(status.text).lineLimit(1) } icon: {
+            Circle().fill(status.health.tint).frame(width: 7, height: 7).accessibilityHidden(true)
+        }
+        let chevron = Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+        Group {
+            if wide {
+                HStack(spacing: 12) {
+                    HStack(spacing: 10) {
+                        WitnessGuardedServiceIcon(service: service, active: status.health != .inactive, size: 32)
+                        Text(service.name).font(.callout.weight(.medium)).lineLimit(1)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    ownership.frame(maxWidth: .infinity, alignment: .leading)
+                    Text(participants(service)).foregroundStyle(.secondary).lineLimit(1)
+                        .frame(width: Self.participantsWidth, alignment: .leading)
+                    statusLabel.frame(width: Self.statusWidth, alignment: .leading)
+                    chevron.frame(width: 10)
+                }
+            } else {
+                HStack(spacing: 10) {
+                    WitnessGuardedServiceIcon(service: service, active: status.health != .inactive, size: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(service.name).font(.callout.weight(.medium)).lineLimit(1)
+                        Text("\(owner.name) · \(participants(service))").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    statusLabel
+                    chevron
+                }
             }
         }
+        .font(.callout).padding(.vertical, 8).contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
-    private var systemDetails: some View {
-        ConsoleSection("System", fillsAvailableHeight: true) {
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 18, verticalSpacing: 14) {
-                systemRow("Computer", symbol: "desktopcomputer", value: host.computerName)
-                systemRow("Architecture", symbol: "cpu", value: host.architecture)
-                systemRow("Memory", symbol: "memorychip", value: host.memory)
-                systemRow("macOS", symbol: "apple.logo", value: host.operatingSystem)
-                systemRow("Ruru", symbol: "app.badge", value: "\(host.version) (\(host.build))")
-                systemRow("Storage", symbol: "externaldrive", value: model.legacyStorageNeedsReplacement ? "SQLite · setup required" : "DuckDB")
-            }
-        }
-    }
-
-    private func systemRow(_ title: String, symbol: String, value: String) -> some View {
-        GridRow {
-            Label { Text(title) } icon: { Image(systemName: symbol).foregroundStyle(.tertiary).frame(width: 18) }
-                .foregroundStyle(.secondary).gridColumnAlignment(.leading)
-            Text(value).lineLimit(1).truncationMode(.middle).textSelection(.enabled).help(value)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }.accessibilityElement(children: .combine)
-    }
-
-    private var alertsCard: some View {
-        WitnessServiceCard(title: "Alerts", symbol: "bell.badge",
-                           status: model.alertsStatusText,
-                           detail: model.alertDeliveryError ?? "Service and authority notifications",
-                           health: model.alertsHealth) { showSettings() }
-    }
+    // MARK: Recent activity
 
     private var recentActivity: some View {
-        ConsoleSection(title: "Recent Activity", accessory: {
-            Button("View All") { onNavigate(.activity) }.buttonStyle(.borderless)
+        ConsoleSection(title: "Recent Activity", padding: 18, accessory: {
+            Button("View All") { onNavigate(.activity) }.buttonStyle(.borderless).foregroundStyle(Color.accentColor)
         }, content: {
             let items = model.activityFeed(limit: 5)
             if items.isEmpty {
@@ -292,14 +386,14 @@ private struct WitnessOverviewIssue: View {
 }
 
 
-private struct WitnessOverviewHost {
+/// Read-only facts about this Mac and build, shown in Settings → General.
+struct RuruHostInfo {
     let computerName: String
     let architecture: String
     let memory: String
     let operatingSystem: String
     let version: String
     let build: String
-    let buildChannel: String
 
     static let current: Self = {
         #if arch(arm64)
@@ -314,7 +408,6 @@ private struct WitnessOverviewHost {
                     memory: ByteCountFormatter.string(fromByteCount: Int64(ProcessInfo.processInfo.physicalMemory), countStyle: .memory),
                     operatingSystem: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
                     version: info["CFBundleShortVersionString"] as? String ?? "—",
-                    build: info["CFBundleVersion"] as? String ?? "—",
-                    buildChannel: "Development preview")
+                    build: info["CFBundleVersion"] as? String ?? "—")
     }()
 }

@@ -2,6 +2,7 @@
 
 ## 0.2.0 — Unreleased development preview
 
+- Adds **Alerts**: configurable alert rules with persistent incidents, recovery, cooldowns, quiet hours and flapping control, default rules that follow what you set up, and a native rule builder. Monitoring and Alerts now work without any guarded service, and checks that can't run (no network, Mac asleep) no longer count as outages. Existing notification settings migrate to equivalent rules.
 - Introduces **Ruru**, the new name for SwiftMesh Witness, with the owl app icon.
 - Renames the Xcode project, application target, and scheme to `Ruru`.
 - Replaces SQLite runtime storage with DuckDB through the official Swift package.

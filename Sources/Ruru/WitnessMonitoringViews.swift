@@ -1,3 +1,4 @@
+import RuruAlerting
 import SwiftUI
 import WitnessKit
 
@@ -132,7 +133,7 @@ struct WitnessMonitorHistoryBar: View {
             ForEach(0..<count, id: \.self) { slot in
                 let index = slot - (count - recent.count)
                 RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(index < 0 ? Color.primary.opacity(0.08) : recent[index].ok ? Color.green : Color.red)
+                    .fill(index < 0 ? Color.primary.opacity(0.08) : recent[index].inconclusive ? Color.gray.opacity(0.55) : recent[index].ok ? Color.green : Color.red)
                     .help(index < 0 ? "" : "\(recent[index].time.formatted(date: .omitted, time: .standard)) · \(recent[index].detail)")
             }
         }
@@ -147,10 +148,14 @@ private struct WitnessMonitorDetailSheet: View {
     @State private var confirmingRemoval = false
     @State private var checking = false
     @State private var error: String?
+    @State private var availability: [(label: String, summary: UptimeSummary)] = []
+    @State private var incidents: [AlertIncident] = []
 
     var body: some View {
         let state = model.monitorStates[target.id]
         VStack(alignment: .leading, spacing: 20) {
+          ScrollView {
+           VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top, spacing: 14) {
                 WitnessMonitorTargetIcon(target: target, size: 44)
                 VStack(alignment: .leading, spacing: 4) {
@@ -190,7 +195,12 @@ private struct WitnessMonitorDetailSheet: View {
                     Text("No changes since Ruru started watching.").font(.callout).foregroundStyle(.secondary)
                 }
             }
+            availabilitySection
+            incidentsSection
             if let error { ConsoleIssue(title: "Could not complete that", detail: error) }
+           }
+          }
+          .frame(maxHeight: 520)
             HStack {
                 Button("Remove…", role: .destructive) { confirmingRemoval = true }
                 Spacer()
@@ -203,6 +213,14 @@ private struct WitnessMonitorDetailSheet: View {
             }
         }
         .padding(24).frame(width: 560)
+        .task(id: target.id) {
+            // Durable history from the alert store; refreshed while the sheet is open.
+            while !Task.isCancelled {
+                availability = await model.monitorUptime(target.id)
+                incidents = await model.alertIncidents(subjectKey: "monitoring|monitor|\(target.id)")
+                try? await Task.sleep(for: .seconds(15))
+            }
+        }
         .sheet(isPresented: $editing) { WitnessMonitorTargetSheet(target: target).environmentObject(model) }
         .confirmationDialog("Remove \(target.name)?", isPresented: $confirmingRemoval, titleVisibility: .visible) {
             Button("Remove Target", role: .destructive) {
@@ -213,8 +231,67 @@ private struct WitnessMonitorDetailSheet: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Ruru stops checking it and discards its history. Nothing else is affected.")
+            Text("Ruru stops checking it, discards its availability history, and archives any open incident. Nothing else is affected.")
         }
+    }
+
+    @ViewBuilder private var availabilitySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Availability").font(.headline)
+            if availability.allSatisfy({ $0.summary.checks == 0 }) {
+                Text(model.alertSnapshot.storage.isUsable
+                     ? "Ruru is collecting history. Availability over 24 hours, 7 and 30 days appears here."
+                     : "Availability history isn't available right now.")
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 18, verticalSpacing: 6) {
+                    ForEach(availability, id: \.label) { window in
+                        GridRow {
+                            Text("Last \(window.label)").font(.callout).foregroundStyle(.secondary).gridColumnAlignment(.leading)
+                            Text(window.summary.ratio.map { Self.percent($0) } ?? "—").font(.callout.weight(.medium)).monospacedDigit()
+                            Text(window.summary.checks == 0 ? "" : "\(window.summary.checks) checks"
+                                 + (window.summary.averageLatencyMilliseconds.map { " · avg \($0) ms" } ?? "")
+                                 + (window.summary.inconclusive > 0 ? " · \(window.summary.inconclusive) inconclusive" : ""))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Text("Checks that couldn't run, such as when this Mac was offline or asleep, aren't counted against availability.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var incidentsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Incidents").font(.headline)
+            if incidents.isEmpty {
+                Text("No incidents recorded. They appear here when an alert rule opens one.").font(.callout).foregroundStyle(.secondary)
+            } else {
+                ForEach(incidents.prefix(6)) { incident in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: incident.isOpen ? (incident.verification == .unverified ? "questionmark.circle.fill" : "exclamationmark.circle.fill")
+                              : (incident.resolution?.isRecovery == true ? "checkmark.circle.fill" : "archivebox.fill"))
+                            .foregroundStyle(incident.isOpen ? (incident.verification == .unverified ? Color.orange : Color.red)
+                                             : (incident.resolution?.isRecovery == true ? Color.green : Color.secondary))
+                            .frame(width: 18).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(incident.isOpen ? (incident.verification == .unverified ? "Open — unverified since restart" : "Open")
+                                 : (incident.resolution?.title ?? "Closed")).font(.callout.weight(.medium))
+                            Text("\(incident.openedAt.formatted(date: .abbreviated, time: .shortened))" + (incident.resolvedAt.map {
+                                " · lasted " + Threshold.durationText(max(1, Int($0.timeIntervalSince(incident.openedAt)))) } ?? ""))
+                                .font(.caption).foregroundStyle(.secondary)
+                            if incident.flapCount > 0 { Text("Changed state \(incident.flapCount + 1) times").font(.caption).foregroundStyle(.orange) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func percent(_ ratio: Double) -> String {
+        let value = ratio * 100
+        return value >= 99.995 ? "100%" : String(format: value >= 99 ? "%.2f%%" : "%.1f%%", value)
     }
 
     private func fact(_ title: String, _ value: String) -> some View {
