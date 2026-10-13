@@ -8,7 +8,7 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
 ## Layout and surfaces
 
 - Use `NavigationSplitView` with a SwiftMiner-style 200pt sidebar: Overview,
-  Guarding, Coordination, Internet Access and Activity. Navigation starts directly
+  Guarding, Coordination, Monitoring, Internet Access and Activity. Navigation starts directly
   below the window controls, without an app branding or section header. Match
   SwiftMiner's 14pt row typography, 8pt outer gutters, 2pt row gaps, sidebar
   material and animated 11pt rounded selection. Keep the sidebar free of a
@@ -114,11 +114,12 @@ newer Liquid Glass controls.
 Match SwiftBot's `ConsoleOverviewView` and `HostSummaryCard`: the real 108pt app
 icon with a live status dot, app name/status/environment, and version/node/uptime
 facts. Put named issue review actions at the foot of the summary. Follow with
-four equal service cards (Authority, Guarding, Internet Access, Activity), using
+equal service cards (Guarding, Monitoring, Internet Access, Activity, Alerts), using
 SwiftBot's 168pt minimum width and a 2×2 fallback. Quick Actions and a read-only
 System inspector share equal card heights when side by side, with spare space
 below the shorter card's content. They stack at natural heights when narrow; Recent
-Activity follows. Keep the full catalog and individual ownership in Guarding.
+Activity follows as one newest-first feed (ownership and server reports merged, five
+compact rows with live relative times). Keep the full catalog and individual ownership in Guarding.
 Uptime is display-only and uses the monotonic service start instant. Use native
 Sequoia button styles in place of SwiftBot's macOS 26 glass controls.
 
@@ -130,6 +131,12 @@ and ownership state; a detail view shows ownership, known servers, recent
 activity and per-service connection details. Add Service uses a modal draft;
 renaming does not interrupt ownership. Use “server” or “participant” for generic
 clients, and SwiftMesh pairing instructions only for a SwiftBot service.
+
+Service icons are display-only. Add and Edit Service accept an `.app` (its Finder
+icon, and its name when none is typed) or an image dropped anywhere on the sheet
+or chosen with Choose…; “Use Default” returns to the template icon. Icons are
+stored as 256 px PNGs in `Application Support/Ruru/ServiceIcons/<service id>.png`,
+outside `configuration.json`, and never affect leases, wire protocol or RuruClient.
 
 Distinguish current ownership from health. Label historical participants' contact
 “Presence unknown”; do not call them connected, online or healthy without fresh evidence.
@@ -181,3 +188,16 @@ fresh/stale report badges. Copy URL is explicit; reports do not prove reachabili
 or ownership. Search narrows the first 100 visible locations. Empty states explain
 client reporting and service opt-in. Recordings and artifacts are examples, not
 special cases in the shared UI. Keep credentials in the existing service sheet.
+
+## Monitoring
+
+A sidebar page of reachability targets, each a TCP port or an HTTP(S) address.
+Rows show a status badge (Up, Down, Paused, Checking…), the last response time or
+failure reason and a 30-check history strip; a detail sheet shows 60 checks, status
+changes and settings. A target is reported down only after its configured number of
+consecutive failures and recovers on the first success. Monitoring is observation
+only: it never affects leases, ownership or failover, and the page says so. Confirmed
+down targets appear in Overview's attention list and Monitoring card, in the global
+activity feed, and as alerts (Settings → Alerts → “A monitored target goes down”).
+Targets take a custom icon exactly like services (drop an app or image on the sheet, or
+Choose…); it is shown on rows and in the detail sheet and shares the service icon store.

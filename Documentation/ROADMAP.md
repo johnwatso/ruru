@@ -1190,3 +1190,18 @@
 
 - Hide the macOS purple capture indicator in the unused upper-left titlebar area with a responsive CSS cover shared by all three screenshot tabs. Native screenshot files and app content remain unchanged.
 - Verified the rendered local browser preview without the badge, checked screenshot tabs, and refreshed the downloadable website archive. Added a stylesheet cache version so the refreshed presentation loads immediately.
+
+### Service icons and activity feed — 14 October 2026
+
+- Overview and each service page now share one compact, newest-first activity feed that merges ownership changes and server reports. Added a `--preview-activity` launch flag with fixtures covering every activity kind, and aligned the Overview "No issues need attention" row with the app icon.
+- Add and Edit Service accept an `.app` (using its Finder icon and name) or a PNG/JPEG/HEIC image, by drag-and-drop onto the sheet or Choose…. Icons are normalised to 256 px PNGs under `Application Support/Ruru/ServiceIcons`, outside `configuration.json`; removing a service deletes its icon. Display-only: no change to the lease protocol or `RuruClient`.
+- Validation: unit tests cover normalisation, storage, unsafe IDs, image/app picking; the Add Service sheet was checked in the debug preview. Not verified: a real drag from Finder and the Choose… panel (UI automation could not drive them), and an icon write failure only shows the icon for the current session.
+
+### Monitoring: TCP and HTTP targets — 14 October 2026
+
+- Added a Monitoring page for reachability targets (TCP port or HTTP(S) address). `MonitorTarget`, the probes, the per-target state machine and `MonitorEngine` live in WitnessKit with no UI. Bounds: 32 targets, 30 s–1 h interval, 1–30 s timeout (always shorter than the interval), 1–10 failures before down, 120 retained results and 20 status changes per target.
+- HTTP counts status 200–399 as up, does not follow redirects, cancels after the headers, and refuses URLs with credentials. Targets are stored in `configuration.json` (`monitorTargets`, optional on decode, so existing files load unchanged); check results are never persisted.
+- Down/recovered transitions raise alerts through the existing delivery path under a new Monitoring toggle (default on), join the Overview activity feed and attention list, and add an Overview Monitoring card. Monitoring never touches leases, ownership or `RuruClient`.
+- Validation: unit tests cover validation, the threshold state machine, history bounds, the engine, and real loopback TCP and HTTP probes (open, closed, 200, 503, redirect). UI checked in the debug preview with `--preview-activity` fixtures covering up, down, flapping, paused and unchecked targets.
+- Limits: ICMP ping is not implemented. History is in memory only and resets when Ruru restarts, and monitoring status changes are not stored in DuckDB. Not verified: probing real network targets from the running (non-preview) app, and real alert delivery for monitor events.
+- Monitor targets accept custom icons (an app's icon or an image) through the same drop/Choose… picker and `ServiceIcons` store as services; removing a target deletes its icon. Checked in the debug preview; a real drag from Finder is unverified.

@@ -111,7 +111,7 @@ struct WitnessOverview: View {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                     Text("No issues need attention").font(.callout).foregroundStyle(.secondary)
-                }.padding(.horizontal, 24).padding(.bottom, 16).padding(.top, -8)
+                }.padding(.leading, 37).padding(.trailing, 28).padding(.bottom, 20).padding(.top, -8)
             }
         }.consoleSurface(cornerRadius: 22)
     }
@@ -158,11 +158,11 @@ struct WitnessOverview: View {
     private var services: some View {
         ConsoleSection(title: "Services", accessory: { Text(model.guardingSummary) }, content: {
             Group {
-                if availableServiceWidth == 0 || availableServiceWidth >= 168 * 4 + 14 * 3 {
-                    HStack(alignment: .top, spacing: 14) { guardingCard; internetCard; activityCard; alertsCard }
+                if availableServiceWidth == 0 || availableServiceWidth >= 168 * 5 + 14 * 4 {
+                    HStack(alignment: .top, spacing: 14) { guardingCard; monitoringCard; internetCard; activityCard; alertsCard }
                 } else {
                     Grid(horizontalSpacing: 14, verticalSpacing: 14) {
-                        GridRow { guardingCard; internetCard }
+                        GridRow { guardingCard; monitoringCard; internetCard }
                         GridRow { activityCard; alertsCard }
                     }
                 }
@@ -175,6 +175,14 @@ struct WitnessOverview: View {
     private var guardingCard: some View {
         WitnessServiceCard(title: "Guarding", symbol: "server.rack", status: "\(model.configuration.guardedServices.count) \(model.configuration.guardedServices.count == 1 ? "service" : "services")",
                            detail: "\(model.activeServiceCount) with an owner", health: model.activeServiceCount > 0 ? .healthy : .inactive) { onNavigate(.guarding) }
+    }
+    private var monitoringCard: some View {
+        let count = model.configuration.monitorTargets.count
+        let down = model.monitorDownCount
+        return WitnessServiceCard(title: "Monitoring", symbol: "waveform.path.ecg",
+                           status: count == 0 ? "No targets" : down > 0 ? "\(down) down" : "All up",
+                           detail: count == 0 ? "Watch servers and addresses" : "\(count) \(count == 1 ? "target" : "targets") monitored",
+                           health: count == 0 ? .inactive : down > 0 ? .error : .healthy) { onNavigate(.monitoring) }
     }
     private var internetCard: some View {
         WitnessServiceCard(title: "Internet Access", symbol: "globe", brandAsset: "CloudflareLogo", status: model.internetStateText,
@@ -231,21 +239,11 @@ struct WitnessOverview: View {
         ConsoleSection(title: "Recent Activity", accessory: {
             Button("View All") { onNavigate(.activity) }.buttonStyle(.borderless)
         }, content: {
-            let ownershipEvents = Array((model.snapshot?.events ?? []).prefix(2))
-            let participantEvents = Array(model.participantActivity.prefix(2))
-            if participantEvents.isEmpty && ownershipEvents.isEmpty {
-                ConsoleEmptyState(symbol: "clock", title: "No transfers yet", detail: "Ownership changes appear here as your servers connect.")
+            let items = model.activityFeed(limit: 5)
+            if items.isEmpty {
+                ConsoleEmptyState(symbol: "clock", title: "Nothing yet", detail: "Ownership changes and server reports appear here as your servers connect.")
             } else {
-                VStack(spacing: 0) {
-                    ForEach(participantEvents) { event in
-                        ParticipantActivityRow(event: event, compact: true)
-                        Divider().padding(.leading, 42)
-                    }
-                    ForEach(ownershipEvents) { event in
-                        WitnessEventRow(event: event, compact: true)
-                        if event.id != ownershipEvents.last?.id { Divider().padding(.leading, 42) }
-                    }
-                }
+                ActivityFeedList(items: items)
             }
         })
     }

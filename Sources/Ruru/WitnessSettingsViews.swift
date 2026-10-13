@@ -607,6 +607,10 @@ private struct WitnessAlertSettings: View {
                 Text("Operational readiness or failover protection changes")
                 Text("SwiftBot-reported readiness and Ruru-observed standby protection changes.")
             }
+            Toggle(isOn: $preferences.monitoring) {
+                Text("A monitored target goes down")
+                Text("A Monitoring target fails its checks, or comes back.")
+            }
         } header: {
             Text("Alert Me When")
         } footer: {

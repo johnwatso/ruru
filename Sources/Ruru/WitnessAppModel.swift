@@ -16,9 +16,14 @@ final class WitnessAppModel: ObservableObject {
     private let pairing = PairingDesk()
     private let participants = ParticipantPresence()
     private let operationalStatus = OperationalStatusRegistry()
+    private let monitor = MonitorEngine()
     @Published private(set) var participantObservations: [ParticipantObservation] = []
     @Published private(set) var operationalObservations: [OperationalStatusObservation] = []
     @Published private(set) var participantActivity: [ParticipantActivityRecord] = []
+    /// Custom service icons by service ID. Display-only; absent means the template icon.
+    @Published private(set) var serviceIcons: [String: NSImage] = [:]
+    /// Latest check state by monitor target ID. Observation only.
+    @Published private(set) var monitorStates: [String: MonitorState] = [:]
     @Published private(set) var pairingCodes: [PairingDesk.Code] = []
     @Published private(set) var pairingRequests: [PairingDesk.Request] = []
     /// Servers approved this session, by cluster ID, for the setup assistant.
@@ -67,6 +72,7 @@ final class WitnessAppModel: ObservableObject {
 
     init(preview: Bool = ProcessInfo.processInfo.arguments.contains("--preview") ||
          ProcessInfo.processInfo.arguments.contains("--preview-screenshots") ||
+         ProcessInfo.processInfo.arguments.contains("--preview-activity") ||
          Bundle.main.object(forInfoDictionaryKey: "RuruScreenshotPreview") as? Bool == true) {
         self.preview = preview
         if preview {
@@ -79,6 +85,12 @@ final class WitnessAppModel: ObservableObject {
                 state = .running
                 listenerPort = UInt16(configuration.port)
                 showingSetup = true
+                return
+            }
+            if ProcessInfo.processInfo.arguments.contains("--preview-activity") {
+                loadScreenshotPreview()
+                loadPreviewActivity()
+                loadPreviewMonitoring()
                 return
             }
             if ProcessInfo.processInfo.arguments.contains("--preview-screenshots") ||
@@ -121,6 +133,10 @@ final class WitnessAppModel: ObservableObject {
         do {
             configuration = try WitnessStorage.load()
             showingSetup = !configuration.setup.completed
+            // Service and monitor-target IDs are distinct UUIDs, so one icon table serves both.
+            for id in configuration.guardedServices.map(\.id) + configuration.monitorTargets.map(\.id) {
+                serviceIcons[id] = RuruServiceIcons.load(serviceID: id)
+            }
             discordWebhook = (try? WitnessKeychain.read(RuruDiscordWebhook.keychainAccount)).flatMap { $0 }
                 .flatMap(RuruDiscordWebhook.validated)
             discordConfigured = discordWebhook != nil
@@ -130,6 +146,8 @@ final class WitnessAppModel: ObservableObject {
             store = try LeaseStore(databaseURL: WitnessStorage.databaseURL)
             try WitnessStorage.recordAuthorityCreated()
             beginSnapshots()
+            let monitor = monitor, targets = configuration.monitorTargets
+            Task { await monitor.configure(targets) }
             for service in configuration.guardedServices {
                 serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
             }
@@ -204,6 +222,89 @@ final class WitnessAppModel: ObservableObject {
                                 ownerNodeName: $0.ownerNodeName)
                 }, events: current.events)
             }
+        }
+    }
+
+    /// Fixture feed covering every ownership and participant activity kind,
+    /// spread from seconds to days old across both preview services.
+    private func loadPreviewActivity() {
+        let now = Date()
+        let build = "build-server"
+        let owner: [(String, Double, String, String, String, Int64)] = [
+            (previewCluster, -45, "Acquired", "home-mac", "Home Mac", 43),
+            (previewCluster, -1_500, "Released", "backup-mac", "Backup Mac", 42),
+            (build, -5_400, "Acquired", "build-mac", "Build Mac", 9),
+            (previewCluster, -40_000, "Acquired", "backup-mac", "Backup Mac", 42),
+            (build, -200_000, "Released", "build-mac", "Build Mac", 8)
+        ]
+        let events = owner.enumerated().map { index, e in
+            WitnessEvent(clusterID: e.0, id: Int64(owner.count - index), time: now.addingTimeInterval(e.1),
+                         action: e.2, nodeID: e.3, term: e.5, nodeName: e.4)
+        }
+        let kinds: [(ParticipantActivityKind, Double, String, String, String, String)] = [
+            (.onBattery, -120, "home-mac", "Home Mac", "swiftbot", "Mains power lost; 50% remaining."),
+            (.lowBattery, -300, "home-mac", "Home Mac", "swiftbot", "12% remaining, about 4 minutes."),
+            (.sessionEnding, -420, "home-mac", "Home Mac", "swiftbot", "Shutdown expected within 2 minutes."),
+            (.powerRestored, -900, "home-mac", "Home Mac", "swiftbot", "Mains power is back."),
+            (.operationalSynchronizing, -2_000, "backup-mac", "Backup Mac", "swiftbot", "Catching up with the active server."),
+            (.operationalOutdated, -2_600, "backup-mac", "Backup Mac", "swiftbot", "Behind by 14 changes."),
+            (.operationalDegraded, -3_100, "backup-mac", "Backup Mac", "swiftbot", "Media store is read-only."),
+            (.operationalUnavailable, -4_000, "build-mac", "Build Mac", "build-server", "No report for 5 minutes."),
+            (.operationalReady, -4_800, "backup-mac", "Backup Mac", "swiftbot", "Synchronised and ready to take over."),
+            (.failoverProtectionImpaired, -9_000, "backup-mac", "Backup Mac", "swiftbot", "No ready standby is reporting."),
+            (.failoverProtectionRestored, -12_000, "backup-mac", "Backup Mac", "swiftbot", "A ready standby is reporting again.")
+        ]
+        participantActivity = kinds.enumerated().map { index, k in
+            ParticipantActivityRecord(id: Int64(kinds.count - index), clusterID: k.4, nodeID: k.2, nodeName: k.3,
+                                      time: now.addingTimeInterval(k.1), kind: k.0.rawValue, detail: k.5)
+        }
+        if let current = snapshot {
+            snapshot = WitnessSnapshot(recoverySeconds: 0, leases: current.leases, events: events,
+                                       participantActivity: participantActivity)
+        }
+    }
+
+    /// Fixture targets covering up, down, flapping, paused and not-yet-checked states.
+    private func loadPreviewMonitoring() {
+        let now = Date()
+        func target(_ n: Int, _ name: String, _ kind: MonitorTarget.Kind, host: String = "", port: Int = 0, url: String = "",
+                    interval: Int = 60, enabled: Bool = true) -> MonitorTarget {
+            MonitorTarget(id: String(format: "00000000-0000-4000-8000-0000000001%02d", n), name: name, kind: kind,
+                          host: host, port: port, url: url, intervalSeconds: interval, failureThreshold: 3, enabled: enabled)
+        }
+        let targets = [
+            target(1, "Home NAS", .tcp, host: "192.168.1.20", port: 445),
+            target(2, "Router", .tcp, host: "192.168.1.1", port: 443),
+            target(3, "Company website", .http, url: "https://example.com/health"),
+            target(4, "Build Mac SSH", .tcp, host: "build-mac.local", port: 22),
+            target(5, "Media server", .http, url: "http://192.168.1.30:8096/health"),
+            target(6, "Backup server", .tcp, host: "backup-mac.local", port: 22, enabled: false),
+            target(7, "New printer", .tcp, host: "192.168.1.44", port: 9100)
+        ]
+        // (target index, pattern of results oldest → newest; false = failed check)
+        let patterns: [Int: [Bool]] = [
+            0: Array(repeating: true, count: 60),
+            1: (0..<60).map { $0 != 17 && $0 != 18 },
+            2: Array(repeating: true, count: 40) + [false, false, false] + Array(repeating: true, count: 17),
+            3: Array(repeating: true, count: 50) + Array(repeating: false, count: 10),
+            4: Array(repeating: true, count: 54) + Array(repeating: false, count: 6)
+        ]
+        let details = [false: ["Connection refused", "Timed out", "HTTP 503", "Connection refused", "HTTP 503"]]
+        var states: [String: MonitorState] = [:]
+        for (index, pattern) in patterns {
+            var state = MonitorState()
+            for (step, ok) in pattern.enumerated() {
+                let time = now.addingTimeInterval(-Double(pattern.count - step) * 60)
+                state.record(MonitorResult(time: time, ok: ok, latencyMilliseconds: ok ? 4 + (step * 7) % 38 : nil,
+                                           detail: ok ? "OK" : details[false]![index]), failureThreshold: targets[index].failureThreshold)
+            }
+            states[targets[index].id] = state
+        }
+        configuration.monitorTargets = targets
+        monitorStates = states
+        // Demonstrates a custom icon on the preview's media server; read-only, nothing is written.
+        if let pick = try? RuruServiceIcons.pick(from: URL(fileURLWithPath: "/System/Applications/Calculator.app")) {
+            setServiceIcon(pick.png, for: targets[4].id)
         }
     }
 
@@ -286,7 +387,43 @@ final class WitnessAppModel: ObservableObject {
                                    action: "Acquired", nodeID: "home-mac", term: 42, nodeName: "Home Mac")])
     }
 
-    func lease(for clusterID: String) -> LeaseStatus? { snapshot?.leases.first { $0.clusterID == clusterID } }
+
+    // MARK: Monitoring
+
+    var monitorDownCount: Int { configuration.monitorTargets.filter { monitorStates[$0.id]?.status == .down }.count }
+
+    /// Adds a target, or replaces the one with the same ID. Never touches leases or listeners.
+    func saveMonitorTarget(_ target: MonitorTarget) async throws {
+        guard !busy, !savingConfiguration, !shuttingDown, target.isValid else { throw WitnessStorage.ConfigurationError.invalid }
+        var saved = configuration
+        if let index = saved.monitorTargets.firstIndex(where: { $0.id == target.id }) { saved.monitorTargets[index] = target }
+        else { saved.monitorTargets.append(target) }
+        guard saved.isValid else { throw WitnessStorage.ConfigurationError.invalid }
+        if !preview { try WitnessStorage.save(saved) }
+        configuration = saved
+        if !preview { await monitor.configure(saved.monitorTargets) }
+    }
+
+    func removeMonitorTarget(id: String) async throws {
+        guard !busy, !savingConfiguration, !shuttingDown,
+              configuration.monitorTargets.contains(where: { $0.id == id }) else { throw WitnessStorage.ConfigurationError.invalid }
+        var saved = configuration
+        saved.monitorTargets.removeAll { $0.id == id }
+        if !preview { try WitnessStorage.save(saved) }
+        configuration = saved
+        monitorStates[id] = nil
+        setServiceIcon(nil, for: id)
+        if !preview { await monitor.configure(saved.monitorTargets) }
+    }
+
+    func checkMonitorNow(_ id: String) async {
+        guard !preview else { return }
+        await monitor.checkNow(id)
+        monitorStates = await monitor.snapshot()
+    }
+
+    func lease(for clusterID: String) -> LeaseStatus? {
+ snapshot?.leases.first { $0.clusterID == clusterID } }
     func service(for clusterID: String) -> GuardedService? { configuration.guardedServices.first { $0.clusterID == clusterID } }
     func serviceName(for clusterID: String) -> String { service(for: clusterID)?.name ?? clusterID }
     func events(for clusterID: String) -> [WitnessEvent] { (snapshot?.events ?? []).filter { $0.clusterID == clusterID } }
@@ -592,6 +729,7 @@ final class WitnessAppModel: ObservableObject {
         shuttingDown = true
         pollTask?.cancel()
         snapshotTask?.cancel()
+        await monitor.stop()
         await internetAccess.stop()
         await server?.stop()
     }
@@ -634,7 +772,7 @@ final class WitnessAppModel: ObservableObject {
     }
 
     func addGuardedService(name: String, clusterID: String, kind: GuardedService.Kind,
-                           leaseSeconds: Int = GuardedService.defaultLeaseSeconds) async throws {
+                           leaseSeconds: Int = GuardedService.defaultLeaseSeconds, iconPNG: Data? = nil) async throws {
         guard !busy, !internetBusy, !savingConfiguration, !shuttingDown else { throw WitnessStorage.ConfigurationError.invalid }
         var saved = configuration
         let service = GuardedService(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -656,6 +794,18 @@ final class WitnessAppModel: ObservableObject {
         }
         serviceCredentials = tokens
         configuration = saved
+        if let iconPNG { setServiceIcon(iconPNG, for: service.id) }
+    }
+
+    /// Best effort: an icon that cannot be written still shows for this session.
+    func setServiceIcon(_ png: Data?, for serviceID: String) {
+        if let png, let image = NSImage(data: png) {
+            if !preview { try? RuruServiceIcons.save(png, serviceID: serviceID) }
+            serviceIcons[serviceID] = image
+        } else {
+            if !preview { RuruServiceIcons.remove(serviceID: serviceID) }
+            serviceIcons[serviceID] = nil
+        }
     }
 
     func removeGuardedService(id: String) async throws {
@@ -689,6 +839,7 @@ final class WitnessAppModel: ObservableObject {
         }
         serviceCredentials = tokens
         configuration = saved
+        setServiceIcon(nil, for: service.id)
         coordinationLocations.removeAll { $0.clusterID == service.clusterID }
         coordinationEnrollments.removeAll { $0.clusterID == service.clusterID }
         participantObservations.removeAll { $0.clusterID == service.clusterID }
@@ -988,6 +1139,7 @@ final class WitnessAppModel: ObservableObject {
     }
 
     private func refresh() async {
+        if !preview { monitorStates = await monitor.snapshot() }
         participantObservations = await participants.snapshot().filter { observation in
             configuration.guardedServices.contains { $0.clusterID == observation.clusterID }
         }
@@ -1125,7 +1277,7 @@ final class WitnessAppModel: ObservableObject {
     }
 
     struct Attention: Identifiable {
-        enum Tier: String { case authority = "Authority", guarding = "Guarding", transport = "Transport" }
+        enum Tier: String { case authority = "Authority", guarding = "Guarding", transport = "Transport", monitoring = "Monitoring" }
         enum Action { case continueSetup, start, setupStorage, page(WitnessPage) }
         let id: String
         let tier: Tier
@@ -1198,6 +1350,15 @@ final class WitnessAppModel: ObservableObject {
                                title: "\(service.name) has no servers yet",
                                detail: "Pair its servers with a code from Connection Details.", health: .inactive,
                                actionTitle: "Pair", action: .page(.guarding)))
+        }
+
+        // Monitoring tier — confirmed-down targets only
+        let down = configuration.monitorTargets.filter { monitorStates[$0.id]?.status == .down }
+        if !down.isEmpty {
+            items.append(.init(id: "monitoring", tier: .monitoring,
+                               title: down.count == 1 ? "\(down[0].name) is unreachable" : "\(down.count) monitored targets are unreachable",
+                               detail: down.count == 1 ? (monitorStates[down[0].id]?.last?.detail ?? "Checks are failing.") : down.map(\.name).joined(separator: ", "),
+                               health: .error, actionTitle: "Monitoring", action: .page(.monitoring)))
         }
         return items
     }
@@ -1297,6 +1458,16 @@ final class WitnessAppModel: ObservableObject {
                                     context: .init(service: service, server: server)))
         }
         announcedPairings.formIntersection(pairingRequests.map(\.id))
+        if !preview {
+            for transition in await monitor.drainTransitions() where transition.change.status != .unknown {
+                let down = transition.change.status == .down
+                alerts.append(RuruAlert(kind: down ? .monitorDown : .monitorRecovered,
+                                        key: "monitor|\(transition.targetID)|\(down ? "down" : "up")",
+                                        title: down ? "\(transition.name) is unreachable" : "\(transition.name) is reachable again",
+                                        detail: down ? "\(transition.address): \(transition.change.detail)" : transition.address,
+                                        context: .init(service: "Monitoring")))
+            }
+        }
         guard !alerts.isEmpty else { return }
         if let failure = await alertDelivery.deliver(alerts, preferences: configuration.alerts, webhook: discordWebhook,
                                                      notifyID: configuration.notifyID, notifyToken: notifyToken) {

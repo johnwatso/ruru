@@ -87,6 +87,8 @@ struct WitnessConfiguration: Codable, Equatable {
     var servicePrimaryPreferences: [String: WitnessPrimaryPreference] = [:]
 
     var serviceCoordinationPolicies: [String: CoordinationPolicy] = [:]
+    /// Reachability targets. Observation only; independent of guarded services.
+    var monitorTargets: [MonitorTarget] = []
 
     func coordinationPolicy(for serviceID: String) -> CoordinationPolicy {
         serviceCoordinationPolicies[serviceID] ?? .init()
@@ -142,7 +144,7 @@ struct WitnessConfiguration: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case setup, bindAddress, port, publicEndpoint, startAutomatically, showInDock, tunnel, alerts, notifyID, services, servicePrimaryPreferences, serviceCoordinationPolicies
+        case setup, bindAddress, port, publicEndpoint, startAutomatically, showInDock, tunnel, alerts, notifyID, services, servicePrimaryPreferences, serviceCoordinationPolicies, monitorTargets
     }
 
     init(from decoder: Decoder) throws {
@@ -159,6 +161,7 @@ struct WitnessConfiguration: Codable, Equatable {
         services = try values.decode([GuardedService].self, forKey: .services)
         serviceCoordinationPolicies = try values.decodeIfPresent([String: CoordinationPolicy].self, forKey: .serviceCoordinationPolicies) ?? [:]
         servicePrimaryPreferences = try values.decodeIfPresent([String: WitnessPrimaryPreference].self, forKey: .servicePrimaryPreferences) ?? [:]
+        monitorTargets = try values.decodeIfPresent([MonitorTarget].self, forKey: .monitorTargets) ?? []
     }
 
     var isValid: Bool {
@@ -171,6 +174,8 @@ struct WitnessConfiguration: Codable, Equatable {
         guard services.count <= 32, services.allSatisfy(\.isValid),
               Set(services.map(\.clusterID)).count == services.count,
               Set(services.map(\.id)).count == services.count else { return false }
+        guard monitorTargets.count <= MonitorTarget.maxTargets, monitorTargets.allSatisfy(\.isValid),
+              Set(monitorTargets.map(\.id)).count == monitorTargets.count else { return false }
         guard ["127.0.0.1", "0.0.0.0", "::1"].contains(bindAddress), (1...65535).contains(port) else { return false }
         guard UUID(uuidString: tunnel.instanceID) != nil else { return false }
         if !tunnel.hostname.isEmpty || !tunnel.tunnelID.isEmpty || !tunnel.accountID.isEmpty {

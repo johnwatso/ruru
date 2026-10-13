@@ -2,13 +2,14 @@ import SwiftUI
 import WitnessKit
 
 enum WitnessPage: String, CaseIterable, Identifiable {
-    case overview = "Overview", guarding = "Guarding", coordination = "Coordination", internet = "Internet Access", activity = "Activity"
+    case overview = "Overview", guarding = "Guarding", coordination = "Coordination", monitoring = "Monitoring", internet = "Internet Access", activity = "Activity"
     var id: Self { self }
     var symbol: String {
         switch self {
         case .overview: "square.grid.2x2"
         case .guarding: "checkmark.shield"
         case .coordination: "square.stack.3d.up"
+        case .monitoring: "waveform.path.ecg"
         case .internet: "globe"
         case .activity: "clock.arrow.circlepath"
         }
@@ -55,6 +56,8 @@ struct WitnessDashboard: View {
             WitnessGuardingPage()
         case .coordination:
             WitnessCoordinationPage()
+        case .monitoring:
+            WitnessMonitoringPage()
         case .internet:
             WitnessInternetPage(onSetup: { showInternet = true }, onConnect: { model.selectedPage = .guarding })
         case .activity:

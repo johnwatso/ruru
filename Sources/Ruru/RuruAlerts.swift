@@ -12,6 +12,7 @@ struct RuruAlertPreferences: Codable, Equatable {
     var authorityProblems = true
     var participantStatus = false
     var operationalStatus = true
+    var monitoring = true
 
     init() {}
     init(from decoder: Decoder) throws {
@@ -25,6 +26,7 @@ struct RuruAlertPreferences: Codable, Equatable {
         authorityProblems = try values.decodeIfPresent(Bool.self, forKey: .authorityProblems) ?? defaults.authorityProblems
         participantStatus = try values.decodeIfPresent(Bool.self, forKey: .participantStatus) ?? defaults.participantStatus
         operationalStatus = try values.decodeIfPresent(Bool.self, forKey: .operationalStatus) ?? defaults.operationalStatus
+        monitoring = try values.decodeIfPresent(Bool.self, forKey: .monitoring) ?? defaults.monitoring
     }
 }
 
@@ -96,6 +98,7 @@ struct RuruAlert: Equatable {
         case serviceDown, serviceRecovered, failover, authorityProblem, authorityRecovered
         case participantOnBattery, participantLowBattery, participantPowerRestored, participantSessionEnding
         case pairingRequest, test
+        case monitorDown, monitorRecovered
         case operationalDegraded, operationalRecovered, failoverProtectionImpaired, failoverProtectionRestored
     }
     enum Severity: Equatable { case critical, warning, resolved, info }
@@ -117,10 +120,10 @@ struct RuruAlert: Equatable {
 
     var severity: Severity {
         switch kind {
-        case .serviceDown, .authorityProblem, .participantLowBattery, .failoverProtectionImpaired: .critical
+        case .serviceDown, .authorityProblem, .participantLowBattery, .failoverProtectionImpaired, .monitorDown: .critical
         case .failover, .participantOnBattery, .participantSessionEnding, .operationalDegraded: .warning
         case .participantPowerRestored, .operationalRecovered, .failoverProtectionRestored: .resolved
-        case .serviceRecovered, .authorityRecovered: .resolved
+        case .serviceRecovered, .authorityRecovered, .monitorRecovered: .resolved
         case .pairingRequest, .test: .info
         }
     }
@@ -134,6 +137,7 @@ struct RuruAlert: Equatable {
             preferences.participantStatus
         case .operationalDegraded, .operationalRecovered, .failoverProtectionImpaired, .failoverProtectionRestored:
             preferences.operationalStatus
+        case .monitorDown, .monitorRecovered: preferences.monitoring
         case .pairingRequest, .test: true
         }
     }
@@ -527,6 +531,8 @@ enum RuruDiscordWebhook {
         case .operationalRecovered: ("✅", "Ruru • Operational status")
         case .failoverProtectionImpaired: ("🛡️", "Ruru • Failover protection")
         case .failoverProtectionRestored: ("✅", "Ruru • Failover protection")
+        case .monitorDown: ("📡", "Ruru • Monitoring")
+        case .monitorRecovered: ("✅", "Ruru • Monitoring")
         case .pairingRequest: ("🔔", "Ruru • Pairing")
         case .test: ("✅", "Ruru • Test notification")
         }

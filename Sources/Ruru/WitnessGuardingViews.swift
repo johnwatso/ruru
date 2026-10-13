@@ -64,12 +64,19 @@ struct WitnessGuardedServicesSummary: View {
 }
 
 struct WitnessGuardedServiceIcon: View {
+    @EnvironmentObject private var model: WitnessAppModel
     let service: GuardedService
     var active = true
     var size: CGFloat = 42
 
     var body: some View {
-        if let asset = service.brandAsset {
+        if let custom = model.serviceIcons[service.id] {
+            Image(nsImage: custom).resizable().interpolation(.high).scaledToFit()
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+                .saturation(active ? 1 : 0).opacity(active ? 1 : 0.55)
+                .accessibilityHidden(true)
+        } else if let asset = service.brandAsset {
             Image(asset).resizable().interpolation(.high).scaledToFit()
                 .frame(width: size, height: size).accessibilityHidden(true)
         } else {
@@ -274,15 +281,11 @@ private struct WitnessGuardedServiceDetails: View {
                 .font(.caption).foregroundStyle(.secondary)
         })
         ConsoleSection("Recent Activity") {
-            if events.isEmpty {
-                ConsoleEmptyState(symbol: "clock", title: "No ownership changes yet", detail: "Acquisitions and releases for this service appear here.")
+            let items = model.activityFeed(clusterID: service.clusterID, limit: 10)
+            if items.isEmpty {
+                ConsoleEmptyState(symbol: "clock", title: "No activity yet", detail: "Ownership changes and server reports for this service appear here.")
             } else {
-                VStack(spacing: 0) {
-                    ForEach(events.prefix(10)) { event in
-                        WitnessEventRow(event: event)
-                        if event.id != events.prefix(10).last?.id { Divider().padding(.leading, 42) }
-                    }
-                }
+                ActivityFeedList(items: items, showsService: false)
             }
         }
         .sheet(isPresented: $connecting) { ConnectionDetailsSheet(clusterID: service.clusterID).environmentObject(model) }
@@ -347,6 +350,8 @@ struct WitnessAddServiceSheet: View {
     @State private var leaseSeconds = GuardedService.defaultLeaseSeconds
     @State private var saving = false
     @State private var error: String?
+    @State private var iconPNG: Data?
+    @State private var iconError: String?
     private var valid: Bool {
         let service = GuardedService(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                                     clusterID: clusterID.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind,
@@ -357,6 +362,9 @@ struct WitnessAddServiceSheet: View {
         VStack(alignment: .leading, spacing: 22) {
             WitnessSheetHeader(title: "Add Service", subtitle: subtitle, symbol: symbol)
             VStack(alignment: .leading, spacing: 16) {
+                WitnessServiceIconPicker(image: iconPNG.flatMap { NSImage(data: $0) }, templateSymbol: GuardedService(name: "", clusterID: "", kind: kind).symbol,
+                                         onPick: pickIcon, onClear: { iconPNG = nil }, onError: { iconError = $0 })
+                if let iconError { ConsoleIssue(title: "Icon could not be used", detail: iconError) }
                 TextField("Service name", text: $name, prompt: Text("e.g. Production Bot or Media Server"))
                 Picker("Application", selection: $kind) { ForEach(GuardedService.Kind.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 TextField("Cluster ID", text: $clusterID, prompt: Text("A unique ID used by this service’s servers"))
@@ -371,7 +379,7 @@ struct WitnessAddServiceSheet: View {
                 Button(saving ? "Adding…" : "Add Service") {
                     saving = true
                     Task {
-                        do { try await model.addGuardedService(name: name, clusterID: clusterID, kind: kind, leaseSeconds: leaseSeconds); dismiss() }
+                        do { try await model.addGuardedService(name: name, clusterID: clusterID, kind: kind, leaseSeconds: leaseSeconds, iconPNG: iconPNG); dismiss() }
                         catch { self.error = error.localizedDescription; saving = false }
                     }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!valid || saving || model.busy)
@@ -381,6 +389,14 @@ struct WitnessAddServiceSheet: View {
             leaseSeconds = GuardedService.defaultLeaseSeconds(for: selectedKind)
         }
         .padding(24).frame(width: 560).interactiveDismissDisabled(saving)
+        .serviceIconDrop(onPick: pickIcon, onError: { iconError = $0 })
+    }
+
+    private func pickIcon(_ pick: RuruServiceIcons.Pick) {
+        iconPNG = pick.png
+        iconError = nil
+        // Dropping an app fills in its name unless one has been typed already.
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let suggested = pick.suggestedName { name = suggested }
     }
 }
 
@@ -405,6 +421,9 @@ private struct WitnessEditServiceSheet: View {
     @State private var leaseSeconds: Int
     @State private var saving = false
     @State private var error: String?
+    /// nil until the icon is edited; then `.some(nil)` means "use the default".
+    @State private var editedIcon: Data??
+    @State private var iconError: String?
     init(service: GuardedService) {
         self.service = service
         _name = State(initialValue: service.name)
@@ -413,6 +432,10 @@ private struct WitnessEditServiceSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Edit Service").font(.title2.weight(.semibold))
+            WitnessServiceIconPicker(image: displayedIcon, templateSymbol: service.symbol,
+                                     onPick: { editedIcon = .some($0.png); iconError = nil },
+                                     onClear: { editedIcon = .some(nil) }, onError: { iconError = $0 })
+            if let iconError { ConsoleIssue(title: "Icon could not be used", detail: iconError) }
             TextField("Service name", text: $name).textFieldStyle(.roundedBorder)
             WitnessLeaseLengthPicker(seconds: $leaseSeconds)
             Text("Shorter leases fail over faster; longer leases need fewer renewals. A new length applies from the owner’s next renewal, and after a restart Ruru waits for the longest lease it granted.")
@@ -424,13 +447,23 @@ private struct WitnessEditServiceSheet: View {
                 Button("Save") {
                     saving = true
                     Task {
-                        do { try await model.updateService(id: service.id, name: name, leaseSeconds: leaseSeconds); dismiss() }
+                        do {
+                            try await model.updateService(id: service.id, name: name, leaseSeconds: leaseSeconds)
+                            if let editedIcon { model.setServiceIcon(editedIcon, for: service.id) }
+                            dismiss()
+                        }
                         catch { self.error = error.localizedDescription; saving = false }
                     }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                     .disabled(WitnessNodeName.normalized(name) == nil || name.utf8.count > 128 || saving || model.busy)
             }
         }.padding(24).frame(width: 460).interactiveDismissDisabled(saving)
+            .serviceIconDrop(onPick: { editedIcon = .some($0.png); iconError = nil }, onError: { iconError = $0 })
+    }
+
+    private var displayedIcon: NSImage? {
+        guard let editedIcon else { return model.serviceIcons[service.id] }
+        return editedIcon.flatMap { NSImage(data: $0) }
     }
 }
 
