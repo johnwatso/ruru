@@ -22,11 +22,13 @@
 		23EDEFA0BB12F1685702EB1C /* AlertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF00FFD0764524C3F4B90383 /* AlertTests.swift */; };
 		27D5F1476A6E13CE7F0DBB8C /* WitnessHTTPServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB1D944D9DF13483B3F58F9 /* WitnessHTTPServer.swift */; };
 		2B23FEE30A03ACF65B8A71B7 /* BackupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0C7A44BE370460F30CA7AE /* BackupTests.swift */; };
+		2BF9757EFE1B54994BCA4B2F /* RuruClient in Frameworks */ = {isa = PBXBuildFile; productRef = F3DA6EE84E94B0C7A81A1098 /* RuruClient */; };
 		2FE4C48088E000C09926CC3C /* WitnessTransportDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8CB025C2896CBAF4B8E75CF /* WitnessTransportDiagnostics.swift */; };
 		3118737F7C9BD996FE6C23C8 /* RuruAlertDelivery.swift in Sources */ = {isa = PBXBuildFile; fileRef = E42373788CE3F9F11B8D4CF3 /* RuruAlertDelivery.swift */; };
 		35A5C1C5343CC399F0632FC3 /* WitnessDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ABF87C6AD71482A1F6264BA /* WitnessDashboard.swift */; };
 		36E39751CEE7B58A60C161F4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6E642B2BFDC2E9B39904B319 /* Assets.xcassets */; };
 		3E33A38CE7D6ED42CE5DE346 /* WitnessStorageRecoveryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8809B91AA7B6A4EB9F4E6F18 /* WitnessStorageRecoveryViews.swift */; };
+		40A8D924BFE27B89441932E2 /* RuruClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1B5D897C377F00727C1B42 /* RuruClientTests.swift */; };
 		40FAAB05CDB95891D572FE92 /* RuruBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B380632F23DD7AD163F98FF /* RuruBackup.swift */; };
 		4152D51CEEBEC2D76C6DBFD4 /* WitnessKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E8147699CA289B1F065001B /* WitnessKit.framework */; };
 		41FBC199D2DE9E1B69670977 /* WitnessKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 4E8147699CA289B1F065001B /* WitnessKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -172,6 +174,7 @@
 		53BAEA3F57493AEC0AD71AD3 /* Sparkle-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Sparkle-LICENSE.txt"; sourceTree = "<group>"; };
 		589E62B4FD29AA9A5364881D /* WitnessCoordinationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessCoordinationViews.swift; sourceTree = "<group>"; };
 		5B4C35408498C1ADAC3E35D3 /* RuruDiagnosticExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruDiagnosticExport.swift; sourceTree = "<group>"; };
+		5E1B5D897C377F00727C1B42 /* RuruClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruClientTests.swift; sourceTree = "<group>"; };
 		61995EA39FB30EDA18A0328A /* RuruDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruDiagnostics.swift; sourceTree = "<group>"; };
 		63879848CC86E8B53CE30747 /* cloudflared-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "cloudflared-LICENSE.txt"; sourceTree = "<group>"; };
 		661580073990BB810644BED5 /* LeaseStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseStoreTests.swift; sourceTree = "<group>"; };
@@ -192,6 +195,7 @@
 		9932375055BEB2EE0933958E /* Pairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing.swift; sourceTree = "<group>"; };
 		A4F804C58282C87C3F86B4E8 /* LeaseBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseBackup.swift; sourceTree = "<group>"; };
 		AA714710207684117CA4DD8F /* UpToDateUserDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpToDateUserDriver.swift; sourceTree = "<group>"; };
+		ABDC63C4E5F00760665B15C6 /* RuruClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RuruClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BC05E7778A1E41F80FAE8557 /* LeaseDatabaseSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseDatabaseSetup.swift; sourceTree = "<group>"; };
 		BCC680F6E57E9994BE1BC16D /* WitnessHTTPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessHTTPTests.swift; sourceTree = "<group>"; };
 		C18D94F4F0CF8D0A34DAA6FA /* RuruDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruDiagnosticsTests.swift; sourceTree = "<group>"; };
@@ -223,6 +227,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				7D29F078CE18F195A82CE828 /* DuckDB in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6CB4EF521A04802E33F3AB3F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2BF9757EFE1B54994BCA4B2F /* RuruClient in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -369,6 +381,7 @@
 				FC40E3D91CFB5923EE152A35 /* Packages */,
 				4991C877603B8AA0577992A8 /* Resources */,
 				5FC28BA58315DC63CC565EBE /* Ruru */,
+				DF0B10BDF75D57FE2311DD08 /* RuruClientTests */,
 				8ECC4BF0162C449F56A47110 /* StorageProbe */,
 				C5BC625CC2718C62D39E69D3 /* WitnessKit */,
 				0F56A393A267CDC86A0CC590 /* WitnessKitTests */,
@@ -376,10 +389,20 @@
 			);
 			sourceTree = "<group>";
 		};
+		DF0B10BDF75D57FE2311DD08 /* RuruClientTests */ = {
+			isa = PBXGroup;
+			children = (
+				5E1B5D897C377F00727C1B42 /* RuruClientTests.swift */,
+			);
+			name = RuruClientTests;
+			path = Clients/RuruClient/Tests/RuruClientTests;
+			sourceTree = "<group>";
+		};
 		F15BB1020D571ADA9CD4D8D4 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				900E2AEDDE0AEC7F10FBF786 /* Ruru.app */,
+				ABDC63C4E5F00760665B15C6 /* RuruClientTests.xctest */,
 				4E8147699CA289B1F065001B /* WitnessKit.framework */,
 				C25D22615849F5D68ABBDD49 /* WitnessKitTests.xctest */,
 				470816112A8C7BD4807FA2F8 /* WitnessStorageProbe */,
@@ -398,6 +421,25 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		2453A3D3CA9EDB9FA905BE75 /* RuruClientTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C6F6ACABD1D760262D9010B1 /* Build configuration list for PBXNativeTarget "RuruClientTests" */;
+			buildPhases = (
+				5E57D41D3AAF8611B001766A /* Sources */,
+				6CB4EF521A04802E33F3AB3F /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RuruClientTests;
+			packageProductDependencies = (
+				F3DA6EE84E94B0C7A81A1098 /* RuruClient */,
+			);
+			productName = RuruClientTests;
+			productReference = ABDC63C4E5F00760665B15C6 /* RuruClientTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		74F7F4CED1DE1E2D821F0DFB /* WitnessKit */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 650BF4A6C7C6658683E9EF25 /* Build configuration list for PBXNativeTarget "WitnessKit" */;
@@ -488,6 +530,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
+					2453A3D3CA9EDB9FA905BE75 = {
+						ProvisioningStyle = Manual;
+					};
 					74F7F4CED1DE1E2D821F0DFB = {
 						ProvisioningStyle = Manual;
 					};
@@ -524,6 +569,7 @@
 				74F7F4CED1DE1E2D821F0DFB /* WitnessKit */,
 				FB3CC4C4DC3F7B0118F60940 /* Ruru */,
 				BBE8B9068C744B8C4CA30CBD /* WitnessKitTests */,
+				2453A3D3CA9EDB9FA905BE75 /* RuruClientTests */,
 				CACB8A6B6C1EA5AEB994351A /* WitnessStorageProbe */,
 			);
 		};
@@ -553,6 +599,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				BC0AC4BC26AC09E1664AA847 /* StorageProbe.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5E57D41D3AAF8611B001766A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				40A8D924BFE27B89441932E2 /* RuruClientTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -663,6 +717,21 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		0424A413216390BD24360523 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.ruruapp.ruru.client-tests";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
 		276B1B545F7621C7FC34D5C9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -831,6 +900,21 @@
 			};
 			name = Release;
 		};
+		A57DB8B66D56510B86D692B8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "dev.ruruapp.ruru.client-tests";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
 		B3EF32D0F2734EF46D86E136 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -980,6 +1064,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		C6F6ACABD1D760262D9010B1 /* Build configuration list for PBXNativeTarget "RuruClientTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A57DB8B66D56510B86D692B8 /* Debug */,
+				0424A413216390BD24360523 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		FFE9E58F4F962FB2911B1F71 /* Build configuration list for PBXNativeTarget "WitnessKitTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -1031,6 +1124,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 8EE8C21633D7C4D7F7DD03FD /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		F3DA6EE84E94B0C7A81A1098 /* RuruClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RuruClient;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

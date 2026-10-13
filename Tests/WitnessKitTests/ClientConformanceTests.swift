@@ -63,6 +63,22 @@ final class ClientConformanceTests: XCTestCase {
         catch { XCTAssertEqual(error as? RuruError, .unauthorized) }
     }
 
+    func testMinimumTermReleasesAnInsufficientRealServerGrant() async throws {
+        let (server, endpoint, _) = try await authority(leaseSeconds: 20)
+        defer { Task { await server.stop() } }
+        let home = client(endpoint, node: "home")
+        let original = try await home.acquire()
+
+        do { _ = try await home.acquire(minimumTerm: original.term + 1); XCTFail("Accepted an insufficient term") }
+        catch { XCTAssertEqual(error as? RuruError, .ownershipLost) }
+
+        let description = try await home.describe()
+        XCTAssertNil(description.lease?.ownerNodeID)
+        XCTAssertEqual(description.lease?.term, original.term)
+        let successor = try await client(endpoint, node: "backup").acquire()
+        XCTAssertGreaterThan(successor.term, original.term)
+    }
+
     func testStandbyPresenceIsVisibleWithoutChangingOwnerOrTerm() async throws {
         let (server, endpoint, _) = try await authority(leaseSeconds: 30)
         defer { Task { await server.stop() } }

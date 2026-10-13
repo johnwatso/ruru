@@ -85,6 +85,13 @@ callback or suspended process cannot be made safe by a timer alone.
 see the [OpenAPI description](openapi.yaml) and the
 [Python example](../Clients/examples/ruru_lease.py).
 
+When an application persists the highest fencing term its protected resource
+has accepted, use `acquire(minimumTerm:)` after the application's recovery. If
+Ruru grants a lower term, RuruClient releases that temporary lease before
+throwing `ownershipLost`; it never silently discards an acquired lease. If the
+release request has a transport error, that error is returned because ownership
+cannot be ruled out until the lease expires.
+
 ## Protocol
 
 Send JSON over HTTPS with `Authorization: Bearer <service token>`:

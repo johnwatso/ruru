@@ -102,6 +102,24 @@ public actor RuruLeaseClient {
         try await lease(.acquire, term: highestTerm)
     }
 
+    /// Requests ownership only when Ruru's fencing term is at least
+    /// `minimumTerm`.
+    ///
+    /// This is useful after recovering an application's own durable fencing
+    /// state. If Ruru grants an older term, the client releases that temporary
+    /// ownership before reporting `ownershipLost`; it must never silently
+    /// discard a valid lease and make other participants wait for it to expire.
+    /// A release transport error is propagated because the client cannot know
+    /// whether Ruru received the release request.
+    public func acquire(minimumTerm: Int64) async throws -> RuruLease {
+        let lease = try await acquire()
+        guard lease.term >= minimumTerm else {
+            try await release(lease)
+            throw RuruError.ownershipLost
+        }
+        return lease
+    }
+
     /// Extends `lease`. Throws `ownershipLost` if it expired or changed hands.
     public func renew(_ lease: RuruLease) async throws -> RuruLease {
         guard lease.isValid else { throw RuruError.ownershipLost }

@@ -73,6 +73,30 @@ final class RuruClientTests: XCTestCase {
         catch { XCTAssertEqual(error as? RuruError, .ownershipHeld) }
     }
 
+    func testMinimumTermReleasesAnInsufficientGrant() async throws {
+        StubProtocol.replies = [
+            (200, #"{"ownerNodeID":"home","term":7,"expiresInSeconds":30}"#),
+            (200, #"{"released":true}"#)
+        ]
+
+        do { _ = try await client().acquire(minimumTerm: 8); XCTFail("Accepted an insufficient term") }
+        catch { XCTAssertEqual(error as? RuruError, .ownershipLost) }
+
+        XCTAssertEqual(StubProtocol.requests.map(\.url?.path), ["/v1/lease/acquire", "/v1/lease/release"])
+        let release = try XCTUnwrap(StubProtocol.requests.last)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: release.httpBody ?? Data()) as? [String: Any])
+        XCTAssertEqual(body["term"] as? Int, 7)
+    }
+
+    func testMinimumTermAcceptsAMatchingGrant() async throws {
+        StubProtocol.replies = [(200, #"{"ownerNodeID":"home","term":8,"expiresInSeconds":30}"#)]
+
+        let lease = try await client().acquire(minimumTerm: 8)
+
+        XCTAssertEqual(lease.term, 8)
+        XCTAssertEqual(StubProtocol.requests.map(\.url?.path), ["/v1/lease/acquire"])
+    }
+
     func testDescribeReportsCapabilities() async throws {
         StubProtocol.replies = [(200, #"{"version":1,"authority":"Ruru","clusterID":"bot","leaseSeconds":60,"recoverySeconds":0,"capabilities":{"lease":{"version":1,"enabled":true},"coordination":{"version":1,"enabled":false}},"lease":null}"#)]
         let description = try await client().describe()

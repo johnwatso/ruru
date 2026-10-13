@@ -78,6 +78,17 @@
                ReferencedContainer = "container:Ruru.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "2453A3D3CA9EDB9FA905BE75"
+               BuildableName = "RuruClientTests.xctest"
+               BlueprintName = "RuruClientTests"
+               ReferencedContainer = "container:Ruru.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

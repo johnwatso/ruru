@@ -99,6 +99,15 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.ruruapp.ruru.tests
+  RuruClientTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [Clients/RuruClient/Tests/RuruClientTests]
+    dependencies:
+      - package: RuruClient
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ruruapp.ruru.client-tests
   WitnessStorageProbe:
     type: tool
     platform: macOS
@@ -117,7 +126,7 @@ schemes:
         WitnessKitTests: [test]
         WitnessStorageProbe: [test]
     test:
-      targets: [WitnessKitTests]
+      targets: [WitnessKitTests, RuruClientTests]
       parallelizable: false
     run:
       config: Debug

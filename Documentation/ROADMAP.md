@@ -1,5 +1,24 @@
 # Development log and next steps
 
+## 2026-10-13 — Minimum-term client acquisition safety
+
+- Added source-compatible `RuruLeaseClient.acquire(minimumTerm:)` for apps
+  recovering their own durable fencing state. A grant below the required term
+  is explicitly released before the client reports ownership loss; a release
+  transport failure remains visible because ownership cannot be ruled out.
+- Added isolated package coverage and real-authority client conformance
+  coverage for releasing an insufficient grant, then allowing a successor to
+  acquire a higher term. Updated the public client and integration guidance.
+- Validation: XcodeGen completed, and the focused Xcode run passed all seven
+  package/client-conformance tests. A full Debug Xcode run passed 158 of 159
+  tests; the unrelated contention fixture
+  `CoordinationTests/testSlowMetadataConnectionsLeaveRoomForLeaseRequests`
+  intermittently returned 200 where that fixture expected 429. No Release
+  universal build or Intel/Sequoia execution was performed.
+- This changes neither the existing lease wire protocol nor service-scoped
+  identity. SwiftBot data transport, state replication, and outbound-only
+  remote connectivity remain separate future work.
+
 ## 2026-10-12 — Notify! alert destination
 
 - Added Notify! as an optional alert destination beside macOS notifications and

@@ -56,6 +56,11 @@ then releases the lease when it is still valid. This does not make an unfenced
 side effect safe; read the [integration guide](../../Documentation/INTEGRATIONS.md)
 before adopting the package.
 
+If your application persists its own highest accepted fencing term, call
+`acquire(minimumTerm:)` after recovery. A grant below that floor is released
+before the method throws `RuruError.ownershipLost`; a release transport failure
+is returned instead because the client cannot know whether Ruru received it.
+
 ## Compatibility
 
 The package follows semantic versioning. Patch releases preserve public API and
