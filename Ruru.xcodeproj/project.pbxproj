@@ -17,6 +17,7 @@
 		1077C5275C6B0BBB7E9E8F6C /* ParticipantPresence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C2B6A412A802552345A9762 /* ParticipantPresence.swift */; };
 		11131DCADCE7F20807F0FC98 /* ClientConformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90F4329634CEDD1178A75E99 /* ClientConformanceTests.swift */; };
 		1CE4C97197BA1DDFB518DAA2 /* ParticipantPresenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E781CE2113EE42FD5459A118 /* ParticipantPresenceTests.swift */; };
+		1F7FB343D5F14EC550ADA791 /* OperationalStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2006424C788DF3112944C3C4 /* OperationalStatusTests.swift */; };
 		22D6B330228246AA32E8920F /* CoordinationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29634F205646A0A16F47ABEF /* CoordinationModels.swift */; };
 		23E1D42CA1DE6CBA18E52B3B /* WitnessConsoleStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 891A5721155305E6E037FA30 /* WitnessConsoleStyle.swift */; };
 		23EDEFA0BB12F1685702EB1C /* AlertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF00FFD0764524C3F4B90383 /* AlertTests.swift */; };
@@ -62,6 +63,7 @@
 		A74389F6485962044328FC80 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = ED154C66DC59BA294AB08EB8 /* LICENSE */; };
 		AED7BC71F13AA14CD7D1FF56 /* WitnessKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E8147699CA289B1F065001B /* WitnessKit.framework */; };
 		B215C536FA43AABAEF4101F4 /* WitnessPreferredPrimarySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E524AFD498B4D66069C76234 /* WitnessPreferredPrimarySheet.swift */; };
+		B50D638A136EDC6FD8D1621A /* OperationalStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DB2F5A10FD8280BF656C4F /* OperationalStatus.swift */; };
 		B624B5E8C68B5C4321515FE5 /* WitnessInternetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B7AEB160DF8CCFE691C0549 /* WitnessInternetTests.swift */; };
 		B6EF4145A27C8B6A0F7B62DE /* CloudflareTunnelClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF8D3058FEE8AA4A62308A99 /* CloudflareTunnelClient.swift */; };
 		BC0AC4BC26AC09E1664AA847 /* StorageProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4849497892124A0AC81F8B5D /* StorageProbe.swift */; };
@@ -152,6 +154,7 @@
 		137FFD2E32735C0F299A0186 /* WitnessSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessSidebar.swift; sourceTree = "<group>"; };
 		139481AB632E0A52F5FEB8B2 /* WitnessOverview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessOverview.swift; sourceTree = "<group>"; };
 		1AC48CD1649D9EC56E0B2A88 /* WitnessConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessConfiguration.swift; sourceTree = "<group>"; };
+		2006424C788DF3112944C3C4 /* OperationalStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationalStatusTests.swift; sourceTree = "<group>"; };
 		2197E021E81DE5F0EC0DD31C /* LeaseModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseModels.swift; sourceTree = "<group>"; };
 		26B9F3DF5E6D5909C8F67940 /* LeaseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseStore.swift; sourceTree = "<group>"; };
 		29634F205646A0A16F47ABEF /* CoordinationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinationModels.swift; sourceTree = "<group>"; };
@@ -196,6 +199,7 @@
 		A4F804C58282C87C3F86B4E8 /* LeaseBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseBackup.swift; sourceTree = "<group>"; };
 		AA714710207684117CA4DD8F /* UpToDateUserDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpToDateUserDriver.swift; sourceTree = "<group>"; };
 		ABDC63C4E5F00760665B15C6 /* RuruClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RuruClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B5DB2F5A10FD8280BF656C4F /* OperationalStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationalStatus.swift; sourceTree = "<group>"; };
 		BC05E7778A1E41F80FAE8557 /* LeaseDatabaseSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseDatabaseSetup.swift; sourceTree = "<group>"; };
 		BCC680F6E57E9994BE1BC16D /* WitnessHTTPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessHTTPTests.swift; sourceTree = "<group>"; };
 		C18D94F4F0CF8D0A34DAA6FA /* RuruDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruDiagnosticsTests.swift; sourceTree = "<group>"; };
@@ -278,6 +282,7 @@
 				D97E8AAAF34560CCDBDFD0D6 /* LeaseDurationTests.swift */,
 				120B98F2D24A44275C2F392F /* LeaseFencingTests.swift */,
 				661580073990BB810644BED5 /* LeaseStoreTests.swift */,
+				2006424C788DF3112944C3C4 /* OperationalStatusTests.swift */,
 				6B99CFFEA11C279D778755A7 /* PairingTests.swift */,
 				E781CE2113EE42FD5459A118 /* ParticipantPresenceTests.swift */,
 				E55690EED6F3284A3E6F0C1A /* RuruClientSafetyTests.swift */,
@@ -360,6 +365,7 @@
 				2197E021E81DE5F0EC0DD31C /* LeaseModels.swift */,
 				26B9F3DF5E6D5909C8F67940 /* LeaseStore.swift */,
 				072A55EE0516065DBFAD2DCD /* LegacyAuthorityReplacement.swift */,
+				B5DB2F5A10FD8280BF656C4F /* OperationalStatus.swift */,
 				9932375055BEB2EE0933958E /* Pairing.swift */,
 				0C2B6A412A802552345A9762 /* ParticipantPresence.swift */,
 				82E99408450D5C7987BC03E9 /* TunnelManager.swift */,
@@ -655,6 +661,7 @@
 				001251692BBC01E44BE02992 /* LeaseModels.swift in Sources */,
 				EEE9B3D345E31C7AF9B2C3F6 /* LeaseStore.swift in Sources */,
 				7C1E0FDDDDA27A7205FC37EA /* LegacyAuthorityReplacement.swift in Sources */,
+				B50D638A136EDC6FD8D1621A /* OperationalStatus.swift in Sources */,
 				BECFD308F35EC7A73DA09916 /* Pairing.swift in Sources */,
 				1077C5275C6B0BBB7E9E8F6C /* ParticipantPresence.swift in Sources */,
 				EF166EA26D016898775159F2 /* TunnelManager.swift in Sources */,
@@ -678,6 +685,7 @@
 				5A7A0715F1F8EF3FFF74E1DC /* LeaseDurationTests.swift in Sources */,
 				C9BD57CAD645E11895040F51 /* LeaseFencingTests.swift in Sources */,
 				445C8F7AF2DD571A2DE2DFBD /* LeaseStoreTests.swift in Sources */,
+				1F7FB343D5F14EC550ADA791 /* OperationalStatusTests.swift in Sources */,
 				69BD77EA1B6F27200A668986 /* PairingTests.swift in Sources */,
 				1CE4C97197BA1DDFB518DAA2 /* ParticipantPresenceTests.swift in Sources */,
 				DB724C6A16736C39DC607766 /* RuruAlerts.swift in Sources */,

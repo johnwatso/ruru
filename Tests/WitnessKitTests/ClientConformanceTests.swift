@@ -112,6 +112,25 @@ final class ClientConformanceTests: XCTestCase {
         catch { XCTAssertEqual(error as? RuruError, .unauthorized) }
     }
 
+    func testOperationalStatusIsVisibleWithoutChangingOwnerOrTerm() async throws {
+        let (server, endpoint, _) = try await authority(leaseSeconds: 30)
+        defer { Task { await server.stop() } }
+        let primary = client(endpoint, node: "home"), backup = client(endpoint, node: "backup")
+        let lease = try await primary.acquire()
+        let discovery = try await backup.describe()
+        XCTAssertTrue(discovery.supports("operationalStatus"))
+        try await backup.reportOperationalStatus(state: .degraded, components: [
+            .init(namespace: "swiftbot", id: "peer-sync", state: .degraded, reasonCode: "peer_unreachable")
+        ])
+        let observations = await server.operationalStatus.snapshot()
+        let observation = try XCTUnwrap(observations.first)
+        XCTAssertEqual(observation.nodeID, "backup")
+        XCTAssertEqual(observation.state, .degraded)
+        let unchanged = try await backup.describe()
+        XCTAssertEqual(unchanged.lease?.ownerNodeID, "home")
+        XCTAssertEqual(unchanged.lease?.term, lease.term)
+    }
+
     func testMaintainHandsOverWhenTheOwnerStops() async throws {
         let (server, endpoint, _) = try await authority()
         defer { Task { await server.stop() } }

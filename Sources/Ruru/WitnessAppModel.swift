@@ -15,7 +15,9 @@ final class WitnessAppModel: ObservableObject {
     private let catalogue = CoordinationCatalogue()
     private let pairing = PairingDesk()
     private let participants = ParticipantPresence()
+    private let operationalStatus = OperationalStatusRegistry()
     @Published private(set) var participantObservations: [ParticipantObservation] = []
+    @Published private(set) var operationalObservations: [OperationalStatusObservation] = []
     @Published private(set) var participantActivity: [ParticipantActivityRecord] = []
     @Published private(set) var pairingCodes: [PairingDesk.Code] = []
     @Published private(set) var pairingRequests: [PairingDesk.Request] = []
@@ -290,6 +292,7 @@ final class WitnessAppModel: ObservableObject {
     func knownNodes(for clusterID: String) -> [String] {
         var nodes = Set(events(for: clusterID).map(\.nodeID))
         nodes.formUnion(participantObservations.filter { $0.clusterID == clusterID }.map(\.nodeID))
+        nodes.formUnion(operationalObservations.filter { $0.clusterID == clusterID }.map(\.nodeID))
         if let owner = lease(for: clusterID)?.ownerNodeID, !owner.isEmpty { nodes.insert(owner) }
         return nodes.sorted()
     }
@@ -301,6 +304,9 @@ final class WitnessAppModel: ObservableObject {
     }
     func participant(for nodeID: String, clusterID: String) -> ParticipantObservation? {
         participantObservations.first { $0.clusterID == clusterID && $0.nodeID == nodeID }
+    }
+    func operationalStatus(for nodeID: String, clusterID: String) -> OperationalStatusObservation? {
+        operationalObservations.first { $0.clusterID == clusterID && $0.nodeID == nodeID }
     }
     var guardingSummary: String {
         let count = configuration.guardedServices.count
@@ -413,7 +419,8 @@ final class WitnessAppModel: ObservableObject {
             for service in configuration.guardedServices where serviceCredentials[service.clusterID] == nil {
                 serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
             }
-            let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue, pairing: pairing, participants: participants)
+            let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue, pairing: pairing,
+                                               participants: participants, operationalStatus: operationalStatus)
             self.server = server
             listenerPort = try await server.start(bindAddress: configuration.bindAddress, port: UInt16(configuration.port))
             state = .running
@@ -680,10 +687,12 @@ final class WitnessAppModel: ObservableObject {
         coordinationLocations.removeAll { $0.clusterID == service.clusterID }
         coordinationEnrollments.removeAll { $0.clusterID == service.clusterID }
         participantObservations.removeAll { $0.clusterID == service.clusterID }
+        operationalObservations.removeAll { $0.clusterID == service.clusterID }
         await pairing.revoke(clusterID: service.clusterID)
         if !preview, let access = try? accessCredentials() {
             try await catalogue.configureServices(access)
             try await participants.configureServices(access)
+            try await operationalStatus.configureServices(access)
         }
         // Durable leases and terms remain in DuckDB. Already granted permission
         // expires normally; old tokens cannot acquire or renew through the router.
@@ -975,6 +984,9 @@ final class WitnessAppModel: ObservableObject {
 
     private func refresh() async {
         participantObservations = await participants.snapshot().filter { observation in
+            configuration.guardedServices.contains { $0.clusterID == observation.clusterID }
+        }
+        operationalObservations = await operationalStatus.snapshot().filter { observation in
             configuration.guardedServices.contains { $0.clusterID == observation.clusterID }
         }
         pairingCodes = await pairing.activeCodes()

@@ -61,6 +61,22 @@ If your application persists its own highest accepted fencing term, call
 before the method throws `RuruError.ownershipLost`; a release transport failure
 is returned instead because the client cannot know whether Ruru received it.
 
+## Operational status
+
+Applications can report bounded readiness checks after feature-detecting
+`operationalStatus` from `describe()`. This is diagnostic data only: it cannot
+grant, renew, release, or extend a lease. Use stable component IDs and bounded
+reason codes, not logs, hostnames, paths, tokens, or free text.
+
+```swift
+if (try await client.describe()).supports("operationalStatus") {
+    try await client.reportOperationalStatus(state: .degraded, components: [
+        .init(namespace: "example", id: "sync", state: .degraded,
+              reasonCode: "peer_unreachable")
+    ])
+}
+```
+
 ## Compatibility
 
 The package follows semantic versioning. Patch releases preserve public API and

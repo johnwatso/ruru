@@ -83,6 +83,7 @@ public struct WitnessServiceDescription: Codable, Equatable, Sendable {
             "lease": .init(version: 1, enabled: true),
             "primaryPreference": .init(version: 1, enabled: true),
             "participantPresence": .init(version: 1, enabled: true),
+            "operationalStatus": .init(version: 1, enabled: true),
             "coordination": .init(version: 1, enabled: service.coordinationPolicy.enabled)
         ]
         self.lease = lease.map {

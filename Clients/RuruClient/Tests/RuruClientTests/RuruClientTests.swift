@@ -106,4 +106,15 @@ final class RuruClientTests: XCTestCase {
         XCTAssertFalse(description.supports("lease", version: 2))
         XCTAssertEqual(StubProtocol.requests.first?.httpMethod, "GET")
     }
+
+    func testOperationalStatusUsesSeparateBoundedReportRoute() async throws {
+        StubProtocol.replies = [(200, #"{"version":1,"accepted":true,"freshSeconds":45,"reportAfterSeconds":15}"#)]
+        try await client().reportOperationalStatus(state: .degraded, components: [
+            .init(namespace: "example", id: "sync", state: .degraded, reasonCode: "peer_unreachable")
+        ])
+        let request = try XCTUnwrap(StubProtocol.requests.first)
+        XCTAssertEqual(request.url?.path, "/v1/operational-status/report")
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any])
+        XCTAssertEqual(body["state"] as? String, "degraded")
+    }
 }

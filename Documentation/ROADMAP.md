@@ -1,5 +1,17 @@
 # Development log and next steps
 
+## 2026-10-13 — Phase 1: operational-status.v1
+
+- Added a generic, versioned `operationalStatus` capability and the separate
+  `POST /v1/operational-status/report` route. Its 32-node / 16-component
+  in-memory registry is bounded, token-scoped, restart-expiring, and isolated
+  from lease storage and lease transactions.
+- Ruru's Guarding view shows each fresh node readiness state. `RuruClient`
+  exposes typed reporting; its README and integration guide document feature
+  detection and bounded reason codes.
+- Operational history and alert policy remain later work. This capability does
+  not infer reachability, change presence, or influence failover/promotion.
+
 ## 2026-10-13 — Phase 0: SwiftBot coordination policy baseline
 
 - The SwiftBot service template now starts new services with a five-minute

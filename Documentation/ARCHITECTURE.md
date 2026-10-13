@@ -32,6 +32,9 @@ credential-free and unprobed, independently of resource catalogue opt-in.
 Fresh UPS, battery and planned-session transitions are also edge-triggered;
 their alert category is opt-in. A bounded DuckDB participant activity history
 is separate from ownership history and is never an authority input.
+The versioned operational-status capability is an additional bounded,
+in-memory diagnostic channel. It uses authenticated node reports with stable
+component codes, expires after restart, and is never an authority input.
 
 ## Coordinator direction
 

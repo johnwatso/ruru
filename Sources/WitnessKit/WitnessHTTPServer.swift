@@ -9,6 +9,7 @@ public actor WitnessHTTPServer {
     public nonisolated let catalogue: CoordinationCatalogue
     public nonisolated let pairing: PairingDesk
     public nonisolated let participants: ParticipantPresence
+    public nonisolated let operationalStatus: OperationalStatusRegistry
     private let queue = DispatchQueue(label: "dev.ruruapp.ruru.http", qos: .utility)
     private var listener: NWListener?
     private var listenerID = UUID()
@@ -29,24 +30,30 @@ public actor WitnessHTTPServer {
         catalogue = router.catalogue
         pairing = router.pairing
         participants = router.participants
+        operationalStatus = router.operationalStatus
     }
 
     public init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil,
-                pairing: PairingDesk? = nil, participants: ParticipantPresence? = nil) throws {
-        router = try WitnessRouter(store: store, services: services, catalogue: catalogue, pairing: pairing, participants: participants)
+                pairing: PairingDesk? = nil, participants: ParticipantPresence? = nil,
+                operationalStatus: OperationalStatusRegistry? = nil) throws {
+        router = try WitnessRouter(store: store, services: services, catalogue: catalogue, pairing: pairing, participants: participants,
+                                  operationalStatus: operationalStatus)
         self.catalogue = router.catalogue
         self.pairing = router.pairing
         self.participants = router.participants
+        self.operationalStatus = router.operationalStatus
     }
 
     /// Changes admission only; the database, lease deadlines and listener stay alive.
     public func configureServices(_ services: [WitnessServiceCredential]) async throws {
         guard !configuringServices else { throw WitnessError.invalidConfiguration }
-        let updated = try WitnessRouter(store: router.store, services: services, catalogue: catalogue, pairing: pairing, participants: participants)
+        let updated = try WitnessRouter(store: router.store, services: services, catalogue: catalogue, pairing: pairing, participants: participants,
+                                        operationalStatus: operationalStatus)
         configuringServices = true
         defer { configuringServices = false }
         try await catalogue.configureServices(services)
         try await participants.configureServices(services)
+        try await operationalStatus.configureServices(services)
         router = updated
     }
 
@@ -174,7 +181,7 @@ public actor WitnessHTTPServer {
            let end = buffer.range(of: Data("\r\n".utf8)),
            let line = String(data: buffer[..<end.lowerBound], encoding: .utf8),
            let path = line.split(separator: " ").dropFirst().first,
-           path.hasPrefix("/v1/coordination/") || path.hasPrefix("/v1/participants/") {
+           path.hasPrefix("/v1/coordination/") || path.hasPrefix("/v1/participants/") || path.hasPrefix("/v1/operational-status/") {
             guard connections.values.filter(\.coordination).count < 4 else {
                 send(.error("coordination_busy", status: 429), id: id)
                 return

@@ -52,6 +52,23 @@ public enum RuruPowerSource: String, Encodable, Sendable {
     case ac, ups, battery, unknown
 }
 
+/// A non-authoritative node readiness state reported to Ruru.
+public enum RuruOperationalState: String, Encodable, Sendable {
+    case ready, synchronizing, outdated, degraded, unknown
+}
+
+/// One bounded application check in an operational-status report.
+public struct RuruOperationalComponent: Encodable, Sendable {
+    public let namespace: String
+    public let id: String
+    public let state: RuruOperationalState
+    public let reasonCode: String?
+
+    public init(namespace: String, id: String, state: RuruOperationalState, reasonCode: String? = nil) {
+        self.namespace = namespace; self.id = id; self.state = state; self.reasonCode = reasonCode
+    }
+}
+
 /// The service description returned by `GET /v1/service`.
 public struct RuruServiceDescription: Decodable, Sendable, Equatable {
     public struct Capability: Decodable, Sendable, Equatable {
@@ -175,6 +192,27 @@ public actor RuruLeaseClient {
             batteryPercent: batteryPercent, batteryTimeRemaining: batteryTimeRemaining,
             sessionEnding: sessionEnding))
         let data = try await send("/v1/participants/report", body: body)
+        struct Reply: Decodable { let version: Int; let accepted: Bool }
+        guard let reply = try? JSONDecoder().decode(Reply.self, from: data), reply.version == 1, reply.accepted else {
+            throw RuruError.server(status: 200, code: "invalid_response")
+        }
+    }
+
+    /// Reports application readiness separately from presence and lease ownership.
+    /// Discover `operationalStatus` first. Reporting has no authority effect.
+    public func reportOperationalStatus(state: RuruOperationalState,
+                                        components: [RuruOperationalComponent]) async throws {
+        struct Report: Encodable {
+            let version = 1
+            let clusterID: String
+            let nodeID: String
+            let nodeName: String?
+            let state: RuruOperationalState
+            let components: [RuruOperationalComponent]
+        }
+        let body = try JSONEncoder().encode(Report(clusterID: configuration.clusterID, nodeID: configuration.nodeID,
+            nodeName: configuration.nodeName, state: state, components: components))
+        let data = try await send("/v1/operational-status/report", body: body)
         struct Reply: Decodable { let version: Int; let accepted: Bool }
         guard let reply = try? JSONDecoder().decode(Reply.self, from: data), reply.version == 1, reply.accepted else {
             throw RuruError.server(status: 200, code: "invalid_response")

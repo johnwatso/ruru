@@ -253,6 +253,11 @@ private struct WitnessGuardedServiceDetails: View {
                                     } else {
                                         Text("Presence unknown").font(.caption).foregroundStyle(.secondary)
                                     }
+                                    if let status = model.operationalStatus(for: node, clusterID: service.clusterID) {
+                                        Label(status.fresh ? Self.operationalLabel(status.state) : "Operational status stale",
+                                              systemImage: status.fresh ? Self.operationalSymbol(status.state) : "clock")
+                                            .font(.caption).foregroundStyle(status.fresh && status.state == .ready ? Color.green : Color.secondary)
+                                    }
                                 }
                                 Image(systemName: "info.circle").foregroundStyle(.secondary)
                             }.padding(12).contentShape(Rectangle())
@@ -301,6 +306,26 @@ private struct WitnessGuardedServiceDetails: View {
                     selectedNode = nil
                 }.environmentObject(model).id(node)
             }
+        }
+    }
+
+    private static func operationalLabel(_ state: OperationalState) -> String {
+        switch state {
+        case .ready: "Operationally ready"
+        case .synchronizing: "Synchronising"
+        case .outdated: "Needs sync"
+        case .degraded: "Operationally degraded"
+        case .unknown: "Operational status unknown"
+        }
+    }
+
+    private static func operationalSymbol(_ state: OperationalState) -> String {
+        switch state {
+        case .ready: "checkmark.seal"
+        case .synchronizing: "arrow.triangle.2.circlepath"
+        case .outdated: "arrow.clockwise"
+        case .degraded: "exclamationmark.triangle"
+        case .unknown: "questionmark.circle"
         }
     }
 }

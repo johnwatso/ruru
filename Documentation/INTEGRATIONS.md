@@ -9,6 +9,27 @@ protocol is SwiftBot-specific.
 Lease guarding controls exclusive work; participant reports independently show
 recent contact, including servers in standby.
 
+## Operational status (v1)
+
+`operationalStatus` is a separate, feature-detected diagnostic capability for a
+node to report application readiness. It has no effect on a lease, presence,
+Preferred Primary, or Ruru's authority health. Reports are authenticated with
+the service token, bounded to 32 nodes and 16 components per node, fresh for
+45 seconds, and expire after 10 minutes or a Ruru restart. Ruru stores no
+free-form detail in this channel.
+
+POST `/v1/operational-status/report` with the normal bearer token:
+
+```json
+{"version":1,"clusterID":"example","nodeID":"stable-node-id","state":"degraded","components":[{"namespace":"example","id":"sync","state":"degraded","reasonCode":"peer_unreachable"}]}
+```
+
+`namespace`, `id`, and optional `reasonCode` are ASCII machine codes (letters,
+digits, `.`, `_`, `-`), not user-provided prose. Clients must call
+`describe()` and use `supports("operationalStatus")` before reporting so older
+authorities remain compatible. The typed `RuruLeaseClient.reportOperationalStatus`
+method is the supported Swift integration boundary.
+
 ## Register a service
 
 In **Guarding → Add Service**, choose a template (SwiftBot or Other app), a
