@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import WitnessKit
 
 final class AlertTests: XCTestCase {
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
@@ -78,6 +79,48 @@ final class AlertTests: XCTestCase {
         XCTAssertTrue(down.isEnabled(in: preferences))
         let decoded = try? JSONDecoder().decode(RuruAlertPreferences.self, from: Data("{}".utf8))
         XCTAssertEqual(decoded, RuruAlertPreferences())
+    }
+
+    func testOperationalStandbyDegradationAlertsAndRestoresFailoverProtection() {
+        var monitor = OperationalAlertMonitor()
+        let participant = ParticipantObservation(clusterID: "bot", nodeID: "backup", nodeName: "Backup Mac",
+                                                 role: .standby, ageSeconds: 0, fresh: true)
+        func status(_ state: OperationalState) -> OperationalStatusObservation {
+            .init(clusterID: "bot", nodeID: "backup", nodeName: "Backup Mac", state: state,
+                  components: [], ageSeconds: 0, fresh: true)
+        }
+        let first = monitor.observe([status(.ready)], participants: [participant], owners: ["bot"],
+                                    serviceNames: ["bot": "SwiftBot"], at: start)
+        XCTAssertTrue(first.alerts.isEmpty, "The first report establishes the baseline")
+        XCTAssertEqual(first.events.map(\.kind), [.operationalReady])
+
+        let degraded = monitor.observe([status(.degraded)], participants: [participant], owners: ["bot"],
+                                       serviceNames: ["bot": "SwiftBot"], at: start + 15)
+        XCTAssertEqual(degraded.alerts.map(\.kind), [.operationalDegraded, .failoverProtectionImpaired])
+        XCTAssertEqual(degraded.events.map(\.kind), [.operationalDegraded, .failoverProtectionImpaired])
+        XCTAssertTrue(degraded.alerts.last?.detail.contains("Primary still owns") == true)
+
+        let recovered = monitor.observe([status(.ready)], participants: [participant], owners: ["bot"],
+                                        serviceNames: ["bot": "SwiftBot"], at: start + 30)
+        XCTAssertEqual(recovered.alerts.map(\.kind), [.operationalRecovered, .failoverProtectionRestored])
+        XCTAssertEqual(recovered.events.map(\.kind), [.operationalReady, .failoverProtectionRestored])
+    }
+
+    func testOperationalStatusStalenessIsRecordedAsRuruObservedNotClientReported() {
+        var monitor = OperationalAlertMonitor()
+        let participant = ParticipantObservation(clusterID: "bot", nodeID: "backup", nodeName: "Backup Mac",
+                                                 role: .standby, ageSeconds: 0, fresh: true)
+        let ready = OperationalStatusObservation(clusterID: "bot", nodeID: "backup", nodeName: "Backup Mac",
+                                                 state: .ready, components: [], ageSeconds: 0, fresh: true)
+        _ = monitor.observe([ready], participants: [participant], owners: ["bot"],
+                            serviceNames: ["bot": "SwiftBot"], at: start)
+        let stale = OperationalStatusObservation(clusterID: "bot", nodeID: "backup", nodeName: "Backup Mac",
+                                                 state: .ready, components: [], ageSeconds: 46, fresh: false)
+        let result = monitor.observe([stale], participants: [participant], owners: ["bot"],
+                                     serviceNames: ["bot": "SwiftBot"], at: start + 46)
+        XCTAssertEqual(result.events.first?.kind, .operationalUnavailable)
+        XCTAssertEqual(result.events.first?.detail, "Ruru observed that the operational report is stale or unavailable.")
+        XCTAssertEqual(result.alerts.map(\.kind), [.operationalDegraded, .failoverProtectionImpaired])
     }
 
     func testFailoverUsesNodeIdentityAndTheNewOwnersWebsite() throws {

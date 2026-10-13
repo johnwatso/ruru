@@ -68,8 +68,9 @@ public struct WitnessEvent: Identifiable, Sendable {
     }
 }
 
-/// Durable display history for self-reported participant telemetry. These
-/// records are informational only and never participate in lease decisions.
+/// Durable display history for self-reported participant telemetry and
+/// Ruru-observed operational transitions. These records are informational only
+/// and never participate in lease decisions.
 public struct ParticipantActivityRecord: Identifiable, Sendable {
     public let id: Int64
     public let clusterID: String

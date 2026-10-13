@@ -11,6 +11,7 @@ struct RuruAlertPreferences: Codable, Equatable {
     var failover = true
     var authorityProblems = true
     var participantStatus = false
+    var operationalStatus = true
 
     init() {}
     init(from decoder: Decoder) throws {
@@ -23,6 +24,7 @@ struct RuruAlertPreferences: Codable, Equatable {
         failover = try values.decodeIfPresent(Bool.self, forKey: .failover) ?? defaults.failover
         authorityProblems = try values.decodeIfPresent(Bool.self, forKey: .authorityProblems) ?? defaults.authorityProblems
         participantStatus = try values.decodeIfPresent(Bool.self, forKey: .participantStatus) ?? defaults.participantStatus
+        operationalStatus = try values.decodeIfPresent(Bool.self, forKey: .operationalStatus) ?? defaults.operationalStatus
     }
 }
 
@@ -94,6 +96,7 @@ struct RuruAlert: Equatable {
         case serviceDown, serviceRecovered, failover, authorityProblem, authorityRecovered
         case participantOnBattery, participantLowBattery, participantPowerRestored, participantSessionEnding
         case pairingRequest, test
+        case operationalDegraded, operationalRecovered, failoverProtectionImpaired, failoverProtectionRestored
     }
     enum Severity: Equatable { case critical, warning, resolved, info }
 
@@ -114,9 +117,9 @@ struct RuruAlert: Equatable {
 
     var severity: Severity {
         switch kind {
-        case .serviceDown, .authorityProblem, .participantLowBattery: .critical
-        case .failover, .participantOnBattery, .participantSessionEnding: .warning
-        case .participantPowerRestored: .resolved
+        case .serviceDown, .authorityProblem, .participantLowBattery, .failoverProtectionImpaired: .critical
+        case .failover, .participantOnBattery, .participantSessionEnding, .operationalDegraded: .warning
+        case .participantPowerRestored, .operationalRecovered, .failoverProtectionRestored: .resolved
         case .serviceRecovered, .authorityRecovered: .resolved
         case .pairingRequest, .test: .info
         }
@@ -129,6 +132,8 @@ struct RuruAlert: Equatable {
         case .authorityProblem, .authorityRecovered: preferences.authorityProblems
         case .participantOnBattery, .participantLowBattery, .participantPowerRestored, .participantSessionEnding:
             preferences.participantStatus
+        case .operationalDegraded, .operationalRecovered, .failoverProtectionImpaired, .failoverProtectionRestored:
+            preferences.operationalStatus
         case .pairingRequest, .test: true
         }
     }
@@ -138,6 +143,8 @@ struct RuruAlert: Equatable {
 /// becomes ownership events or influences who may act for a service.
 enum ParticipantActivityKind: String, Equatable {
     case onBattery, lowBattery, powerRestored, sessionEnding
+    case operationalReady, operationalSynchronizing, operationalOutdated, operationalDegraded, operationalUnavailable
+    case failoverProtectionImpaired, failoverProtectionRestored
 
     var title: String {
         switch self {
@@ -145,6 +152,13 @@ enum ParticipantActivityKind: String, Equatable {
         case .lowBattery: "Battery low"
         case .powerRestored: "Power restored"
         case .sessionEnding: "Session ending soon"
+        case .operationalReady: "Operationally ready"
+        case .operationalSynchronizing: "Synchronising"
+        case .operationalOutdated: "Needs synchronisation"
+        case .operationalDegraded: "Operationally degraded"
+        case .operationalUnavailable: "Operational report unavailable"
+        case .failoverProtectionImpaired: "Failover protection impaired"
+        case .failoverProtectionRestored: "Failover protection restored"
         }
     }
     var symbol: String {
@@ -153,6 +167,23 @@ enum ParticipantActivityKind: String, Equatable {
         case .lowBattery: "battery.0percent"
         case .powerRestored: "powerplug"
         case .sessionEnding: "bolt.shield"
+        case .operationalReady: "checkmark.seal"
+        case .operationalSynchronizing: "arrow.triangle.2.circlepath"
+        case .operationalOutdated: "arrow.clockwise"
+        case .operationalDegraded: "exclamationmark.triangle"
+        case .operationalUnavailable: "clock.badge.exclamationmark"
+        case .failoverProtectionImpaired: "shield.slash"
+        case .failoverProtectionRestored: "shield.checkered"
+        }
+    }
+
+    var source: String {
+        switch self {
+        case .onBattery, .lowBattery, .powerRestored, .sessionEnding: "SwiftBot-reported"
+        case .operationalReady, .operationalSynchronizing, .operationalOutdated, .operationalDegraded:
+            "SwiftBot-reported"
+        case .operationalUnavailable, .failoverProtectionImpaired, .failoverProtectionRestored:
+            "Ruru-observed"
         }
     }
 }
@@ -164,6 +195,135 @@ struct ParticipantActivityTransition {
     let date: Date
     let kind: ParticipantActivityKind
     let detail: String
+}
+
+/// Edges from bounded operational reports. The monitor records what SwiftBot
+/// reported separately from Ruru's own freshness/protection observations. It
+/// does not read, write, or influence leases.
+struct OperationalAlertMonitor {
+    private enum Condition: Equatable {
+        case ready, synchronizing, outdated, degraded, unavailable
+
+        init(observation: OperationalStatusObservation) {
+            guard observation.fresh else { self = .unavailable; return }
+            switch observation.state {
+            case .ready: self = .ready
+            case .synchronizing: self = .synchronizing
+            case .outdated: self = .outdated
+            case .degraded: self = .degraded
+            case .unknown: self = .unavailable
+            }
+        }
+
+        var activityKind: ParticipantActivityKind {
+            switch self {
+            case .ready: .operationalReady
+            case .synchronizing: .operationalSynchronizing
+            case .outdated: .operationalOutdated
+            case .degraded: .operationalDegraded
+            case .unavailable: .operationalUnavailable
+            }
+        }
+
+        var detail: String {
+            switch self {
+            case .ready: "SwiftBot reported that readiness checks are complete."
+            case .synchronizing: "SwiftBot reported that synchronisation is in progress."
+            case .outdated: "SwiftBot reported that required data is out of date."
+            case .degraded: "SwiftBot reported a degraded operational condition."
+            case .unavailable: "Ruru observed that the operational report is stale or unavailable."
+            }
+        }
+    }
+
+    private struct State {
+        var condition: Condition
+        var nodeName: String
+        var standby = false
+        var wasReady = false
+    }
+
+    private var states: [String: State] = [:]
+    private var protectionImpaired: Set<String> = []
+
+    mutating func observe(_ observations: [OperationalStatusObservation], participants: [ParticipantObservation],
+                          owners: Set<String>, serviceNames: [String: String], at now: Date)
+        -> (alerts: [RuruAlert], events: [ParticipantActivityTransition]) {
+        let roles = Dictionary(uniqueKeysWithValues: participants.filter(\.fresh).map {
+            ("\($0.clusterID)|\($0.nodeID)", $0.role)
+        })
+        let latest = Dictionary(uniqueKeysWithValues: observations.map { ("\($0.clusterID)|\($0.nodeID)", $0) })
+        var alerts: [RuruAlert] = []
+        var events: [ParticipantActivityTransition] = []
+
+        for (key, observation) in latest.sorted(by: { $0.key < $1.key }) {
+            let condition = Condition(observation: observation)
+            let nodeName = observation.nodeName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? observation.nodeID
+            let standby = roles[key] == .standby
+            let prior = states[key]
+            states[key] = State(condition: condition, nodeName: nodeName, standby: standby || prior?.standby == true,
+                                wasReady: condition == .ready || prior?.wasReady == true)
+            guard prior?.condition != condition else { continue }
+            events.append(.init(clusterID: observation.clusterID, nodeID: observation.nodeID, nodeName: nodeName,
+                                date: now, kind: condition.activityKind, detail: condition.detail))
+            if prior?.condition == .ready, condition != .ready {
+                let service = serviceNames[observation.clusterID] ?? observation.clusterID
+                alerts.append(.init(kind: .operationalDegraded, key: "operational|\(key)",
+                                    title: "\(nodeName) needs attention", detail: "\(service) · \(condition.detail)",
+                                    context: .init(service: service, server: nodeName)))
+            } else if prior != nil, prior!.condition != .ready, condition == .ready {
+                let service = serviceNames[observation.clusterID] ?? observation.clusterID
+                alerts.append(.init(kind: .operationalRecovered, key: "operational|\(key)",
+                                    title: "\(nodeName) is operationally ready", detail: "\(service) · SwiftBot reported that readiness checks are complete.",
+                                    context: .init(service: service, server: nodeName)))
+            }
+        }
+
+        // A retained report that stops refreshing becomes a Ruru-observed
+        // unavailable condition; it is deliberately distinct from a client
+        // claiming that it is degraded.
+        for (key, prior) in Array(states) where latest[key] == nil && serviceNames[key.split(separator: "|", maxSplits: 1).first.map(String.init) ?? ""] != nil {
+            guard prior.condition != .unavailable else { continue }
+            let pieces = key.split(separator: "|", maxSplits: 1).map(String.init)
+            guard pieces.count == 2 else { continue }
+            let clusterID = pieces[0], nodeID = pieces[1]
+            states[key] = State(condition: .unavailable, nodeName: prior.nodeName, standby: prior.standby, wasReady: prior.wasReady)
+            events.append(.init(clusterID: clusterID, nodeID: nodeID, nodeName: prior.nodeName, date: now,
+                                kind: .operationalUnavailable, detail: Condition.unavailable.detail))
+            if prior.condition == .ready {
+                let service = serviceNames[clusterID] ?? clusterID
+                alerts.append(.init(kind: .operationalDegraded, key: "operational|\(key)",
+                                    title: "\(prior.nodeName) needs attention", detail: "\(service) · \(Condition.unavailable.detail)",
+                                    context: .init(service: service, server: prior.nodeName)))
+            }
+        }
+
+        for (clusterID, service) in serviceNames.sorted(by: { $0.key < $1.key }) {
+            let standbys = states.filter { key, state in key.hasPrefix(clusterID + "|") && state.standby && state.wasReady }
+            let protected = !standbys.isEmpty && standbys.contains { $0.value.condition == .ready }
+            let impaired = owners.contains(clusterID) && !standbys.isEmpty && !protected
+            if impaired, protectionImpaired.insert(clusterID).inserted {
+                events.append(.init(clusterID: clusterID, nodeID: "ruru", nodeName: "Ruru", date: now,
+                                    kind: .failoverProtectionImpaired,
+                                    detail: "Ruru observed no previously-ready standby that is operationally ready."))
+                alerts.append(.init(kind: .failoverProtectionImpaired, key: "protection|\(clusterID)",
+                                    title: "\(service) failover protection is impaired",
+                                    detail: "The Primary still owns the service, but no previously-ready standby is operationally ready.",
+                                    context: .init(service: service)))
+            } else if !impaired, protectionImpaired.remove(clusterID) != nil {
+                events.append(.init(clusterID: clusterID, nodeID: "ruru", nodeName: "Ruru", date: now,
+                                    kind: .failoverProtectionRestored,
+                                    detail: "Ruru observed an operationally ready standby."))
+                alerts.append(.init(kind: .failoverProtectionRestored, key: "protection|\(clusterID)",
+                                    title: "\(service) failover protection is restored",
+                                    detail: "Ruru observed an operationally ready standby again.",
+                                    context: .init(service: service)))
+            }
+        }
+        states = states.filter { key, _ in serviceNames[key.split(separator: "|", maxSplits: 1).first.map(String.init) ?? ""] != nil }
+        protectionImpaired.formIntersection(Set(serviceNames.keys))
+        return (alerts, events)
+    }
 }
 
 /// Detects edges in fresh, self-reported participant telemetry. The first
@@ -363,6 +523,10 @@ enum RuruDiscordWebhook {
         case .participantLowBattery: ("🪫", "Ruru • Participant status")
         case .participantPowerRestored: ("🔌", "Ruru • Participant status")
         case .participantSessionEnding: ("⚡", "Ruru • Participant status")
+        case .operationalDegraded: ("⚠️", "Ruru • Operational status")
+        case .operationalRecovered: ("✅", "Ruru • Operational status")
+        case .failoverProtectionImpaired: ("🛡️", "Ruru • Failover protection")
+        case .failoverProtectionRestored: ("✅", "Ruru • Failover protection")
         case .pairingRequest: ("🔔", "Ruru • Pairing")
         case .test: ("✅", "Ruru • Test notification")
         }

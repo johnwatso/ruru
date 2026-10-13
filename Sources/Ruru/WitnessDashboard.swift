@@ -322,7 +322,7 @@ private struct WitnessActivityPage: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            ConsolePageHeader(title: "Activity", subtitle: "Ownership transfers and releases.")
+            ConsolePageHeader(title: "Activity", subtitle: "Ownership, power, and operational readiness transitions.")
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Filter by service, server, action, or term", text: $search).textFieldStyle(.plain)
@@ -331,11 +331,11 @@ private struct WitnessActivityPage: View {
                         .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear filter")
                 }
             }.padding(12).consoleRowGroup()
-            ConsoleSection(title: "Participant Activity", accessory: { Text("\(participantEvents.count) events") }, content: {
+            ConsoleSection(title: "Participant & Operational Activity", accessory: { Text("\(participantEvents.count) events") }, content: {
                 if participantEvents.isEmpty {
                     ConsoleEmptyState(symbol: search.isEmpty ? "bolt" : "magnifyingglass",
                         title: search.isEmpty ? "No participant events yet" : "No matching events",
-                        detail: "UPS, power, battery, and planned session changes appear here.")
+                        detail: "SwiftBot-reported readiness and Ruru-observed protection changes appear here alongside power and session changes.")
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach(participantEvents) { event in
@@ -381,7 +381,7 @@ struct ParticipantActivityRow: View {
                 .font(.system(size: 16, weight: .medium)).frame(width: 22).padding(.top, 3)
             VStack(alignment: .leading, spacing: 5) {
                 Text(event.displayTitle).font(.callout.weight(.medium))
-                Text("\(model.serviceName(for: event.clusterID)) · \(event.nodeName) · \(event.detail)")
+                Text("\(event.displaySource) · \(model.serviceName(for: event.clusterID)) · \(event.nodeName) · \(event.detail)")
                     .font(.callout).foregroundStyle(.secondary).lineLimit(compact ? 1 : nil)
                     .help("Node ID: \(event.nodeID)").textSelection(.enabled)
                 Text(event.time.formatted(date: .abbreviated, time: .standard)).font(.caption).foregroundStyle(.tertiary)
@@ -393,6 +393,7 @@ struct ParticipantActivityRow: View {
 private extension ParticipantActivityRecord {
     var displayKind: ParticipantActivityKind? { ParticipantActivityKind(rawValue: kind) }
     var displayTitle: String { displayKind?.title ?? "Participant update" }
+    var displaySource: String { displayKind?.source ?? "Ruru-observed" }
 }
 
 struct WitnessEventRow: View {

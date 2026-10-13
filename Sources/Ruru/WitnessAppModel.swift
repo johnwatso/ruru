@@ -43,6 +43,7 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var alertDeliveryError: String?
     private var alertMonitor = RuruAlertMonitor()
     private var participantAlertMonitor = ParticipantAlertMonitor()
+    private var operationalAlertMonitor = OperationalAlertMonitor()
     private let alertDelivery = RuruAlertDelivery()
     private var discordWebhook: URL?
     private var notifyToken: String?
@@ -1266,7 +1267,14 @@ final class WitnessAppModel: ObservableObject {
                                      uniquingKeysWith: { first, _ in first }),
             at: now)
         alerts.append(contentsOf: participantTransitions.alerts)
-        for transition in participantTransitions.events {
+        let operationalTransitions = operationalAlertMonitor.observe(
+            operationalObservations, participants: participantObservations,
+            owners: Set(leases.filter { $0.remainingSeconds > 0 && !$0.ownerNodeID.isEmpty }.map(\.clusterID)),
+            serviceNames: Dictionary(configuration.guardedServices.map { ($0.clusterID, $0.name) },
+                                     uniquingKeysWith: { first, _ in first }),
+            at: now)
+        alerts.append(contentsOf: operationalTransitions.alerts)
+        for transition in participantTransitions.events + operationalTransitions.events {
             guard let store else { continue }
             do {
                 let record = try await store.recordParticipantActivity(
@@ -1276,7 +1284,7 @@ final class WitnessAppModel: ObservableObject {
                 participantActivity.insert(record, at: 0)
                 participantActivity = Array(participantActivity.prefix(128))
             } catch {
-                alertDeliveryError = "Participant activity could not be saved to DuckDB."
+                alertDeliveryError = "Operational activity could not be saved to DuckDB."
             }
         }
         for request in pairingRequests where !announcedPairings.contains(request.id) {

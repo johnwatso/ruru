@@ -37,6 +37,13 @@ is separate from ownership history and is never an authority input.
 The versioned operational-status capability is an additional bounded,
 in-memory diagnostic channel. It uses authenticated node reports with stable
 component codes, expires after restart, and is never an authority input.
+Ruru records only readiness-state edges in its separate bounded activity
+history: SwiftBot-reported ready/synchronising/outdated/degraded states are
+labelled separately from Ruru-observed stale reports and failover-protection
+changes. A previously ready standby becoming degraded or stale can alert the
+operator even while the current owner remains healthy; recovery produces a
+separate resolved alert. These observations and delivery failures never affect
+the lease route, term, output permission, or promotion decision.
 
 ## Coordinator direction
 

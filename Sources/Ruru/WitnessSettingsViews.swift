@@ -603,6 +603,10 @@ private struct WitnessAlertSettings: View {
                 Text("A participant reports a power or session change")
                 Text("UPS power loss, low battery, restored power, or a planned session end.")
             }
+            Toggle(isOn: $preferences.operationalStatus) {
+                Text("Operational readiness or failover protection changes")
+                Text("SwiftBot-reported readiness and Ruru-observed standby protection changes.")
+            }
         } header: {
             Text("Alert Me When")
         } footer: {

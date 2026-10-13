@@ -94,7 +94,10 @@ public struct LeaseSnapshot: Codable, Equatable, Sendable {
                   && WitnessNodeName.normalized($0.name) == $0.name }),
               participantEvents.allSatisfy({ $0.id > 0 && identifier($0.clusterID) && identifier($0.nodeID)
                   && WitnessNodeName.normalized($0.nodeName) == $0.nodeName
-                  && ["onBattery", "lowBattery", "powerRestored", "sessionEnding"].contains($0.kind)
+                  && ["onBattery", "lowBattery", "powerRestored", "sessionEnding",
+                      "operationalReady", "operationalSynchronizing", "operationalOutdated",
+                      "operationalDegraded", "operationalUnavailable",
+                      "failoverProtectionImpaired", "failoverProtectionRestored"].contains($0.kind)
                   && $0.time.timeIntervalSince1970.isFinite && !$0.detail.isEmpty
                   && $0.detail.utf8.count <= 1024 && $0.detail.rangeOfCharacter(from: .controlCharacters) == nil }) else {
             throw LeaseRestoreError.invalidSnapshot

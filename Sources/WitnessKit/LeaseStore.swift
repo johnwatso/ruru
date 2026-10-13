@@ -178,7 +178,10 @@ public actor LeaseStore {
     /// enforces bounds even though the caller uses report-derived identifiers.
     public func recordParticipantActivity(clusterID: String, nodeID: String, nodeName: String,
                                           kind: String, detail: String, at date: Foundation.Date = Foundation.Date()) throws -> ParticipantActivityRecord {
-        let allowedKinds: Set<String> = ["onBattery", "lowBattery", "powerRestored", "sessionEnding"]
+        let allowedKinds: Set<String> = ["onBattery", "lowBattery", "powerRestored", "sessionEnding",
+                                         "operationalReady", "operationalSynchronizing", "operationalOutdated",
+                                         "operationalDegraded", "operationalUnavailable",
+                                         "failoverProtectionImpaired", "failoverProtectionRestored"]
         guard !clusterID.isEmpty, clusterID.utf8.count <= 128,
               !nodeID.isEmpty, nodeID.utf8.count <= 128,
               allowedKinds.contains(kind), date.timeIntervalSince1970.isFinite,

@@ -1,5 +1,22 @@
 # Development log and next steps
 
+## 2026-10-13 — Phase 1–2 operational visibility completion
+
+- Added bounded operational transition monitoring on top of the existing
+  in-memory report registry. Ruru records synchronising, readiness, outdated,
+  degraded, stale/unavailable, and failover-protection transition edges in the
+  existing per-service activity history.
+- Alerts now cover a previously ready standby becoming degraded or stale,
+  impaired protection while a primary still owns the lease, and both readiness
+  and protection recovery. The default alert preference is enabled; event-edge
+  detection plus the existing one-minute delivery suppression prevents flapping
+  from flooding destinations.
+- Activity explicitly distinguishes SwiftBot-reported readiness from
+  Ruru-observed staleness/protection. Status-report handling and activity-write
+  failures are isolated from lease acquisition, renewal, expiry, and fencing.
+- Validation: focused Debug Xcode alert, operational-status, and duration
+  suites passed. No multi-Mac or target-Intel run was performed.
+
 ## 2026-10-13 — Authority release identity in discovery
 
 - `GET /v1/service` now returns optional `authorityVersion` and
