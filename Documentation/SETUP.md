@@ -25,8 +25,10 @@ The manual steps are:
    A record, Homebrew installation, or router port forwarding is required.
    HTTPS is supplied by Cloudflare. See [Cloudflare's setup flow](https://developers.cloudflare.com/tunnel/get-started/).
 3. Open **Guarding → Add Service**. Choose the **SwiftBot** template or **Other
-   app**, a name, a unique cluster ID and a lease length (30 seconds suits most
-   apps). Ruru creates a bearer token for that service in this Mac's Keychain.
+   app**, a name, a unique cluster ID and a lease length. The SwiftBot template
+   starts at five minutes (300 seconds); Other app starts at 30 seconds. Change
+   either value only with an understanding of its expiry and recovery trade-off.
+   Ruru creates a bearer token for that service in this Mac's Keychain.
 4. Open the service's **Connection Details** and give every participating server
    the endpoint, cluster ID and token, or use **Pair a Server** to create a
    single-use code and approve the server's request (for servers whose software

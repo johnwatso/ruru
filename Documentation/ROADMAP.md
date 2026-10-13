@@ -1,5 +1,15 @@
 # Development log and next steps
 
+## 2026-10-13 — Phase 0: SwiftBot coordination policy baseline
+
+- The SwiftBot service template now starts new services with a five-minute
+  lease, while the application-neutral template remains at 30 seconds.
+  Existing service records are unchanged; the lease wire protocol and its
+  10–300 second validation range are unchanged.
+- Documented the template distinction and service-token trust boundary. The
+  next coordination capability will be observational only: it must not grant,
+  renew, release, or otherwise influence ownership.
+
 ## 2026-10-13 — Minimum-term client acquisition safety
 
 - Added source-compatible `RuruLeaseClient.acquire(minimumTerm:)` for apps

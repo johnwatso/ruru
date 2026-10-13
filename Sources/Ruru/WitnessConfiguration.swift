@@ -7,7 +7,14 @@ import WitnessKit
 struct GuardedService: Codable, Equatable, Identifiable {
     enum Kind: String, Codable, CaseIterable { case swiftBot = "SwiftBot", custom = "Other app" }
     static let leaseSecondsRange = 10...300
+    /// The conservative default for a general-purpose service.
     static let defaultLeaseSeconds = 30
+
+    /// Template defaults are applied only when creating a service. Existing
+    /// saved services retain their chosen duration.
+    static func defaultLeaseSeconds(for kind: Kind) -> Int {
+        kind == .swiftBot ? 300 : defaultLeaseSeconds
+    }
 
     var id = UUID().uuidString.lowercased()
     var name: String

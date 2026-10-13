@@ -351,7 +351,11 @@ struct WitnessAddServiceSheet: View {
                     }
                 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(!valid || saving || model.busy)
             }
-        }.padding(24).frame(width: 560).interactiveDismissDisabled(saving)
+        }
+        .onChange(of: kind) { _, selectedKind in
+            leaseSeconds = GuardedService.defaultLeaseSeconds(for: selectedKind)
+        }
+        .padding(24).frame(width: 560).interactiveDismissDisabled(saving)
     }
 }
 

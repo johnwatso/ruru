@@ -12,15 +12,19 @@ recent contact, including servers in standby.
 ## Register a service
 
 In **Guarding → Add Service**, choose a template (SwiftBot or Other app), a
-name, a unique cluster ID and a lease length (10 seconds to 5 minutes; 30
-seconds by default). A fresh Ruru starts with no services. Open the service's
+name, a unique cluster ID and a lease length (10 seconds to 5 minutes). The
+SwiftBot template starts at five minutes; Other app starts at 30 seconds.
+Existing services keep their saved duration. A fresh Ruru starts with no services. Open the service's
 **Connection Details** and give every participating server the endpoint,
 cluster ID and bearer token. The token authorizes only that service. Up to 32
 services share one authority, database and optional HTTPS tunnel, each with an
 independent owner and term.
 
 SwiftBot uses **SwiftMesh → Recovery and Pairing**. "Other app" is a generic
-lease integration; it does not imply an adapter for any named application.
+lease integration; it does not imply an adapter for any named application. A
+service token trusts every node within that service, so pair only intended
+participants; it does not authenticate a node or replace an application's own
+membership and transport security.
 
 ## Pair with a code
 

@@ -19,13 +19,15 @@ final class WitnessConfigurationTests: XCTestCase {
         XCTAssertEqual(restored, configuration)
     }
 
-    func testEveryServiceIsEqualAndTheSwiftBotTemplateOnlyChangesPresentation() {
+    func testSwiftBotTemplateUsesLongerDefaultWithoutChangingExistingServices() {
         let worker = GuardedService(name: "Worker", clusterID: "worker")
         XCTAssertEqual(bot.brandAsset, "SwiftBotLogo")
         XCTAssertNil(worker.brandAsset)
         XCTAssertEqual(bot.keychainAccount, "service-" + bot.id)
         XCTAssertEqual(worker.keychainAccount, "service-" + worker.id)
-        XCTAssertEqual(bot.leaseSeconds, worker.leaseSeconds)
+        XCTAssertEqual(bot.leaseSeconds, worker.leaseSeconds, "Stored defaults remain wire-compatible")
+        XCTAssertEqual(GuardedService.defaultLeaseSeconds(for: .custom), 30)
+        XCTAssertEqual(GuardedService.defaultLeaseSeconds(for: .swiftBot), 300)
         XCTAssertTrue(configured(bot, worker).isValid)
     }
 
