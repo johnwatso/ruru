@@ -28,14 +28,38 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
     /// Consecutive failures before the target is reported down.
     public var failureThreshold: Int
     public var enabled: Bool
+    /// Whether this target being down counts as something needing attention on
+    /// Overview. Off by default; the check and its alerts are unaffected.
+    public var needsAttention: Bool
 
     public init(id: String = UUID().uuidString.lowercased(), name: String, kind: Kind, host: String = "", port: Int = 0,
                 url: String = "", intervalSeconds: Int = MonitorTarget.defaultInterval,
                 timeoutSeconds: Int = MonitorTarget.defaultTimeout,
-                failureThreshold: Int = MonitorTarget.defaultThreshold, enabled: Bool = true) {
+                failureThreshold: Int = MonitorTarget.defaultThreshold, enabled: Bool = true,
+                needsAttention: Bool = false) {
+        self.needsAttention = needsAttention
         self.id = id; self.name = name; self.kind = kind; self.host = host; self.port = port; self.url = url
         self.intervalSeconds = intervalSeconds; self.timeoutSeconds = timeoutSeconds
         self.failureThreshold = failureThreshold; self.enabled = enabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, kind, host, port, url, intervalSeconds, timeoutSeconds, failureThreshold, enabled, needsAttention
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        kind = try values.decode(Kind.self, forKey: .kind)
+        host = try values.decode(String.self, forKey: .host)
+        port = try values.decode(Int.self, forKey: .port)
+        url = try values.decode(String.self, forKey: .url)
+        intervalSeconds = try values.decode(Int.self, forKey: .intervalSeconds)
+        timeoutSeconds = try values.decode(Int.self, forKey: .timeoutSeconds)
+        failureThreshold = try values.decode(Int.self, forKey: .failureThreshold)
+        enabled = try values.decode(Bool.self, forKey: .enabled)
+        needsAttention = try values.decodeIfPresent(Bool.self, forKey: .needsAttention) ?? false
     }
 
     /// What the target points at, for display.

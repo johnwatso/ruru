@@ -235,6 +235,19 @@ public actor AlertService {
         _ = try await saveRule(rule)
     }
 
+    /// The saved rules and which defaults were provisioned, for backups.
+    public func rulesFile() -> AlertRulesFile { file }
+
+    /// Replaces the rules with those from a backup. The record of provisioned defaults
+    /// comes with them, so defaults the user deleted are not created again.
+    public func restoreRules(_ restored: AlertRulesFile) async throws {
+        guard started, rulesActive else { throw AlertServiceError.notStarted }
+        var next = AlertRulesFile()
+        next.rules = Array(restored.rules.prefix(AlertRule.maxRules)).map { $0.normalized() }
+        next.provisioned = restored.provisioned
+        try await commit(next)
+    }
+
     /// Creates a rule from a template, even one that already exists.
     public func addRule(fromTemplate id: String) async throws -> AlertRule {
         guard let template = AlertTemplates.template(id) else { throw AlertServiceError.notFound }

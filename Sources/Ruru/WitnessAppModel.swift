@@ -1015,6 +1015,7 @@ final class WitnessAppModel: ObservableObject {
         let createdAt: Date?
         let configuration: WitnessConfiguration?
         let leases: LeaseSnapshot?
+        let alertRules: AlertRulesFile?
     }
 
     var backupAvailable: Bool { !preview }
@@ -1051,14 +1052,16 @@ final class WitnessAppModel: ObservableObject {
         if leases == nil, let latest = WitnessStorage.snapshotFiles().last {
             leases = try LeaseSnapshot.decode(Data(contentsOf: latest))
         }
-        try RuruBackup(configuration: configuration, leases: leases).encoded().write(to: url, options: .atomic)
+        let rules = await alertService?.rulesFile()
+        try RuruBackup(configuration: configuration, leases: leases, alertRules: rules).encoded().write(to: url, options: .atomic)
     }
 
     func readBackup(at url: URL) throws -> BackupContents {
         let contents = try RuruBackup.read(Data(contentsOf: url))
         let created = (try? LeaseSnapshot.decoder.decode(RuruBackup.self, from: Data(contentsOf: url)))?.createdAt
             ?? contents.leases?.createdAt
-        return BackupContents(url: url, createdAt: created, configuration: contents.configuration, leases: contents.leases)
+        return BackupContents(url: url, createdAt: created, configuration: contents.configuration, leases: contents.leases,
+                              alertRules: contents.alertRules)
     }
 
     /// Explicit disaster restore. Stops the service, archives the current
@@ -1103,6 +1106,11 @@ final class WitnessAppModel: ObservableObject {
                 for service in imported.guardedServices {
                     serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
                 }
+                // Alert rules travel with the settings they refer to (monitor and service IDs).
+                if let rules = backup.alertRules, alertRulesActive, let alertService {
+                    try? await alertService.restoreRules(rules)
+                    alertSnapshot = await alertService.snapshot()
+                }
             }
         } catch {
             reopenAfterRestore()
@@ -1145,6 +1153,7 @@ final class WitnessAppModel: ObservableObject {
         let observations = await monitor.drainObservations()
         let transitions = await monitor.drainTransitions()
         guard alertEngineReady else { return }
+        await evaluateUnavailableAuthority()
         if alertRulesActive, let alertService {
             let now = Date()
             if !observations.isEmpty {
@@ -1173,6 +1182,23 @@ final class WitnessAppModel: ObservableObject {
     }
 
     // MARK: Alert engine
+
+    /// If the authority could not open at launch, the normal poll loop never starts and
+    /// would never report it. Say so here, using the monitoring loop, which does run.
+    /// Only the "Ruru's service stopped" condition is evaluated; ownership needs the authority.
+    private func evaluateUnavailableAuthority() async {
+        guard pollTask == nil, state == .failed, store == nil, !shuttingDown else { return }
+        let now = Date()
+        let observation = RuruAlertMonitor.Observation(
+            serviceRunning: false, recovering: false, serviceFailure: error ?? "The ownership database is unavailable.",
+            tunnelError: nil, snapshotError: nil, owners: [:],
+            services: Dictionary(configuration.services.map { ($0.clusterID, $0.name) }, uniquingKeysWith: { first, _ in first }),
+            releases: [])
+        let alerts = alertMonitor.observe(observation, at: now)
+        guard alertRulesActive, let alertService else { enqueueLegacyDelivery(alerts); return }
+        let subjects = RuruAlertSubjects(services: configuration.guardedServices)
+        await alertService.ingest(alertMonitor.conditionSignals(subjects: subjects, at: now).filter { $0.subject.source == .authority })
+    }
 
     private var alertCapabilities: AlertCapabilities {
         AlertCapabilities(monitoring: !configuration.monitorTargets.isEmpty, guarding: !configuration.services.isEmpty,
@@ -1596,16 +1622,14 @@ final class WitnessAppModel: ObservableObject {
                                actionTitle: "Continue Setup", action: .continueSetup), at: 0)
             return items
         }
-        // Someone who only monitors never configured Guarding; its prompts would be noise.
-        let monitoringOnly = configuration.services.isEmpty && !configuration.monitorTargets.isEmpty
-        if state == .stopped, !legacyStorageNeedsReplacement, !monitoringOnly {
+        if state == .stopped, !legacyStorageNeedsReplacement {
             items.append(.init(id: "stopped", tier: .authority, title: "Ruru is stopped",
                                detail: "Servers can’t take or keep ownership until it runs.",
                                health: .warning, actionTitle: "Start", action: .start))
         }
 
         // Transport tier
-        if !configuration.tunnel.isConfigured, !configuration.setup.localOnly, !monitoringOnly {
+        if !configuration.tunnel.isConfigured, !configuration.setup.localOnly {
             items.append(.init(id: "address", tier: .transport, title: "No public address",
                                detail: "Servers on other Macs can’t reach Ruru until Internet Access is set up.",
                                health: .warning, actionTitle: "Set Up", action: .page(.internet)))
@@ -1617,12 +1641,14 @@ final class WitnessAppModel: ObservableObject {
         }
 
         // Guarding tier — services
-        if configuration.services.isEmpty, !monitoringOnly {
+        if configuration.services.isEmpty {
             items.append(.init(id: "services", tier: .guarding, title: "No services yet",
                                detail: "Add an app such as SwiftBot, then pair its servers.",
                                health: .inactive, actionTitle: "Add Service", action: .page(.guarding)))
         }
-        for service in configuration.services where knownNodes(for: service.clusterID).isEmpty
+        var seenClusters = Set<String>()
+        for service in configuration.services where seenClusters.insert(service.clusterID).inserted
+            && knownNodes(for: service.clusterID).isEmpty
             && (pairedServers[service.clusterID] ?? []).isEmpty {
             items.append(.init(id: "unpaired-" + service.id, tier: .guarding,
                                title: "\(service.name) has no servers yet",
@@ -1652,6 +1678,54 @@ final class WitnessAppModel: ObservableObject {
                                health: .error, actionTitle: "Monitoring", action: .page(.monitoring)))
         }
         return items
+    }
+
+    /// What the Overview's single attention row summarises: distinct, actionable
+    /// problems outside the authority itself. Authority problems stay in the top
+    /// card, and setup states (no services, no servers yet, no public address)
+    /// are not problems. Keys are stable identifiers of the underlying issue, so
+    /// an alert opened by a monitor outage is the same issue as the outage.
+    struct OverviewAttention: Equatable {
+        struct Item: Identifiable, Equatable {
+            let id: String
+            let title: String
+            let detail: String
+            let page: WitnessPage
+        }
+        var items: [Item] = []
+        var count: Int { items.count }
+    }
+
+    var overviewAttention: OverviewAttention {
+        var result = OverviewAttention()
+        func add(_ id: String, _ title: String, _ detail: String, _ page: WitnessPage) {
+            guard !result.items.contains(where: { $0.id == id }) else { return }
+            result.items.append(.init(id: id, title: title, detail: detail, page: page))
+        }
+        // Only targets the user opted in count; the rest are quiet on Overview.
+        let counted = Dictionary(uniqueKeysWithValues: configuration.monitorTargets.map { ($0.id, $0.needsAttention) })
+        let down = configuration.monitorTargets.filter { $0.needsAttention && monitorStates[$0.id]?.status == .down }
+        let downIDs = Set(down.map(\.id))
+        for target in down {
+            add("monitor:" + target.id, "\(target.name) is unreachable",
+                monitorStates[target.id]?.last?.detail ?? "Checks are failing.", .monitoring)
+        }
+        for incident in alertSnapshot.openIncidents {
+            let subject = incident.subject
+            if subject.source == .authority { continue }
+            // An outage and the alert it raised are one issue, and it is that
+            // target's: it counts only for targets that opted in.
+            if subject.source == .monitoring, subject.kind == "monitor",
+               downIDs.contains(subject.id) || counted[subject.id] != true { continue }
+            add("alert:\(subject.source.rawValue):\(subject.kind):\(subject.id):\(incident.trigger.rawValue)",
+                incident.title, incident.detail, .alerts)
+        }
+        for request in pairingRequests {
+            add("pairing:" + request.id, "\(request.nodeName ?? request.nodeID) wants to pair",
+                "Approve or reject it in Guarding.", .guarding)
+        }
+        if internetStatus.state == .error { add("transport", "Tunnel unavailable", internetStatus.detail, .internet) }
+        return result
     }
 
     // MARK: Pairing

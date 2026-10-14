@@ -1,5 +1,26 @@
 # Development log and next steps
 
+## 2026-10-15 — v1 scope control and validation freeze
+
+- Established a v1 feature gate in `ARCHITECTURE.md`: Ruru remains an
+  independent lease authority with the operator visibility needed to run it.
+  Monitoring and Alerts remain optional, non-authoritative capabilities; they
+  are retained because their bounded isolation protects the lease path, not as
+  a mandate to grow a general operations platform.
+- Paused new monitor types, alert destinations, generic webhooks/email/scripts,
+  automation, routing, replication, managed work, application-data transfer,
+  automatic discovery and authority replication. Exceptions require a concrete
+  integration need, explicit bounds and safety validation.
+- Removed the monitor-only setup path and its special-case suppression of
+  authority, transport and service setup prompts. Existing monitoring remains
+  available as optional visibility once Ruru is set up; its internal isolation
+  still lets it report an authority-open failure without delaying lease work.
+- The next work is deployment proof: Release-universal and Intel Mac mini
+  execution; real notification and tunnel-loss behaviour; sleep/wake; a
+  two-server failover drill; backup/restore; and bounded long-running resource
+  measurements. Existing, isolated capabilities are not being removed without
+  a demonstrated safety, maintenance or operator-cost reason.
+
 ## 2026-10-13 — Phase 1–2 operational visibility completion
 
 - Added bounded operational transition monitoring on top of the existing
@@ -1216,7 +1237,7 @@
 
 Implemented in six sequential phases. The lease authority, its schema, commit path, wire protocol, restart quarantine and fencing are unchanged. Everything below runs beside it and is never awaited by it.
 
-- **Phase 0 — independence.** Monitoring and alert evaluation now start before, and independently of, the lease authority opening, so a monitoring-only install works and Monitoring keeps running if authority storage fails. Legacy alert delivery moved off the 1 s refresh loop onto its own serial queue. Guarding prompts ("No public address", "No services yet", "Ruru is stopped…") are hidden for installs that only monitor, and the setup assistant offers "Skip Setup — Monitor Only". Monitoring checks gained an *inconclusive* class: a failure while this Mac has no network path (`NWPathMonitor`), or a check that started late after sleep or a stall, neither counts toward a failure threshold nor clears an outage, and is shown grey in history.
+- **Phase 0 — independence.** Monitoring and alert evaluation now start before, and independently of, the lease authority opening, so monitoring continues if authority storage fails. Legacy alert delivery moved off the 1 s refresh loop onto its own serial queue. Monitoring checks gained an *inconclusive* class: a failure while this Mac has no network path (`NWPathMonitor`), or a check that started late after sleep or a stall, neither counts toward a failure threshold nor clears an outage, and is shown grey in history. The monitor-only setup route introduced here was removed on 15 October to keep Ruru focused on its authority role.
 - **Phase 1 — engine.** New UI-free `RuruAlerting` framework (Foundation + DuckDB only; it cannot import WitnessKit). `AlertSignal` (event or condition: active / clear / inconclusive), a trigger catalogue that decides which options each trigger offers (events have no thresholds or recovery), `AlertRule`, a pure deterministic `AlertEngineCore` (thresholds, incident lifecycle, deduplication, cooldown, quiet hours, repeat reminders, flapping), an `AlertDispatcher` (per-destination bounded queues, one retry, timeouts) and an `AlertService` actor. Rules live in `alert-rules.json`; incidents, history, pending evidence and monitoring rollups live in a separate `Alerts/alerts.duckdb` (1 thread, 32 MB limit). Delivery reuses the existing macOS, Discord and Notify! code through `RuruAlertTransport`.
 - **Restart behaviour.** Open incidents persist and come back **unverified**: visible, unresolved, never shown as healthy, never expired by age, never announced again. Only fresh observations verify or recover them, and only a recovery sends a recovery notice. Pending threshold evidence (first-failure time and count) is persisted at most every 30 s and reused after a restart only if the gap is within the producer's trust window (monitors: max(120 s, 3 × interval + timeout)); otherwise the run restarts. Incidents closed because their rule was disabled or removed, or their monitor/service was removed or paused, are *archived* (distinct resolution, no recovery notice).
 - **Phase 2 — monitoring.** Every check is published as a `MonitorObservation`; alerts consume them as evidence. Rule thresholds: monitor's own setting (default, identical to previous behaviour), immediately, N consecutive failed checks, or after a duration. Hourly rollups give 24 h / 7 d / 30 d availability, average latency and inconclusive counts (90-day retention); the monitor detail sheet shows them and its incident history.
@@ -1226,7 +1247,7 @@ Implemented in six sequential phases. The lease authority, its schema, commit pa
 - **Phase 5 — reliability.** A damaged rules file or alert database is set aside (never deleted) with a visible notice and Ruru continues; an unusable alert store degrades to in-memory incidents with a warning.
 - **Validation.** Debug build and the full test suite pass. `CoordinationTests.testSlowMetadataConnectionsLeaveRoomForLeaseRequests`, the intermittent fixture already noted above, failed once in an earlier full run and passed alone and in the final full run. New tests cover thresholds, dedupe, recovery, cooldown during recovery, flapping, quiet hours, repeats, restart with open incidents and pending thresholds, archival, validation, provisioning and migration, destination failure/slowness, damaged and unavailable storage, uptime rollups, dispatcher lanes/retry/bounds, detector signals, and that 40 lease renewals stay under 0.5 s while every destination hangs and 150 alerts fire. Release builds are universal (x86_64 + arm64). UI checked in the debug preview (`--preview-alerts`) at 1340 × 800 and at the 900 × 640 minimum (inspector collapses, nothing clipped) and the History tab.
 - **Not validated.** No run on Intel hardware (an attempted x86_64 test run under Rosetta on Apple silicon hung and was abandoned, so only the universal link was verified). No real notification, Discord or Notify! delivery, macOS notification permission flow, sleep/wake, real network loss, multi-Mac failover, long-duration soak or memory measurement was exercised; automated tests with fakes do not establish real-world monitoring reliability. The new editor was inspected visually but not exercised for every control; dark mode and VoiceOver are unchecked.
-- **Known limits / future.** Alert history and monitoring rollups are not included in portable backups. No generic webhook, email or scripted actions (by design). Ownership-transfer detection starts from the first observation after launch. A node that was never ready is not reported as degraded; after a restart, an incident for a node that stays degraded remains unverified until it reports ready. Participant telemetry conditions begin fresh after restart. Alert rule export/import is not implemented.
+- **Known limits / future.** Alert incidents, history and monitoring rollups are not included in portable backups (rules are; see below). No generic webhook, email or scripted actions (by design). Ownership-transfer detection starts from the first observation after launch. A node that was never ready is not reported as degraded; after a restart, an incident for a node that stays degraded remains unverified until it reports ready. Participant telemetry conditions begin fresh after restart. Alert rule export/import is not implemented.
 
 
 ### Response-time alerts — 14 October 2026
@@ -1234,3 +1255,16 @@ Implemented in six sequential phases. The lease authority, its schema, commit pa
 - New **Monitor responds slowly** trigger and **Slow response** default rule (off until enabled). A rule picks a limit in milliseconds (default 100) and a threshold: consecutive slow checks (default 3), immediately, or after a duration. Each rule judges the same measurement against its own limit, so different monitors or severities can use different limits. A fast check recovers it once; failed or inconclusive checks have no response time and neither open nor clear a slow incident.
 - "Response time" is the TCP connect time or time to HTTP response headers measured by the monitor, not an ICMP ping (still not implemented).
 - Validation: engine tests for per-rule limits, consecutive counts, recovery, inconclusive handling and limit validation; full suite passes. The editor's limit field was built but not clicked through in the running app.
+
+### Alert follow-ups — 14 October 2026
+
+- **Authority failing to open now alerts.** If the lease authority cannot open at launch, the authority poll loop never starts, so "Ruru's service stopped" could not fire. The always-running monitoring loop now evaluates that one condition (it never judges ownership without the authority) and sends it through the rules, or the earlier alert path if rules are unavailable. Covered by a detector test; the launch-failure path itself was not exercised in the running app.
+- **Backups include alert rules.** `RuruBackup` gained an optional `alertRules` (rules plus the record of provisioned defaults); older backups read unchanged and older apps ignore it. Restore with "Restore settings" replaces the rules, and defaults the user had deleted are not recreated. Incidents, history and rollups stay out by design. Tested at the file and service level; a real Settings → Backup export/restore through the UI was not run.
+
+
+### Overview attention summary — 14 October 2026
+
+- The Overview's top card is back to Ruru's own state: icon, name, running badge, host and uptime, and the authority line. It no longer lists warnings, so it keeps the same height however many incidents exist. The page subtitle is removed.
+- A single understated "N issues need attention" row appears only when there are actionable problems outside the authority. `WitnessAppModel.overviewAttention` counts distinct issues by stable key: each down monitor target, each open alert by subject and trigger, each pending pairing request and a tunnel error. An alert raised by a monitor that is already counted down is the same issue, not a second one. Authority-source alerts stay in the authority line. **Review** opens a small popover listing each issue (capped at eight) with the page it lives on; choosing one navigates there. Unreachable monitor targets, and alerts raised by monitors, count only for targets whose own setting "Show on Overview when unreachable" (`MonitorTarget.needsAttention`, default off, absent in older configs reads as off) is on.
+- Setup states (no services, a service with no servers yet, no public address) no longer count. Duplicate "has no servers yet" items for services sharing a cluster ID are collapsed. `attentionItems` (menu bar icon) is unchanged apart from that dedupe.
+- Validation: build and the full test suite pass. The aggregation lives in the app target, which has no unit tests, so the ten scenarios were reasoned from the code, not run in the app; small-window layout and dark mode were not inspected visually.

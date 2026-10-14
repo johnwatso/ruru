@@ -1,8 +1,10 @@
 import Foundation
+import RuruAlerting
 import WitnessKit
 
-/// A portable backup: application settings plus lease terms and history.
-/// Bearer tokens and Cloudflare credentials are never included.
+/// A portable backup: application settings, alert rules, and lease terms and history.
+/// Bearer tokens and Cloudflare credentials are never included. Alert incidents and
+/// history are not: they describe this Mac's past and are not needed to restore behaviour.
 struct RuruBackup: Codable {
     static let currentFormat = "dev.ruruapp.ruru.backup"
     static let currentVersion = 1
@@ -12,13 +14,16 @@ struct RuruBackup: Codable {
     let createdAt: Date
     let configuration: WitnessConfiguration
     let leases: LeaseSnapshot?
+    /// Optional: older backups have none, and older apps ignore it.
+    let alertRules: AlertRulesFile?
 
-    init(configuration: WitnessConfiguration, leases: LeaseSnapshot?, createdAt: Date = Date()) {
+    init(configuration: WitnessConfiguration, leases: LeaseSnapshot?, alertRules: AlertRulesFile? = nil, createdAt: Date = Date()) {
         format = Self.currentFormat
         version = Self.currentVersion
         self.createdAt = createdAt
         self.configuration = Self.portable(configuration)
         self.leases = leases
+        self.alertRules = alertRules
     }
 
     /// Strips this Mac's Cloudflare tunnel identity; a new Mac sets up its own.
@@ -50,16 +55,16 @@ struct RuruBackup: Codable {
     }
 
     /// Reads a full backup or a bare lease snapshot.
-    static func read(_ data: Data) throws -> (configuration: WitnessConfiguration?, leases: LeaseSnapshot?) {
+    static func read(_ data: Data) throws -> (configuration: WitnessConfiguration?, leases: LeaseSnapshot?, alertRules: AlertRulesFile?) {
         if let backup = try? LeaseSnapshot.decoder.decode(RuruBackup.self, from: data) {
             guard backup.format == currentFormat, backup.version == currentVersion else {
                 throw LeaseRestoreError.unsupportedSnapshot
             }
             guard backup.configuration.isValid else { throw WitnessStorage.ConfigurationError.invalid }
             try backup.leases?.validate()
-            return (backup.configuration, backup.leases)
+            return (backup.configuration, backup.leases, backup.alertRules)
         }
-        return (nil, try LeaseSnapshot.decode(data))
+        return (nil, try LeaseSnapshot.decode(data), nil)
     }
 }
 

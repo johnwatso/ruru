@@ -151,20 +151,6 @@ private struct RuruSetupWelcome: View {
             }
             Text("Setup gets Ruru itself working; you’ll add apps like SwiftBot and pair their servers afterwards. It takes a few minutes, and you can stop and continue later.")
                 .font(.callout).foregroundStyle(.secondary)
-            Divider()
-            HStack(alignment: .firstTextBaseline) {
-                Text("Only want to watch websites, Macs or network services?")
-                    .font(.callout).foregroundStyle(.secondary)
-                Spacer()
-                Button("Skip Setup — Monitor Only") {
-                    Task {
-                        try? await model.updateSetup { $0.completed = true; $0.localOnly = true }
-                        model.showingSetup = false
-                        model.selectedPage = .monitoring
-                    }
-                }.buttonStyle(.link)
-                    .help("Monitoring and alerts work without a public address or any guarded service.")
-            }
         }
     }
 }

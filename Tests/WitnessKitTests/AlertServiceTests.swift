@@ -72,7 +72,7 @@ final class AlertServiceTests: XCTestCase {
 
     // MARK: Capability-aware defaults
 
-    func testMonitoringOnlyInstallGetsOnlyMonitoringDefaultsAndGuardingArrivesLater() async throws {
+    func testMonitoringDefaultsAreProvisionedBeforeGuardingArrives() async throws {
         let service = makeService(transport: FakeTransport(), clock: AlertTestClock(start))
         let report = await service.start(capabilities: .init(monitoring: true), legacy: .defaults)
         XCTAssertTrue(report.rulesActive)
@@ -327,6 +327,23 @@ final class AlertServiceTests: XCTestCase {
         _ = await reloaded.start(capabilities: .init(monitoring: true), legacy: .defaults)
         let reloadedRules = await reloaded.snapshot().rules
         XCTAssertEqual(reloadedRules.first { $0.id == made.id }, made)
+    }
+
+    func testRestoringBackedUpRulesKeepsCustomisationsAndDoesNotRecreateDeletedDefaults() async throws {
+        let service = makeService(transport: FakeTransport(), clock: AlertTestClock(start))
+        _ = await service.start(capabilities: .init(monitoring: true), legacy: .defaults)
+        var backup = AlertRulesFile()
+        backup.rules = [AlertRule(name: "NAS latency", trigger: .monitorSlow, threshold: .failedChecks(4), limit: 30)]
+        // The backup's owner had already been offered, and deleted, both monitoring defaults.
+        backup.provisioned = ["default.monitor.unavailable", "default.monitor.slowResponse"]
+        try await service.restoreRules(backup)
+        var snapshot = await service.snapshot()
+        XCTAssertEqual(snapshot.rules.map(\.name), ["NAS latency"])
+        XCTAssertEqual(snapshot.rules.first?.limit, 30)
+        let added = await service.provision(capabilities: .init(monitoring: true), legacy: .defaults)
+        XCTAssertTrue(added.isEmpty, "Deleted defaults stay deleted after a restore")
+        snapshot = await service.snapshot()
+        XCTAssertEqual(snapshot.rules.count, 1)
     }
 
     func testTooManyRulesAreRefused() async throws {

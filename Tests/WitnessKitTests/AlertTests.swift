@@ -385,3 +385,23 @@ final class AlertSignalTests: XCTestCase {
         XCTAssertNotNil(try? RuruNotify.payload(for: alert))
     }
 }
+
+final class AlertAuthorityFailureTests: XCTestCase {
+    func testAnAuthorityThatCannotOpenIsReportedAsAConditionWithoutJudgingOwnership() {
+        var monitor = RuruAlertMonitor()
+        let service = GuardedService(name: "SwiftBot", clusterID: "bot", kind: .swiftBot)
+        let observation = RuruAlertMonitor.Observation(
+            serviceRunning: false, recovering: false, serviceFailure: "The ownership database is unavailable.", tunnelError: nil,
+            snapshotError: nil, owners: [:], services: ["bot": "SwiftBot"], releases: [])
+        let alerts = monitor.observe(observation, at: Date(timeIntervalSince1970: 1_800_000_000))
+        XCTAssertEqual(alerts.map(\.kind), [.authorityProblem], "The earlier alert path also reports it")
+        let signals = monitor.conditionSignals(subjects: RuruAlertSubjects(services: [service]), at: Date(timeIntervalSince1970: 1_800_000_001))
+        let stopped = signals.first { $0.trigger == .serviceStopped }
+        guard case .condition(.active) = stopped?.shape else { return XCTFail("Expected an active authority condition") }
+        XCTAssertEqual(stopped?.detail, "The ownership database is unavailable.")
+        XCTAssertEqual(stopped?.subject.source, .authority)
+        guard case .condition(.inconclusive) = signals.first(where: { $0.trigger == .primaryUnreachable })?.shape else {
+            return XCTFail("Ownership can't be judged without the authority")
+        }
+    }
+}

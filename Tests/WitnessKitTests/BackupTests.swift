@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import RuruAlerting
 @testable import WitnessKit
 
 final class BackupTests: XCTestCase {
@@ -164,5 +165,20 @@ final class BackupTests: XCTestCase {
         XCTAssertThrowsError(try WitnessStorage.checkAuthorityPresent(in: directory))
         try Data().write(to: directory.appendingPathComponent("Authority/leases.duckdb.initialized"))
         XCTAssertNoThrow(try WitnessStorage.checkAuthorityPresent(in: directory))
+    }
+}
+
+final class BackupAlertRulesTests: XCTestCase {
+    func testBackupsCarryAlertRulesAndOlderBackupsStillRead() throws {
+        var file = AlertRulesFile()
+        file.rules = [AlertRule(name: "NAS latency", trigger: .monitorSlow, threshold: .failedChecks(4), limit: 30, cooldownSeconds: 600)]
+        file.provisioned = ["default.monitor.unavailable"]
+        let backup = RuruBackup(configuration: WitnessConfiguration(), leases: nil, alertRules: file)
+        let read = try RuruBackup.read(backup.encoded())
+        XCTAssertEqual(read.alertRules, file)
+        XCTAssertEqual(read.alertRules?.rules.first?.limit, 30)
+        // A backup made before alert rules existed.
+        let old = try RuruBackup.read(RuruBackup(configuration: WitnessConfiguration(), leases: nil).encoded())
+        XCTAssertNil(old.alertRules)
     }
 }

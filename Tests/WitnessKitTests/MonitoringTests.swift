@@ -188,3 +188,21 @@ private actor OutcomeQueue {
         return MonitorResult(ok: ok, latencyMilliseconds: ok ? 1 : nil, detail: ok ? "OK" : "Down")
     }
 }
+
+final class MonitorTargetAttentionTests: XCTestCase {
+    func testOlderTargetWithoutAttentionSettingDecodesAsOff() throws {
+        let json = """
+        {"id":"\(UUID().uuidString.lowercased())","name":"NAS","kind":"TCP","host":"10.0.0.2","port":22,
+         "url":"","intervalSeconds":60,"timeoutSeconds":10,"failureThreshold":3,"enabled":true}
+        """
+        let target = try JSONDecoder().decode(MonitorTarget.self, from: Data(json.utf8))
+        XCTAssertFalse(target.needsAttention)
+    }
+
+    func testAttentionSettingRoundTrips() throws {
+        let target = MonitorTarget(name: "Site", kind: .http, url: "https://example.com", needsAttention: true)
+        let decoded = try JSONDecoder().decode(MonitorTarget.self, from: JSONEncoder().encode(target))
+        XCTAssertEqual(decoded, target)
+        XCTAssertTrue(decoded.needsAttention)
+    }
+}

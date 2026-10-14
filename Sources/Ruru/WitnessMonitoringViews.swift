@@ -324,6 +324,7 @@ struct WitnessMonitorTargetSheet: View {
     @State private var timeout: Int
     @State private var threshold: Int
     @State private var enabled: Bool
+    @State private var needsAttention: Bool
     @State private var saving = false
     @State private var error: String?
 
@@ -342,6 +343,7 @@ struct WitnessMonitorTargetSheet: View {
         _timeout = State(initialValue: target?.timeoutSeconds ?? MonitorTarget.defaultTimeout)
         _threshold = State(initialValue: target?.failureThreshold ?? MonitorTarget.defaultThreshold)
         _enabled = State(initialValue: target?.enabled ?? true)
+        _needsAttention = State(initialValue: target?.needsAttention ?? false)
     }
 
     private var draft: MonitorTarget {
@@ -349,7 +351,8 @@ struct WitnessMonitorTargetSheet: View {
                       name: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind,
                       host: host.trimmingCharacters(in: .whitespacesAndNewlines), port: port,
                       url: url.trimmingCharacters(in: .whitespacesAndNewlines),
-                      intervalSeconds: interval, timeoutSeconds: timeout, failureThreshold: threshold, enabled: enabled)
+                      intervalSeconds: interval, timeoutSeconds: timeout, failureThreshold: threshold, enabled: enabled,
+                      needsAttention: needsAttention)
     }
 
     var body: some View {
@@ -388,6 +391,9 @@ struct WitnessMonitorTargetSheet: View {
                     ForEach(1...5, id: \.self) { Text($0 == 1 ? "1 failed check" : "\($0) failed checks").tag($0) }
                 }
                 Toggle("Check this target", isOn: $enabled)
+                Toggle("Show on Overview when unreachable", isOn: $needsAttention)
+                Text("Adds this target to the issues needing attention. Checks and alerts are unaffected.")
+                    .font(.callout).foregroundStyle(.secondary)
                 if let error { ConsoleIssue(title: "Target could not be saved", detail: error) }
             }.textFieldStyle(.roundedBorder)
             HStack {

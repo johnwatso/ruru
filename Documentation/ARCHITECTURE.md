@@ -89,6 +89,47 @@ approval checkpoints and publishes an enabled allowlist. SwiftBot offers this
 sharing choice during failover pairing using the existing Ruru credentials.
 Managed work, replication and coordinator routing decisions remain future work.
 
+## v1 scope and feature gate
+
+Ruru v1 is a safe, independent authority for a configured service and the
+operator visibility needed to run that authority. Its product promise is that
+Ruru decides which participant may perform guarded work; it does not perform
+that work, host application data, or become a general automation platform.
+
+The existing Monitoring and Alerts capabilities are retained as optional,
+strictly non-authoritative operational visibility for a Ruru deployment. They
+may observe configured targets and report conditions, but must remain
+independently bounded and must never influence ownership, fencing, promotion,
+routing, client output permission, or the lease store's availability. Their
+current isolation is a reason to retain them, not a reason to grow a separate
+operations product. Ruru does not offer a monitor-only setup path.
+
+Until v1 deployment validation is complete, new runtime work is in scope only
+when it does at least one of the following:
+
+1. Strengthens lease safety, durability, recovery, service isolation or client
+   compatibility.
+2. Makes an already configured guarded service safer or more operable.
+3. Is required by a concrete application integration and fits an existing,
+   versioned capability boundary.
+4. Closes a documented release-validation gap on the target Intel/Sequoia
+   deployment.
+
+The following remain out of scope for v1: additional monitor/probe types,
+additional alert destinations, generic webhooks, email, scripts or automated
+actions; workflow execution; routing or replication; managed work assignment;
+authority replication; application data transfer; and automatic application or
+server discovery. A proposed exception needs an explicit user need, resource
+and failure bounds, a statement of why it cannot live in the participating app,
+and safety validation before implementation.
+
+The near-term priority is proof rather than feature expansion: a Release
+universal build, execution on the Intel Mac mini, real notification and tunnel
+failure behaviour, sleep/wake, a two-server failover drill, backup/restore,
+and a bounded long-running resource check. Features already implemented are not
+removed merely to make the source tree smaller; removal is justified only by a
+demonstrated safety, maintenance, or operator-cost problem.
+
 ## Wire compatibility
 
 Routes are `/v1/lease/acquire`, `/v1/lease/renew`, `/v1/lease/release`.

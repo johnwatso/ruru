@@ -10,6 +10,7 @@ struct WitnessOverview: View {
     let onNavigate: (WitnessPage) -> Void
     let onStop: () -> Void
     @State private var showingStorageSetup = false
+    @State private var showingAttention = false
     @State private var availableCardWidth: CGFloat = 0
     @State private var availableTableWidth: CGFloat = 0
     private let host = RuruHostInfo.current
@@ -44,7 +45,7 @@ struct WitnessOverview: View {
     }
 
     private var header: some View {
-        ConsolePageHeader(title: "Overview", subtitle: "Ruru’s status, guarded services and recent activity at a glance.") {
+        ConsolePageHeader(title: "Overview", subtitle: "") {
             HStack(spacing: 12) {
                 Menu {
                     if model.state == .running {
@@ -99,11 +100,6 @@ struct WitnessOverview: View {
         }
     }
 
-    /// Issues beyond the authority line itself, each with the action that fixes it.
-    private var otherIssues: [WitnessAppModel.Attention] {
-        model.attentionItems.filter { $0.id != "recovery" && $0.id != "stopped" }
-    }
-
     private var summary: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center, spacing: 20) {
@@ -130,18 +126,60 @@ struct WitnessOverview: View {
                 }
                 Spacer(minLength: 0)
             }
-            if !otherIssues.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(otherIssues) { item in
-                        WitnessOverviewIssue(tier: item.tier.rawValue, title: item.title,
-                                             detail: item.detail, health: item.health,
-                                             reviewTitle: item.actionTitle) { perform(item.action) }
-                    }
-                }
-            }
+            attentionRow
         }
         .padding(22).frame(maxWidth: .infinity, alignment: .leading)
         .consoleSurface(cornerRadius: 22)
+    }
+
+    /// One understated line for everything outside the authority that needs a
+    /// look. Absent when nothing does; the list opens only on request.
+    @ViewBuilder private var attentionRow: some View {
+        let attention = model.overviewAttention
+        if attention.count > 0 {
+            let text = "\(attention.count) \(attention.count == 1 ? "issue needs" : "issues need") attention"
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.circle").foregroundStyle(.secondary).accessibilityHidden(true)
+                Text(text).font(.callout).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button { showingAttention = true } label: { Text("Review").font(.callout) }
+                    .buttonStyle(.borderless).foregroundStyle(Color.accentColor)
+                    .accessibilityLabel("Review \(text)")
+                    .popover(isPresented: $showingAttention, arrowEdge: .bottom) {
+                        attentionList(attention.items)
+                    }
+            }
+            .padding(.top, 14)
+            .overlay(alignment: .top) { Divider() }
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private func attentionList(_ items: [WitnessAppModel.OverviewAttention.Item]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(items.prefix(8)) { item in
+                Button {
+                    showingAttention = false
+                    onNavigate(item.page)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title).font(.callout.weight(.medium))
+                            Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                        Spacer(minLength: 12)
+                        Text(item.page.rawValue).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 8).padding(.horizontal, 14).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityHint("Shows \(item.page.rawValue)")
+                if item.id != items.prefix(8).last?.id { Divider() }
+            }
+            if items.count > 8 {
+                Text("and \(items.count - 8) more").font(.caption).foregroundStyle(.secondary).padding(14)
+            }
+        }
+        .frame(width: 340).padding(.vertical, 4)
     }
 
     private var appIcon: some View {
@@ -342,49 +380,6 @@ struct WitnessOverview: View {
         })
     }
 }
-
-private struct WitnessOverviewIssue: View {
-    var tier: String = ""
-    let title: String
-    let detail: String
-    let health: WitnessHealth
-    var reviewTitle = "Review"
-    let onReview: () -> Void
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { message; Spacer(minLength: 16); review }
-            VStack(alignment: .leading, spacing: 12) { message; review }
-        }
-        .padding(.leading, 24).padding(.trailing, 14).padding(.vertical, 10)
-        .background(health.tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(tier.isEmpty ? "" : "\(tier): ")\(title). \(detail)")
-    }
-    private var message: some View {
-        HStack(alignment: .center, spacing: 16) {
-            Image(systemName: health.symbol)
-                .font(.system(size: 22)).foregroundStyle(health == .inactive ? .orange : health.tint)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    if !tier.isEmpty {
-                        Text(tier).font(.caption.weight(.semibold)).foregroundStyle(health.tint)
-                            .textCase(.uppercase).accessibilityHidden(true)
-                        Text("—").font(.caption).foregroundStyle(.tertiary).accessibilityHidden(true)
-                    }
-                    Text(title).font(.callout.weight(.semibold))
-                }
-                Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-    private var review: some View {
-        Button(reviewTitle, action: onReview).buttonStyle(.bordered).buttonBorderShape(.capsule)
-            .accessibilityLabel(reviewTitle == "Review" ? "Review \(title)" : reviewTitle)
-    }
-}
-
 
 /// Read-only facts about this Mac and build, shown in Settings → General.
 struct RuruHostInfo {
