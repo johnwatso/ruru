@@ -6,6 +6,7 @@ import Network
 public actor WitnessHTTPServer {
     private var configuringServices = false
     private var router: WitnessRouter
+    private let webHandler: WitnessWebHandler?
     public nonisolated let catalogue: CoordinationCatalogue
     public nonisolated let pairing: PairingDesk
     public nonisolated let participants: ParticipantPresence
@@ -25,10 +26,11 @@ public actor WitnessHTTPServer {
         var buffer = Data()
         let timeout: Task<Void, Never>
         var coordination = false
+        var web = false
     }
 
     public init(store: LeaseStore, clusterID: String, token: String, authorityVersion: String? = nil,
-                authorityBuild: String? = nil) throws {
+                authorityBuild: String? = nil, webHandler: WitnessWebHandler? = nil) throws {
         router = try WitnessRouter(store: store, clusterID: clusterID, token: token,
                                    authorityVersion: authorityVersion, authorityBuild: authorityBuild)
         catalogue = router.catalogue
@@ -37,12 +39,13 @@ public actor WitnessHTTPServer {
         operationalStatus = router.operationalStatus
         self.authorityVersion = authorityVersion
         self.authorityBuild = authorityBuild
+        self.webHandler = webHandler
     }
 
     public init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil,
                 pairing: PairingDesk? = nil, participants: ParticipantPresence? = nil,
                 operationalStatus: OperationalStatusRegistry? = nil, authorityVersion: String? = nil,
-                authorityBuild: String? = nil) throws {
+                authorityBuild: String? = nil, webHandler: WitnessWebHandler? = nil) throws {
         router = try WitnessRouter(store: store, services: services, catalogue: catalogue, pairing: pairing, participants: participants,
                                   operationalStatus: operationalStatus, authorityVersion: authorityVersion,
                                   authorityBuild: authorityBuild)
@@ -52,6 +55,7 @@ public actor WitnessHTTPServer {
         self.operationalStatus = router.operationalStatus
         self.authorityVersion = authorityVersion
         self.authorityBuild = authorityBuild
+        self.webHandler = webHandler
     }
 
     /// Changes admission only; the database, lease deadlines and listener stay alive.
@@ -199,25 +203,64 @@ public actor WitnessHTTPServer {
             }
             connections[id]?.coordination = true
         }
+        if connections[id]?.web == false,
+           let end = buffer.range(of: Data("\r\n".utf8)),
+           let line = String(data: buffer[..<end.lowerBound], encoding: .utf8),
+           let path = line.split(separator: " ").dropFirst().first,
+           Self.isWebPath(path) {
+            guard connections.values.filter(\.web).count < 4 else {
+                send(.error("web_ui_busy", status: 429), id: id)
+                return
+            }
+            connections[id]?.web = true
+        }
         switch HTTPParser.parse(buffer) {
         case .incomplete:
             if complete { close(id) } else { receive(id) }
         case .reject(let status): send(.error("invalid_request", status: status), id: id)
         case .request(let request):
+            if Self.isWebPath(Substring(request.path)), let webHandler,
+               let response = await webHandler(WitnessWebRequest(request)) {
+                send(response, id: id)
+                return
+            }
             let reply = await router.route(request)
             send(reply, id: id)
         }
     }
 
+    private static func isWebPath(_ path: Substring) -> Bool {
+        path == "/" || path.hasPrefix("/web/") || path.hasPrefix("/api/web/")
+    }
+
     private func send(_ reply: LeaseReply, id: UUID) {
+        send(WitnessWebResponse(status: reply.status, body: reply.body), id: id)
+    }
+
+    private func send(_ reply: WitnessWebResponse, id: UUID) {
         let reasons = [200: "OK", 202: "Accepted", 410: "Gone", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict",
                        429: "Too Many Requests", 411: "Length Required", 413: "Content Too Large", 431: "Request Header Fields Too Large", 503: "Service Unavailable"]
-        var bytes = Data("HTTP/1.1 \(reply.status) \(reasons[reply.status] ?? "Error")\r\nContent-Type: application/json\r\nContent-Length: \(reply.body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".utf8)
+        let type = Self.safeHeaderValue(reply.contentType) ?? "application/octet-stream"
+        var bytes = Data("HTTP/1.1 \(reply.status) \(reasons[reply.status] ?? "Error")\r\nContent-Type: \(type)\r\nContent-Length: \(reply.body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n".utf8)
+        for (name, value) in reply.headers.sorted(by: { $0.key < $1.key }) where Self.safeHeaderName(name) && Self.safeHeaderValue(value) != nil {
+            bytes.append(Data("\(name): \(value)\r\n".utf8))
+        }
+        bytes.append(Data("\r\n".utf8))
         bytes.append(reply.body)
         connections[id]?.network.send(content: bytes, completion: .contentProcessed { [weak self] _ in
             guard let server = self else { return }
             Task { await server.close(id) }
         })
+    }
+
+    private static func safeHeaderName(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.allSatisfy { (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || $0 == 45 }
+    }
+
+    private static func safeHeaderValue(_ value: String) -> String? {
+        guard !value.isEmpty, value.utf8.count <= 4_096,
+              !value.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else { return nil }
+        return value
     }
 
     private func close(_ id: UUID) {

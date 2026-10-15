@@ -225,7 +225,7 @@ special cases in the shared UI. Keep credentials in the existing service sheet.
 
 ## Monitoring
 
-A sidebar page of reachability targets, each a TCP port or an HTTP(S) address.
+A sidebar page of reachability targets, each a TCP port, DNS server or HTTP(S) address.
 Rows show a status badge (Up, Down, Paused, Checking…), the last response time or
 failure reason and a 30-check history strip; a detail sheet shows 60 checks, status
 changes and settings. A target is reported down only after its configured number of
@@ -235,3 +235,5 @@ down targets appear in Overview's attention list and Monitoring card, in the glo
 activity feed, and as alerts (Settings → Alerts → “A monitored target goes down”).
 Targets take a custom icon exactly like services (drop an app or image on the sheet, or
 Choose…); it is shown on rows and in the detail sheet and shares the service icon store.
+New HTTP(S) targets without a chosen icon also make one bounded, same-origin request for
+`/favicon.ico`; the result is optional and never affects the reachability check.

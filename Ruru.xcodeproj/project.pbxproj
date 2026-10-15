@@ -51,6 +51,7 @@
 		4CF6A2204BDC3941AB23D4E4 /* WitnessKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A39FDFEDFEDFC2836F06E21 /* WitnessKeychain.swift */; };
 		4E9F0ED1C16047BBDFDFDE43 /* AlertRuleStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0F195374BD5F31A7A19E91 /* AlertRuleStorage.swift */; };
 		56B7A83DD2DC5C773E0EFF69 /* Sparkle-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 53BAEA3F57493AEC0AD71AD3 /* Sparkle-LICENSE.txt */; };
+		56D348F58DEEC4238CB35229 /* RuruWebUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8F93F0B323D6AFD02C8FFCE /* RuruWebUI.swift */; };
 		5A7A0715F1F8EF3FFF74E1DC /* LeaseDurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D97E8AAAF34560CCDBDFD0D6 /* LeaseDurationTests.swift */; };
 		5BBB1913D8A1C40FC0C80D6C /* CloudflareDNSProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361B6452A7FA6B958247E39C /* CloudflareDNSProvider.swift */; };
 		5D7FB7DFC165C57646866D11 /* RuruApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41754CE5DDF212A3E5D325FC /* RuruApp.swift */; };
@@ -66,9 +67,11 @@
 		7C1E0FDDDDA27A7205FC37EA /* LegacyAuthorityReplacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 072A55EE0516065DBFAD2DCD /* LegacyAuthorityReplacement.swift */; };
 		7D29F078CE18F195A82CE828 /* DuckDB in Frameworks */ = {isa = PBXBuildFile; productRef = 4E148C9499CEAB2948EF4281 /* DuckDB */; };
 		7E8653657367B67F565D27F7 /* WitnessHTTPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCC680F6E57E9994BE1BC16D /* WitnessHTTPTests.swift */; };
+		7FD94689AFC66BD8F7EC13B5 /* CloudflareSPFRecordTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDACAF90AB146C9E8B3F178D /* CloudflareSPFRecordTests.swift */; };
 		85075B9DF2F33F14C790EA1C /* cloudflared-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 63879848CC86E8B53CE30747 /* cloudflared-LICENSE.txt */; };
 		851ADB982E701B51930BD0B7 /* RuruAlertTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8574A11B318E28B0689DF64 /* RuruAlertTransport.swift */; };
 		8B9A58ADF82F7B7DDF648233 /* WitnessInternetAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB0DE86CD88FFB20F836FC48 /* WitnessInternetAccess.swift */; };
+		923E40413DA4BD8CD0E94162 /* WebAuthn in Frameworks */ = {isa = PBXBuildFile; productRef = 0ADC2B0D2273D90FFB473859 /* WebAuthn */; };
 		94CC5799968C03A87B27F47A /* UpToDateUserDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA714710207684117CA4DD8F /* UpToDateUserDriver.swift */; };
 		9B76015878362B39C11E17E4 /* AlertEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A02A442579CED3138E66E9F /* AlertEngineTests.swift */; };
 		9BB7D0589625396D14C05F45 /* DuckDB-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 7F578465B5907701B1A9B525 /* DuckDB-LICENSE.txt */; };
@@ -88,6 +91,7 @@
 		B6EF4145A27C8B6A0F7B62DE /* CloudflareTunnelClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF8D3058FEE8AA4A62308A99 /* CloudflareTunnelClient.swift */; };
 		BC0AC4BC26AC09E1664AA847 /* StorageProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4849497892124A0AC81F8B5D /* StorageProbe.swift */; };
 		BECFD308F35EC7A73DA09916 /* Pairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9932375055BEB2EE0933958E /* Pairing.swift */; };
+		C02AD9E3718D2FAD4B493B1C /* CloudflareSPFRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2203AACC6712D8920165055A /* CloudflareSPFRecord.swift */; };
 		C0AA717F3FDC78F0C740CF24 /* WitnessTransportDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0047855EA2F1733C68587BC /* WitnessTransportDiagnosticsTests.swift */; };
 		C137E10FA5B102C47816647B /* WitnessOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139481AB632E0A52F5FEB8B2 /* WitnessOverview.swift */; };
 		C18BF56767ACE5A3B67E30D9 /* RuruAlerts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF39C444DFA7AB19816451D7 /* RuruAlerts.swift */; };
@@ -203,6 +207,7 @@
 		2006424C788DF3112944C3C4 /* OperationalStatusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationalStatusTests.swift; sourceTree = "<group>"; };
 		2180BE79B01BBF57CDB1BB61 /* MonitoringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringTests.swift; sourceTree = "<group>"; };
 		2197E021E81DE5F0EC0DD31C /* LeaseModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseModels.swift; sourceTree = "<group>"; };
+		2203AACC6712D8920165055A /* CloudflareSPFRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareSPFRecord.swift; sourceTree = "<group>"; };
 		26B9F3DF5E6D5909C8F67940 /* LeaseStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseStore.swift; sourceTree = "<group>"; };
 		29634F205646A0A16F47ABEF /* CoordinationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinationModels.swift; sourceTree = "<group>"; };
 		2A02A442579CED3138E66E9F /* AlertEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertEngineTests.swift; sourceTree = "<group>"; };
@@ -254,6 +259,7 @@
 		9ECBCC36366FFAC578AA682A /* RuruAlerting.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = RuruAlerting.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		A4F804C58282C87C3F86B4E8 /* LeaseBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseBackup.swift; sourceTree = "<group>"; };
 		A6B593CCB86129D4F176F104 /* Monitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Monitoring.swift; sourceTree = "<group>"; };
+		A8F93F0B323D6AFD02C8FFCE /* RuruWebUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruWebUI.swift; sourceTree = "<group>"; };
 		AA714710207684117CA4DD8F /* UpToDateUserDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpToDateUserDriver.swift; sourceTree = "<group>"; };
 		ABDC63C4E5F00760665B15C6 /* RuruClientTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RuruClientTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B5DB2F5A10FD8280BF656C4F /* OperationalStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationalStatus.swift; sourceTree = "<group>"; };
@@ -279,6 +285,7 @@
 		E6EF0A5DA812F3130511BD6C /* WitnessConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessConfigurationTests.swift; sourceTree = "<group>"; };
 		E781CE2113EE42FD5459A118 /* ParticipantPresenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParticipantPresenceTests.swift; sourceTree = "<group>"; };
 		ED154C66DC59BA294AB08EB8 /* LICENSE */ = {isa = PBXFileReference; path = LICENSE; sourceTree = "<group>"; };
+		EDACAF90AB146C9E8B3F178D /* CloudflareSPFRecordTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareSPFRecordTests.swift; sourceTree = "<group>"; };
 		EF00FFD0764524C3F4B90383 /* AlertTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertTests.swift; sourceTree = "<group>"; };
 		EF8D3058FEE8AA4A62308A99 /* CloudflareTunnelClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareTunnelClient.swift; sourceTree = "<group>"; };
 		F018A0414FBFE44DE1E447D5 /* cloudflared */ = {isa = PBXFileReference; path = cloudflared; sourceTree = "<group>"; };
@@ -320,6 +327,7 @@
 				F3DE3C454952D76767FB7B30 /* RuruAlerting.framework in Frameworks */,
 				D13008D67C966B7313B57B1A /* DuckDB in Frameworks */,
 				A3C441FC738F346EFB5AA116 /* Sparkle in Frameworks */,
+				923E40413DA4BD8CD0E94162 /* WebAuthn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -352,6 +360,7 @@
 				EF00FFD0764524C3F4B90383 /* AlertTests.swift */,
 				4B0C7A44BE370460F30CA7AE /* BackupTests.swift */,
 				90F4329634CEDD1178A75E99 /* ClientConformanceTests.swift */,
+				EDACAF90AB146C9E8B3F178D /* CloudflareSPFRecordTests.swift */,
 				D0425971E5EFD8DD4C38C82F /* CoordinationTests.swift */,
 				665E47E1E6268C552D5F5490 /* DuckDBStorageTests.swift */,
 				D97E8AAAF34560CCDBDFD0D6 /* LeaseDurationTests.swift */,
@@ -403,6 +412,7 @@
 				1FE5AC3DF036A99A62C67FF9 /* RuruServiceIcons.swift */,
 				C1DE3631D1C6B019ACC043EE /* RuruSetupAssistant.swift */,
 				31B2014C61EC1C9648C1C16D /* RuruUpdateConfiguration.swift */,
+				A8F93F0B323D6AFD02C8FFCE /* RuruWebUI.swift */,
 				AA714710207684117CA4DD8F /* UpToDateUserDriver.swift */,
 				6B9DAC3EC172A3ED226F717D /* WitnessActivityFeed.swift */,
 				940F27770AD755263EF1164D /* WitnessAlertsViews.swift */,
@@ -453,6 +463,7 @@
 			isa = PBXGroup;
 			children = (
 				361B6452A7FA6B958247E39C /* CloudflareDNSProvider.swift */,
+				2203AACC6712D8920165055A /* CloudflareSPFRecord.swift */,
 				EF8D3058FEE8AA4A62308A99 /* CloudflareTunnelClient.swift */,
 				0485423B78D36235B557FD09 /* CoordinationCatalogue.swift */,
 				29634F205646A0A16F47ABEF /* CoordinationModels.swift */,
@@ -645,6 +656,7 @@
 			packageProductDependencies = (
 				E7FD66C4FB6B85E5E1DCB8DF /* DuckDB */,
 				BFC20F58A33E9AACC1DBA1E3 /* Sparkle */,
+				0ADC2B0D2273D90FFB473859 /* WebAuthn */,
 			);
 			productName = Ruru;
 			productReference = 900E2AEDDE0AEC7F10FBF786 /* Ruru.app */;
@@ -691,6 +703,7 @@
 			packageReferences = (
 				3EC90959819AD983E1E0CF43 /* XCRemoteSwiftPackageReference "duckdb-swift" */,
 				8EE8C21633D7C4D7F7DD03FD /* XCRemoteSwiftPackageReference "Sparkle" */,
+				D55AE90742DFB38FA29583C8 /* XCRemoteSwiftPackageReference "swift-webauthn" */,
 				BD65421137D18F908AF13D7B /* XCLocalSwiftPackageReference "Clients/RuruClient" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -759,6 +772,7 @@
 				124C797EB14704E94C7FDB8C /* RuruServiceIcons.swift in Sources */,
 				E9C377BBD2F3E6EECA3F571D /* RuruSetupAssistant.swift in Sources */,
 				9F4FC631F800A074F5698106 /* RuruUpdateConfiguration.swift in Sources */,
+				56D348F58DEEC4238CB35229 /* RuruWebUI.swift in Sources */,
 				94CC5799968C03A87B27F47A /* UpToDateUserDriver.swift in Sources */,
 				0F4BE7CEF3403CC556D9DD6F /* WitnessActivityFeed.swift in Sources */,
 				4C5FC76E1AFA480D2FBAB663 /* WitnessAlertsViews.swift in Sources */,
@@ -784,6 +798,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5BBB1913D8A1C40FC0C80D6C /* CloudflareDNSProvider.swift in Sources */,
+				C02AD9E3718D2FAD4B493B1C /* CloudflareSPFRecord.swift in Sources */,
 				B6EF4145A27C8B6A0F7B62DE /* CloudflareTunnelClient.swift in Sources */,
 				D2FADF8394FB1B32F87E46FF /* CoordinationCatalogue.swift in Sources */,
 				22D6B330228246AA32E8920F /* CoordinationModels.swift in Sources */,
@@ -830,6 +845,7 @@
 				23EDEFA0BB12F1685702EB1C /* AlertTests.swift in Sources */,
 				2B23FEE30A03ACF65B8A71B7 /* BackupTests.swift in Sources */,
 				11131DCADCE7F20807F0FC98 /* ClientConformanceTests.swift in Sources */,
+				7FD94689AFC66BD8F7EC13B5 /* CloudflareSPFRecordTests.swift in Sources */,
 				78DCF4BD209CECEA1DBC9E4E /* CoordinationTests.swift in Sources */,
 				FD995F83B6EFB5D9F2D8855D /* DuckDBStorageTests.swift in Sources */,
 				5A7A0715F1F8EF3FFF74E1DC /* LeaseDurationTests.swift in Sources */,
@@ -1046,7 +1062,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2026100615;
+				CURRENT_PROJECT_VERSION = 2026101612;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1209,7 +1225,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2026100615;
+				CURRENT_PROJECT_VERSION = 2026101612;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -1334,9 +1350,22 @@
 				version = 2.9.5;
 			};
 		};
+		D55AE90742DFB38FA29583C8 /* XCRemoteSwiftPackageReference "swift-webauthn" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/brokenhandsio/swift-webauthn.git";
+			requirement = {
+				kind = revision;
+				revision = 2b6b4d4cfe9a3d65955ba94dbc09425637952dae;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		0ADC2B0D2273D90FFB473859 /* WebAuthn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D55AE90742DFB38FA29583C8 /* XCRemoteSwiftPackageReference "swift-webauthn" */;
+			productName = WebAuthn;
+		};
 		1A12FE85F83EEA79AFFD4B99 /* RuruClient */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RuruClient;

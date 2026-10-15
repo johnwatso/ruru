@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import XCTest
 
 final class ServiceIconTests: XCTestCase {
@@ -61,4 +62,62 @@ final class ServiceIconTests: XCTestCase {
         XCTAssertEqual(pick.suggestedName, "Calculator")
         XCTAssertNotNil(NSImage(data: pick.png))
     }
+
+    func testWebsiteIconFetchUsesSameOriginFaviconAndNormalizesIt() async throws {
+        let favicon = try RuruServiceIcons.normalizedPNG(from: sampleImage(width: 48, height: 48))
+        WebsiteIconProtocol.install(status: 200, body: favicon)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebsiteIconProtocol.self]
+        let icon = try await RuruServiceIcons.fetchWebsiteIcon(
+            for: URL(string: "https://example.com/status/health")!,
+            session: URLSession(configuration: configuration)
+        )
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: icon))
+        XCTAssertEqual(bitmap.pixelsWide, RuruServiceIcons.pixels)
+        XCTAssertEqual(bitmap.pixelsHigh, RuruServiceIcons.pixels)
+        XCTAssertEqual(WebsiteIconProtocol.lastRequest?.url?.absoluteString, "https://example.com/favicon.ico")
+    }
+
+    func testWebsiteIconFetchRejectsOverLimitResponse() async {
+        WebsiteIconProtocol.install(status: 200, body: Data(), contentLength: RuruServiceIcons.maxWebsiteIconBytes + 1)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebsiteIconProtocol.self]
+        do {
+            _ = try await RuruServiceIcons.fetchWebsiteIcon(
+                for: URL(string: "https://example.com")!, session: URLSession(configuration: configuration)
+            )
+            XCTFail("Expected an oversized favicon to be rejected")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "That website’s favicon could not be downloaded.")
+        }
+    }
+}
+
+private final class WebsiteIconProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var reply: (status: Int, body: Data, contentLength: Int)?
+    nonisolated(unsafe) private static var capturedRequest: URLRequest?
+    static var lastRequest: URLRequest? { lock.withLock { capturedRequest } }
+
+    static func install(status: Int, body: Data, contentLength: Int? = nil) {
+        lock.withLock {
+            reply = (status, body, contentLength ?? body.count)
+            capturedRequest = nil
+        }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let reply = Self.lock.withLock { Self.capturedRequest = request; return Self.reply }
+        guard let reply, let url = request.url else { client?.urlProtocolDidFinishLoading(self); return }
+        let response = HTTPURLResponse(url: url, statusCode: reply.status, httpVersion: "HTTP/1.1",
+                                       headerFields: ["Content-Type": "image/png", "Content-Length": "\(reply.contentLength)"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: reply.body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() { }
 }

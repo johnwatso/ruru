@@ -8,6 +8,36 @@ struct HTTPRequest: Sendable {
     let body: Data
 }
 
+/// A deliberately narrow browser surface hosted beside the authority protocol.
+/// It cannot alter lease routing: `/v1/*` remains owned by `WitnessRouter`, and
+/// the application supplies a handler only for the Web UI path namespace.
+public struct WitnessWebRequest: Sendable {
+    public let method: String
+    public let path: String
+    public let headers: [String: String]
+    public let body: Data
+
+    init(_ request: HTTPRequest) {
+        method = request.method; path = request.path; headers = request.headers; body = request.body
+    }
+}
+
+/// A complete browser response. The HTTP server validates header values before
+/// writing them, so a Web UI handler cannot introduce response splitting.
+public struct WitnessWebResponse: Sendable {
+    public let status: Int
+    public let contentType: String
+    public let body: Data
+    public let headers: [String: String]
+
+    public init(status: Int = 200, contentType: String = "application/json; charset=utf-8",
+                body: Data = Data(), headers: [String: String] = [:]) {
+        self.status = status; self.contentType = contentType; self.body = body; self.headers = headers
+    }
+}
+
+public typealias WitnessWebHandler = @Sendable (WitnessWebRequest) async -> WitnessWebResponse?
+
 enum HTTPParseResult {
     case incomplete
     case request(HTTPRequest)

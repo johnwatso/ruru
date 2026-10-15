@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import UniformTypeIdentifiers
 
 /// Display-only icons for guarded services. They live beside, not inside,
@@ -7,6 +8,11 @@ import UniformTypeIdentifiers
 enum RuruServiceIcons {
     static let pixels = 256
     static let maxSourceBytes = 20_000_000
+    /// A downloaded favicon is intentionally much smaller than a user-chosen
+    /// local image. It is display-only and must not turn saving a monitor into
+    /// an unbounded network or memory operation.
+    static let maxWebsiteIconBytes = 2 * 1024 * 1024
+    static let maxWebsiteIconPixels = 4_194_304
 
     struct Pick {
         let png: Data
@@ -15,12 +21,13 @@ enum RuruServiceIcons {
     }
 
     enum IconError: LocalizedError {
-        case unreadable, tooLarge, notAnImage
+        case unreadable, tooLarge, notAnImage, websiteUnavailable
         var errorDescription: String? {
             switch self {
             case .unreadable: "That file could not be read."
             case .tooLarge: "That image is too large. Choose one under 20 MB."
             case .notAnImage: "Choose an app (.app) or an image such as PNG, JPEG or HEIC."
+            case .websiteUnavailable: "That website’s favicon could not be downloaded."
             }
         }
     }
@@ -70,6 +77,80 @@ enum RuruServiceIcons {
         NSGraphicsContext.restoreGraphicsState()
         guard let data = bitmap.representation(using: .png, properties: [:]) else { throw IconError.unreadable }
         return data
+    }
+
+    // MARK: Website favicons
+
+    /// Fetches only the conventional same-origin `/favicon.ico` location. This
+    /// deliberately avoids following redirects or parsing arbitrary page HTML.
+    /// The result is normalised before it ever reaches the icon store.
+    static func fetchWebsiteIcon(for website: URL, session suppliedSession: URLSession? = nil) async throws -> Data {
+        guard let faviconURL = sameOriginFaviconURL(for: website) else { throw IconError.websiteUnavailable }
+        let ownsSession = suppliedSession == nil
+        let session = suppliedSession ?? websiteIconSession()
+        defer { if ownsSession { session.invalidateAndCancel() } }
+
+        var request = URLRequest(url: faviconURL)
+        request.timeoutInterval = 10
+        request.setValue("Ruru", forHTTPHeaderField: "User-Agent")
+        request.setValue("image/*", forHTTPHeaderField: "Accept")
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode),
+                  response.url == faviconURL,
+                  response.expectedContentLength <= Int64(maxWebsiteIconBytes) || response.expectedContentLength < 0 else {
+                throw IconError.websiteUnavailable
+            }
+            var data = Data()
+            for try await byte in bytes {
+                data.append(byte)
+                guard data.count <= maxWebsiteIconBytes else { throw IconError.tooLarge }
+            }
+            return try normalizedWebsiteIcon(data)
+        } catch let error as IconError {
+            throw error
+        } catch {
+            throw IconError.websiteUnavailable
+        }
+    }
+
+    private static func sameOriginFaviconURL(for website: URL) -> URL? {
+        guard let scheme = website.scheme?.lowercased(), ["http", "https"].contains(scheme),
+              website.host != nil, website.user == nil, website.password == nil else { return nil }
+        var parts = URLComponents()
+        parts.scheme = scheme
+        parts.host = website.host
+        parts.port = website.port
+        parts.path = "/favicon.ico"
+        return parts.url
+    }
+
+    private static func websiteIconSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 10
+        configuration.httpCookieStorage = nil
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
+    }
+
+    private static func normalizedWebsiteIcon(_ data: Data) throws -> Data {
+        guard !data.isEmpty, data.count <= maxWebsiteIconBytes,
+              let image = NSImage(data: data),
+              let bitmap = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first,
+              bitmap.pixelsWide > 0, bitmap.pixelsHigh > 0,
+              bitmap.pixelsWide <= 4_096, bitmap.pixelsHigh <= 4_096,
+              bitmap.pixelsWide * bitmap.pixelsHigh <= maxWebsiteIconPixels else {
+            throw IconError.notAnImage
+        }
+        return try normalizedPNG(from: image)
+    }
+
+    private final class NoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest) async -> URLRequest? { nil }
     }
 
     // MARK: Storage

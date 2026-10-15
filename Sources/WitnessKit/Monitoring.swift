@@ -4,7 +4,7 @@ import Network
 /// A reachability target Ruru checks on a schedule. Monitoring is observation
 /// only: results feed the UI and alerts and never touch leases or ownership.
 public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
-    public enum Kind: String, Codable, CaseIterable, Sendable { case tcp = "TCP", http = "HTTP" }
+    public enum Kind: String, Codable, CaseIterable, Sendable { case tcp = "TCP", http = "HTTP", dns = "DNS" }
 
     public static let maxTargets = 32
     public static let intervalRange = 30...3600
@@ -23,6 +23,9 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
     public var port: Int
     /// HTTP: absolute http(s) URL. Unused for TCP.
     public var url: String
+    /// DNS: the A-record name queried directly from the configured resolver.
+    /// Unused for TCP and HTTP.
+    public var dnsQueryName: String
     public var intervalSeconds: Int
     public var timeoutSeconds: Int
     /// Consecutive failures before the target is reported down.
@@ -33,18 +36,19 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
     public var needsAttention: Bool
 
     public init(id: String = UUID().uuidString.lowercased(), name: String, kind: Kind, host: String = "", port: Int = 0,
-                url: String = "", intervalSeconds: Int = MonitorTarget.defaultInterval,
+                url: String = "", dnsQueryName: String = "example.com", intervalSeconds: Int = MonitorTarget.defaultInterval,
                 timeoutSeconds: Int = MonitorTarget.defaultTimeout,
                 failureThreshold: Int = MonitorTarget.defaultThreshold, enabled: Bool = true,
                 needsAttention: Bool = false) {
         self.needsAttention = needsAttention
         self.id = id; self.name = name; self.kind = kind; self.host = host; self.port = port; self.url = url
+        self.dnsQueryName = dnsQueryName
         self.intervalSeconds = intervalSeconds; self.timeoutSeconds = timeoutSeconds
         self.failureThreshold = failureThreshold; self.enabled = enabled
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, kind, host, port, url, intervalSeconds, timeoutSeconds, failureThreshold, enabled, needsAttention
+        case id, name, kind, host, port, url, dnsQueryName, intervalSeconds, timeoutSeconds, failureThreshold, enabled, needsAttention
     }
 
     public init(from decoder: Decoder) throws {
@@ -55,6 +59,7 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
         host = try values.decode(String.self, forKey: .host)
         port = try values.decode(Int.self, forKey: .port)
         url = try values.decode(String.self, forKey: .url)
+        dnsQueryName = try values.decodeIfPresent(String.self, forKey: .dnsQueryName) ?? "example.com"
         intervalSeconds = try values.decode(Int.self, forKey: .intervalSeconds)
         timeoutSeconds = try values.decode(Int.self, forKey: .timeoutSeconds)
         failureThreshold = try values.decode(Int.self, forKey: .failureThreshold)
@@ -67,6 +72,7 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
         switch kind {
         case .tcp: host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
         case .http: url
+        case .dns: "\(host.contains(":") ? "[\(host)]" : host):\(port) · \(dnsQueryName)"
         }
     }
 
@@ -78,6 +84,7 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
         switch kind {
         case .tcp: return Self.validHost(host) && (1...65535).contains(port)
         case .http: return Self.validURL(url) != nil
+        case .dns: return Self.validHost(host) && (1...65535).contains(port) && Self.validDNSQueryName(dnsQueryName) != nil
         }
     }
 
@@ -92,6 +99,19 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
               scheme == "http" || scheme == "https", let host = url.host, !host.isEmpty,
               url.user == nil, url.password == nil else { return nil }
         return url
+    }
+
+    /// A conventional DNS name. Monitoring sends an A lookup only, so service
+    /// labels and arbitrary record syntax are deliberately not accepted here.
+    public static func validDNSQueryName(_ text: String) -> String? {
+        let name = text.hasSuffix(".") ? String(text.dropLast()) : text
+        guard !name.isEmpty, name.utf8.count <= 253, !name.contains("..") else { return nil }
+        let labels = name.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.allSatisfy({ label in
+            guard (1...63).contains(label.utf8.count), label.first != "-", label.last != "-" else { return false }
+            return label.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
+        }) else { return nil }
+        return name
     }
 }
 
@@ -176,6 +196,7 @@ public enum MonitorProbe {
         switch target.kind {
         case .tcp: await tcp(host: target.host, port: target.port, timeout: target.timeoutSeconds)
         case .http: await http(url: target.url, timeout: target.timeoutSeconds)
+        case .dns: await dns(host: target.host, port: target.port, queryName: target.dnsQueryName, timeout: target.timeoutSeconds)
         }
     }
 
@@ -220,6 +241,82 @@ public enum MonitorProbe {
             }
         case .dns: "Name could not be resolved"
         default: "Connection failed"
+        }
+    }
+
+    // MARK: DNS
+
+    /// Sends one recursive UDP A lookup straight to the configured resolver.
+    /// A TCP port check alone cannot tell whether a DNS service can answer.
+    static func dns(host: String, port: Int, queryName: String, timeout: Int) async -> MonitorResult {
+        guard let port = NWEndpoint.Port(rawValue: UInt16(clamping: port)),
+              let normalizedName = MonitorTarget.validDNSQueryName(queryName) else {
+            return MonitorResult(ok: false, detail: "Invalid DNS target")
+        }
+        let identifier = UInt16.random(in: .min ... .max)
+        let query = dnsQuery(identifier: identifier, name: normalizedName)
+        let started = ContinuousClock.now
+        let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .udp)
+        let outcome: (ok: Bool, detail: String) = await withCheckedContinuation { continuation in
+            let gate = OneShot(continuation)
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    connection.send(content: query, completion: .contentProcessed { error in
+                        guard error == nil else { gate.finish((false, "DNS request failed")); return }
+                        connection.receiveMessage { data, _, _, error in
+                            guard error == nil, let data else { gate.finish((false, "DNS request failed")); return }
+                            gate.finish(dnsResponse(data, matching: identifier))
+                        }
+                    })
+                case .failed, .waiting:
+                    gate.finish((false, "DNS server could not be reached"))
+                case .cancelled:
+                    gate.finish((false, "DNS request cancelled"))
+                default:
+                    break
+                }
+            }
+            connection.start(queue: .global(qos: .utility))
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .seconds(timeout)) {
+                gate.finish((false, "DNS request timed out after \(timeout) s"))
+            }
+        }
+        connection.cancel()
+        let elapsed = started.duration(to: .now)
+        let milliseconds = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+        return MonitorResult(ok: outcome.ok, latencyMilliseconds: outcome.ok ? milliseconds : nil, detail: outcome.detail)
+    }
+
+    private static func dnsQuery(identifier: UInt16, name: String) -> Data {
+        var bytes: [UInt8] = [
+            UInt8(identifier >> 8), UInt8(identifier & 0xFF),
+            0x01, 0x00, // standard recursive query
+            0x00, 0x01, // one question
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        ]
+        for label in name.split(separator: ".") {
+            bytes.append(UInt8(label.utf8.count))
+            bytes.append(contentsOf: label.utf8)
+        }
+        bytes.append(0)
+        bytes.append(contentsOf: [0x00, 0x01, 0x00, 0x01]) // A, IN
+        return Data(bytes)
+    }
+
+    private static func dnsResponse(_ data: Data, matching identifier: UInt16) -> (ok: Bool, detail: String) {
+        guard data.count >= 12,
+              UInt16(data[0]) << 8 | UInt16(data[1]) == identifier,
+              data[2] & 0x80 != 0 else {
+            return (false, "Invalid DNS response")
+        }
+        switch data[3] & 0x0F {
+        case 0: return (true, "DNS response")
+        case 1: return (false, "DNS format error")
+        case 2: return (false, "DNS server failure")
+        case 3: return (false, "DNS name not found")
+        case 5: return (false, "DNS query refused")
+        default: return (false, "DNS response error")
         }
     }
 

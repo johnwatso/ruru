@@ -381,6 +381,40 @@ final class WitnessHTTPTests: XCTestCase {
         if case .reject(400) = HTTPParser.parse(pipelined) { } else { XCTFail("Pipelined request accepted") }
     }
 
+    func testWebHandlerIsBoundedToWebNamespaceAndCannotInterceptLeases() async throws {
+        let database = try store()
+        let server = try WitnessHTTPServer(store: database, clusterID: "bot", token: token,
+            webHandler: { request in
+                guard request.path == "/" else { return nil }
+                return WitnessWebResponse(contentType: "text/plain; charset=utf-8", body: Data("Ruru Web UI".utf8),
+                                          headers: ["X-Ruru-Web": "present"])
+            })
+        let port = try await server.start(port: 0)
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        do {
+            let (index, indexResponse) = try await session.data(for: URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
+            XCTAssertEqual((indexResponse as? HTTPURLResponse)?.statusCode, 200)
+            XCTAssertEqual(String(decoding: index, as: UTF8.self), "Ruru Web UI")
+            XCTAssertEqual((indexResponse as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Ruru-Web"), "present")
+
+            var leaseRequest = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/v1/lease/acquire")!)
+            leaseRequest.httpMethod = "POST"
+            leaseRequest.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+            leaseRequest.httpBody = try JSONEncoder().encode(LeaseRequest(clusterID: "bot", nodeID: "primary", term: 0))
+            let (lease, leaseResponse) = try await session.data(for: leaseRequest)
+            XCTAssertEqual((leaseResponse as? HTTPURLResponse)?.statusCode, 200)
+            XCTAssertEqual(try JSONDecoder().decode(LeaseGrant.self, from: lease).ownerNodeID, "primary")
+
+            let (_, unknownResponse) = try await session.data(for: URLRequest(url: URL(string: "http://127.0.0.1:\(port)/web/not-found")!))
+            XCTAssertEqual((unknownResponse as? HTTPURLResponse)?.statusCode, 404)
+            await server.stop()
+        } catch {
+            await server.stop()
+            throw error
+        }
+    }
+
     func testLiveListenerMatchesSwiftBotLeaseProtocol() async throws {
         let database = try store()
         let server = try WitnessHTTPServer(store: database, clusterID: "bot", token: token)

@@ -1,5 +1,76 @@
 # Development log and next steps
 
+## 2026-10-16 — Cloudflare-protected operator Web UI foundation
+
+- The existing bounded loopback listener now reserves a separate four-connection
+  Web UI budget for `/`, `/web/` and `/api/web/`. The application owns that
+  surface; `/v1` remains exclusively owned by the lease router and a regression
+  test verifies a Web handler cannot intercept a lease grant.
+- Ruru’s browser console is available only at a configured, live HTTPS tunnel
+  address. Every route requires the Cloudflare Access authenticated-user email
+  header, then a user-verified resident passkey before it can read, add, remove
+  or run a monitor check. Passkey public keys and counters are in Keychain;
+  browser sessions, CSRF values and registration ceremonies are memory-only and
+  expire at restart. First enrolment additionally requires a native-console
+  code valid for ten minutes.
+- The native Internet Access page exposes the operator address and one-time
+  enrolment control. An operator must create the Cloudflare Access application
+  for that hostname before use; Ruru rejects a request without the Access
+  identity header.
+  This change does not provision Access policy through the Cloudflare API yet,
+  because that needs a separately scoped Access-management token and a live
+  policy/audit flow rather than expanding the existing tunnel token silently.
+- Added a conservative SPF merge primitive for the forthcoming no-reply email
+  setup: it inserts one provider `include:` before `all`/`redirect=`, retains
+  every existing mechanism, rejects malformed/oversized values and never
+  deletes or recreates a TXT record. Sending provider setup is intentionally
+  still deferred: Cloudflare's free path is limited to verified destination
+  addresses, while arbitrary-recipient Email Sending needs a paid Workers plan;
+  a provider must be chosen with its credential scope, free allowance and
+  delivery requirements explicit.
+- Validation: XcodeGen and Debug Xcode build passed; focused HTTP listener and
+  SPF tests passed. A live Cloudflare Access policy, browser WebAuthn ceremony,
+  Cloudflare email configuration, Release-universal build and Intel Mac mini
+  run remain untested.
+
+## 2026-10-16 — Website favicon monitor icons
+
+- A new HTTP(S) monitor with no operator-chosen icon makes one optional, same-origin request for `/favicon.ico` after it saves. The downloaded favicon is display-only and never changes monitoring, alerts, leases or failover; an unavailable, invalid or oversized favicon simply leaves the normal HTTP icon in place.
+- Remote downloads are bounded to 2 MiB and 4,194,304 source pixels, do not send cookies, do not use cache and do not follow redirects. Accepted images are normalised to the existing 256×256 local PNG icon format. Operators can still choose or clear an icon manually.
+- Validation: URL-protocol tests cover same-origin path selection, normalisation and the download-size rejection. Real favicon variants, including nonstandard link-tag paths and SVG-only icons, remain untested and are not fetched.
+
+## 2026-10-16 — DNS server monitoring
+
+- Monitoring targets now include a **DNS server** option. Ruru sends one bounded UDP A-record lookup directly to the configured resolver and treats only a matching, valid `NOERROR` reply as up. The server, port and query name are saved with the existing target configuration; older targets decode unchanged with `example.com` as their unused DNS query default.
+- DNS checks share the existing 32-target, 1–30-second timeout, interval, threshold, history, alert and observation-only limits. They do not query through the system resolver, change DNS settings, or affect lease ownership or failover. UDP-only means a resolver that can answer only over TCP is reported down.
+- Validation: unit coverage includes DNS-target validation and a loopback UDP resolver reply. Live public DNS resolver checks, sleep/wake and alert delivery remain to be exercised.
+
+## 2026-10-16 — Intel deployment test export
+
+- Exported Ruru **0.2.0 (2026101608)** from a clean universal Release build.
+  Refreshed the build number in `project.yml` and regenerated with XcodeGen.
+  The ZIP, checksum, receipt, validation logs and installation notes are in
+  `Build/Testing/2026101608/`; earlier exports were left untouched.
+- Whole-bundle preflight passed before and after ZIP extraction: every Mach-O
+  includes x86_64 and arm64, supports macOS 15 or earlier, and resolves its
+  non-system dependencies inside the app. Strict signatures passed on both
+  bundles; main-executable hashes match. The extracted app launched in isolated
+  preview, with the Sequoia fallback icon present.
+- Validation limit: two full Debug Xcode runs each had one failure. The run
+  alongside Release compilation lost a loopback connection in
+  `CoordinationTests.testCatalogueLoadAndLiveDisablePreserveLeaseRenewal`.
+  The subsequent run without compilation reported `alreadyRunning` reopening
+  the fixture in
+  `ClientConformanceTests.testRestartQuarantineIsReportedAsRecovering`.
+  All other tests passed in each run (238 tests total per run). Both failing
+  tests then passed together in a focused recheck. No tests were changed or
+  excluded; the intermittent failures remain unresolved, not a clean full-suite
+  result for this export session.
+- This is an ad-hoc test export, not a signed/notarised public release. Updates
+  remain disabled without ShipHook's public key. Physical Intel execution and
+  live deployment drills remain operator acceptance work. No production
+  database, credentials, login item, power setting or tunnel was changed.
+
 ## 2026-10-16 — Recovery guidance and independent Ruru visibility
 
 - SwiftBot's existing Ruru health check now flags unreachable/recovering Ruru

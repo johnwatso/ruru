@@ -10,12 +10,14 @@ final class MonitoringTests: XCTestCase {
     func testTargetValidation() {
         XCTAssertTrue(MonitorTarget(name: "NAS", kind: .tcp, host: "192.168.1.20", port: 445).isValid)
         XCTAssertTrue(MonitorTarget(name: "Site", kind: .http, url: "https://example.com/health").isValid)
+        XCTAssertTrue(MonitorTarget(name: "Cloudflare DNS", kind: .dns, host: "1.1.1.1", port: 53).isValid)
         XCTAssertFalse(MonitorTarget(name: "", kind: .tcp, host: "nas.local", port: 22).isValid)
         XCTAssertFalse(MonitorTarget(name: "Bad", kind: .tcp, host: "nas local", port: 22).isValid)
         XCTAssertFalse(MonitorTarget(name: "Bad", kind: .tcp, host: "nas/etc", port: 22).isValid)
         XCTAssertFalse(MonitorTarget(name: "Bad", kind: .tcp, host: "nas", port: 0).isValid)
         XCTAssertFalse(MonitorTarget(name: "Bad", kind: .http, url: "ftp://example.com").isValid)
         XCTAssertFalse(MonitorTarget(name: "Bad", kind: .http, url: "https://user:pw@example.com").isValid)
+        XCTAssertFalse(MonitorTarget(name: "Bad DNS", kind: .dns, host: "1.1.1.1", port: 53, dnsQueryName: "bad name").isValid)
         XCTAssertFalse(MonitorTarget(name: "Fast", kind: .tcp, host: "nas", port: 22, intervalSeconds: 5).isValid)
         XCTAssertFalse(MonitorTarget(name: "Slow probe", kind: .tcp, host: "nas", port: 22, intervalSeconds: 30, timeoutSeconds: 30).isValid)
         XCTAssertFalse(MonitorTarget(id: "not-a-uuid", name: "Id", kind: .tcp, host: "nas", port: 22).isValid)
@@ -101,6 +103,32 @@ final class MonitoringTests: XCTestCase {
         XCTAssertTrue(redirect.ok, "A redirect proves the server answers and is not followed")
         let invalid = await MonitorProbe.http(url: "not a url", timeout: 5)
         XCTAssertFalse(invalid.ok)
+    }
+
+    func testDNSProbeSeesAValidResponse() async throws {
+        let listener = try NWListener(using: .udp, on: .any)
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: .global())
+            connection.receiveMessage { data, _, _, _ in
+                guard let data, data.count >= 12 else { connection.cancel(); return }
+                var response = data
+                response[2] = 0x81
+                response[3] = 0x80
+                response[6] = 0; response[7] = 0; response[8] = 0; response[9] = 0; response[10] = 0; response[11] = 0
+                connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+        let ready = expectation(description: "listening")
+        listener.stateUpdateHandler = { if case .ready = $0 { ready.fulfill() } }
+        listener.start(queue: .global())
+        await fulfillment(of: [ready], timeout: 5)
+        defer { listener.cancel() }
+        let port = try XCTUnwrap(listener.port?.rawValue)
+
+        let good = await MonitorProbe.dns(host: "127.0.0.1", port: Int(port), queryName: "example.com", timeout: 5)
+        XCTAssertTrue(good.ok); XCTAssertEqual(good.detail, "DNS response")
+        let invalid = await MonitorProbe.dns(host: "127.0.0.1", port: Int(port), queryName: "bad name", timeout: 5)
+        XCTAssertFalse(invalid.ok); XCTAssertEqual(invalid.detail, "Invalid DNS target")
     }
 
     func testEngineRecordsTransitionsAndDropsRemovedTargets() async throws {
@@ -197,6 +225,7 @@ final class MonitorTargetAttentionTests: XCTestCase {
         """
         let target = try JSONDecoder().decode(MonitorTarget.self, from: Data(json.utf8))
         XCTAssertFalse(target.needsAttention)
+        XCTAssertEqual(target.dnsQueryName, "example.com")
     }
 
     func testAttentionSettingRoundTrips() throws {

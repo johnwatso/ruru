@@ -93,6 +93,9 @@ final class WitnessAppModel: ObservableObject {
 
     private var store: LeaseStore?
     private var server: WitnessHTTPServer?
+    /// Browser UI state is volatile by design; an authority restart invalidates
+    /// browser sessions and unfinished passkey enrolments.
+    private var webUI: RuruWebUI?
     private var serviceCredentials: [String: String] = [:]
     private var savingConfiguration = false
     private var pollTask: Task<Void, Never>?
@@ -663,9 +666,26 @@ final class WitnessAppModel: ObservableObject {
             let appBundle = Bundle.main
             let authorityVersion = appBundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             let authorityBuild = appBundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            let webUI = RuruWebUI(
+                origin: { [weak self] in await MainActor.run { self?.webUIOrigin } },
+                monitorSnapshot: { [weak self] in await MainActor.run { self?.configuration.monitorTargets ?? [] } },
+                monitorSave: { [weak self] target in
+                    guard let self else { throw WitnessStorage.ConfigurationError.invalid }
+                    try await self.saveMonitorTarget(target)
+                },
+                monitorRemove: { [weak self] id in
+                    guard let self else { throw WitnessStorage.ConfigurationError.invalid }
+                    try await self.removeMonitorTarget(id: id)
+                },
+                monitorCheck: { [weak self] id in
+                    guard let self else { return }
+                    await self.checkMonitorNow(id)
+                })
             let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue, pairing: pairing,
                                                participants: participants, operationalStatus: operationalStatus,
-                                               authorityVersion: authorityVersion, authorityBuild: authorityBuild)
+                                               authorityVersion: authorityVersion, authorityBuild: authorityBuild,
+                                               webHandler: { request in await webUI.route(request) })
+            self.webUI = webUI
             self.server = server
             listenerPort = try await server.start(bindAddress: configuration.bindAddress, port: UInt16(configuration.port))
             state = .running
@@ -674,6 +694,7 @@ final class WitnessAppModel: ObservableObject {
         } catch {
             await server?.stop()
             server = nil
+            webUI = nil
             state = .failed
             serviceStartedAt = nil
             self.error = error.localizedDescription
@@ -691,10 +712,27 @@ final class WitnessAppModel: ObservableObject {
         transportDiagnostics = nil
         await server?.stop()
         server = nil
+        webUI = nil
         listenerPort = nil
         state = .stopped
         serviceStartedAt = nil
         busy = false
+    }
+
+    /// Shows a one-time code in the native console. The public route still
+    /// requires Cloudflare Access, and the code expires after ten minutes.
+    func beginWebUIEnrollment() async throws -> String {
+        guard state == .running, let webUI, webUIOrigin != nil else { throw WitnessStorage.ConfigurationError.invalid }
+        return try await webUI.beginEnrollment()
+    }
+
+    var webUIOrigin: String? {
+        guard configuration.tunnel.isConfigured, configuration.tunnel.enabled,
+              let url = URL(string: configuration.publicEndpoint), url.scheme == "https",
+              url.host != nil, url.user == nil, url.password == nil,
+              url.query == nil, url.fragment == nil, url.path.isEmpty || url.path == "/" else { return nil }
+        let value = url.absoluteString
+        return value.hasSuffix("/") ? String(value.dropLast()) : value
     }
 
     func saveConfiguration(_ draft: WitnessConfiguration) async throws {

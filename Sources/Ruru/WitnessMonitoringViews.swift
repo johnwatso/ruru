@@ -3,7 +3,13 @@ import SwiftUI
 import WitnessKit
 
 extension MonitorTarget {
-    var symbol: String { kind == .tcp ? "point.3.connected.trianglepath.dotted" : "globe" }
+    var symbol: String {
+        switch kind {
+        case .tcp: "point.3.connected.trianglepath.dotted"
+        case .http: "globe"
+        case .dns: "network"
+        }
+    }
 }
 
 extension WitnessAppModel {
@@ -61,7 +67,7 @@ struct WitnessMonitoringPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                ConsolePageHeader(title: "Monitoring", subtitle: "Check that servers and addresses on your network are reachable.") {
+                ConsolePageHeader(title: "Monitoring", subtitle: "Check that servers, DNS and addresses on your network are reachable.") {
                     Button("Add Target", systemImage: "plus") { adding = true }
                         .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                         .disabled(model.configuration.monitorTargets.count >= MonitorTarget.maxTargets)
@@ -69,7 +75,7 @@ struct WitnessMonitoringPage: View {
                 ConsoleSection(title: "Targets", accessory: { Text(model.monitoringSummary) }, content: {
                     if model.configuration.monitorTargets.isEmpty {
                         ConsoleEmptyState(symbol: "waveform.path.ecg", title: "Nothing monitored yet",
-                                          detail: "Add a server, router or web address. Ruru checks it on a schedule and tells you when it stops answering.")
+                                          detail: "Add a server, router, DNS server or web address. Ruru checks it on a schedule and tells you when it stops answering.")
                     } else {
                         VStack(spacing: 0) {
                             ForEach(model.configuration.monitorTargets) { target in
@@ -326,6 +332,7 @@ struct WitnessMonitorTargetSheet: View {
     @State private var host: String
     @State private var port: Int
     @State private var url: String
+    @State private var dnsQueryName: String
     @State private var interval: Int
     @State private var timeout: Int
     @State private var threshold: Int
@@ -345,6 +352,7 @@ struct WitnessMonitorTargetSheet: View {
         _host = State(initialValue: target?.host ?? "")
         _port = State(initialValue: target?.port ?? 22)
         _url = State(initialValue: target?.url ?? "https://")
+        _dnsQueryName = State(initialValue: target?.dnsQueryName ?? "example.com")
         _interval = State(initialValue: target?.intervalSeconds ?? MonitorTarget.defaultInterval)
         _timeout = State(initialValue: target?.timeoutSeconds ?? MonitorTarget.defaultTimeout)
         _threshold = State(initialValue: target?.failureThreshold ?? MonitorTarget.defaultThreshold)
@@ -357,6 +365,7 @@ struct WitnessMonitorTargetSheet: View {
                       name: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind,
                       host: host.trimmingCharacters(in: .whitespacesAndNewlines), port: port,
                       url: url.trimmingCharacters(in: .whitespacesAndNewlines),
+                      dnsQueryName: dnsQueryName.trimmingCharacters(in: .whitespacesAndNewlines),
                       intervalSeconds: interval, timeoutSeconds: timeout, failureThreshold: threshold, enabled: enabled,
                       needsAttention: needsAttention)
     }
@@ -374,6 +383,7 @@ struct WitnessMonitorTargetSheet: View {
                 Picker("Check type", selection: $kind) {
                     Text("TCP port").tag(MonitorTarget.Kind.tcp)
                     Text("HTTP(S) address").tag(MonitorTarget.Kind.http)
+                    Text("DNS server").tag(MonitorTarget.Kind.dns)
                 }
                 switch kind {
                 case .tcp:
@@ -383,6 +393,12 @@ struct WitnessMonitorTargetSheet: View {
                 case .http:
                     LabeledContent("Address") { TextField("Address", text: $url, prompt: Text("https://example.com/health")).labelsHidden() }
                     Text("Counts as up when the server answers with a status below 400. Redirects are not followed.")
+                        .font(.callout).foregroundStyle(.secondary)
+                case .dns:
+                    LabeledContent("DNS server") { TextField("DNS server", text: $host, prompt: Text("IP address or name, e.g. 1.1.1.1")).labelsHidden() }
+                    LabeledContent("Port") { TextField("Port", value: $port, format: .number.grouping(.never)).labelsHidden().frame(width: 100) }
+                    LabeledContent("Query name") { TextField("Query name", text: $dnsQueryName, prompt: Text("example.com")).labelsHidden() }
+                    Text("Sends one UDP A-record lookup directly to this server. It is up only when it returns a valid answer.")
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 Picker("Check every", selection: $interval) {
@@ -410,7 +426,15 @@ struct WitnessMonitorTargetSheet: View {
                     Task {
                         do {
                             try await model.saveMonitorTarget(draft)
-                            if let editedIcon { model.setServiceIcon(editedIcon, for: targetID) }
+                            if let editedIcon {
+                                model.setServiceIcon(editedIcon, for: targetID)
+                            } else if existing == nil, kind == .http, let website = MonitorTarget.validURL(draft.url) {
+                                Task {
+                                    if let icon = try? await RuruServiceIcons.fetchWebsiteIcon(for: website) {
+                                        model.setServiceIcon(icon, for: targetID)
+                                    }
+                                }
+                            }
                             dismiss()
                         }
                         catch { self.error = error.localizedDescription; saving = false }
@@ -419,6 +443,9 @@ struct WitnessMonitorTargetSheet: View {
             }
         }.padding(24).frame(width: 560).interactiveDismissDisabled(saving)
             .serviceIconDrop(onPick: pickIcon, onError: { iconError = $0 })
+            .onChange(of: kind) { _, newKind in
+                if newKind == .dns, port == 0 || port == 22 { port = 53 }
+            }
     }
 
     private var displayedIcon: NSImage? {
