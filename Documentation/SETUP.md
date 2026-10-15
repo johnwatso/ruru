@@ -38,17 +38,19 @@ The manual steps are:
    Code carries the settings to the Failover. Other apps use [RuruClient or the
    protocol](INTEGRATIONS.md).
 5. In **Settings → General**, enable **Launch at login** and **Start the service automatically**,
-   then save the changes. macOS may require approval under System Settings
+   if desired; preferences apply immediately. macOS may require approval under System Settings
    → General → Login Items. The login option is off until you choose it.
 6. Keep the Mac and its internet connection running. Configure the Mac's power
    settings to prevent automatic system sleep while plugged in; the display may
    sleep. Verify the remote HTTPS endpoint from every server location before a drill.
-7. In **Settings → Alerts**, choose what to be told about and set up macOS
-   notifications and/or a Discord webhook. Use **Send Test** to check delivery.
+7. Open **Alerts** to choose what to be told about. Each rule has **Alert me when**
+   and **Notify me**, with timing and quiet hours under **More options**.
+   **Settings → Alerts** configures destinations; use **Send Test** there to
+   check delivery. Open incidents include guidance and a **Review** action.
 8. Test Primary loss, recovery/return, witness loss, and a witness restart.
-   The earlier SQLite version was launched and connected on the target Mac.
-   Ruru's DuckDB revision and a complete failover/return/partition drill still
-   need validation there. Follow [Operating Ruru safely](OPERATIONS.md) for
+   Deployment testing is underway and the operator reports it working well as
+   of 15 October 2026; record exact builds and completed scenarios rather than
+   assuming every failure mode is covered. Follow [Operating Ruru safely](OPERATIONS.md) for
    the exact drill, restart-quarantine expectations and backup rules.
 
 Closing the window leaves the menu bar service running. Quitting the app,

@@ -43,6 +43,21 @@ Run the read-only preflight against the finished app:
 swift Scripts/validate_sparkle.swift /path/to/Ruru.app
 ```
 
+Run the whole-bundle artifact check as well:
+
+```sh
+swift Scripts/validate_release.swift /path/to/Ruru.app
+```
+
+It checks every bundled Mach-O binary, including RuruAlerting, cloudflared and
+Sparkle's nested helpers, for Intel and Apple silicon slices and a macOS minimum
+no later than Sequoia. It checks non-system linked libraries are bundled and
+also runs the Sparkle preflight. Launch the final bundle in isolated preview
+mode too; static dependency checks do not simulate every dyld load path. CI uses
+`--allow-unconfigured` while ShipHook's public key is pending; that development
+exception does not establish distribution readiness. Neither script signs,
+notarises, publishes, or proves a successful update installation.
+
 The preflight rejects missing public keys, generated-plist/version drift,
 missing embedded Sparkle and unsigned/malformed published items. It checks
 structure; ShipHook and an actual update installation must verify the final
@@ -61,7 +76,7 @@ archive signature. Use `--allow-unconfigured` only for development validation.
      -derivedDataPath /tmp/ruru-release build
    ```
 
-3. Verify the app, `WitnessKit.framework`, and `cloudflared` each contain **x86_64 and arm64** with a minimum macOS version of **15.0**. Check the generated `ruru.icns` fallback and launch an isolated `--preview`.
+3. Run `validate_release.swift` against the final app. Verify all bundled code, including `RuruAlerting.framework` and Sparkle helpers, has **x86_64 and arm64** slices and supports macOS **15.0**. Check the generated `ruru.icns` fallback and launch an isolated `--preview`.
 4. Verify behaviour on the Intel Sequoia/OpenCore deployment Mac. Complete Primary loss, recovery, authority loss, restart quarantine, and network-partition drills with paired bots before describing that revision as deployment-validated.
 
 ## Distribution signing

@@ -373,7 +373,7 @@ struct ConnectionDetailsSheet: View {
                             }
                         }.consoleRowGroup()
                     }
-                    Text("The bearer token grants access only to this service’s ownership group. Cloudflare credentials stay on this Mac.")
+                    Text("Paired servers share this service's bearer token. It grants access to the service's enabled capabilities; reported server IDs are not individually authenticated. Only pair servers you trust. Cloudflare credentials stay on this Mac.")
                         .font(.callout).foregroundStyle(.secondary)
                     WitnessPairingPanel(service: service)
                     if let feedback { Label(feedback, systemImage: "checkmark.circle").font(.callout).foregroundStyle(.secondary) }
@@ -456,7 +456,7 @@ private struct WitnessBackupSettings: View {
                 Button("Export…", action: export)
             } label: {
                 Text("Backup file")
-                Text("Services, names, policies, settings, and current terms.")
+                Text("Services, names, policies, settings, alert rules and current terms.")
             }
             LabeledContent {
                 Button("Restore…", action: chooseRestore)
@@ -469,7 +469,7 @@ private struct WitnessBackupSettings: View {
         } header: {
             Text("Backup and Restore")
         } footer: {
-            footnote("Bearer tokens and Cloudflare credentials are never exported. After restoring on a new Mac, pair each server again and set up Internet Access.")
+            footnote("Bearer tokens and Cloudflare credentials are never exported. Alert rules are included; incidents and alert history are not. After restoring on a new Mac, pair each server again and set up Internet Access.")
         }
         .disabled(!model.backupAvailable || working || model.busy)
         .sheet(item: Binding(get: { pending.map(PendingRestore.init) }, set: { pending = $0?.contents })) { item in
@@ -515,7 +515,9 @@ private struct WitnessBackupSettings: View {
         defer { working = false }
         do {
             try await model.restoreBackup(contents, includeSettings: includeSettings)
-            message = "Restored. Ruru is stopped and will wait 30 seconds after starting before granting ownership."
+            message = contents.leases == nil
+                ? "Settings restored. Ruru is stopped; review its configuration before starting."
+                : "Restored. Ruru is stopped. Review its settings, then start it. Ownership remains unavailable until the restore quarantine has finished (up to \(Int(LeaseStore.leaseDurationRange.upperBound)) seconds from reopening the restored database)."
         } catch { failure = error.localizedDescription }
     }
 
@@ -560,14 +562,14 @@ private struct WitnessRestoreSheet: View {
                     Text("Restore \(contents.url.lastPathComponent)")
                 } footer: {
                     if contents.leases != nil {
-                        Text("Ruru stops the service, archives the current ownership database, and rebuilds it from this backup with every term raised by \(LeaseRestore.termMargin.formatted()). No server can be granted a term it has already seen. Ownership is not restored; after you start Ruru, it waits a full lease before granting.")
+                        Text("Ruru stops the service, archives the current ownership database, and raises terms above the backup and any current terms available on this Mac by \(LeaseRestore.termMargin.formatted()). Ownership is not restored. Reopening the restored database begins a \(Int(LeaseStore.leaseDurationRange.upperBound))-second quarantine. If newer authority data was lost, reconcile the servers' latest terms before restarting them.")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
                 if contents.leases != nil {
                     Section {
                         Toggle("Any other Ruru authority for these services is stopped", isOn: $previousStopped)
-                        Toggle("Servers may need to acquire ownership again", isOn: $understood)
+                        Toggle("Servers are stopped and any newer lost terms have been reconciled", isOn: $understood)
                     }
                 }
             }

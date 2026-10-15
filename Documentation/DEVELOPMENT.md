@@ -22,6 +22,11 @@ xcodebuild -project Ruru.xcodeproj -scheme Ruru \
 
 Xcode resolves DuckDB Swift at the pinned version **1.1.3** and Sparkle **2.9.5**, matching SwiftMiner. The connector is already vendored in `Resources/cloudflared`. The app does not download database extensions or require a package manager at runtime. `Scripts/vendor_cloudflared.py` is a maintenance tool, not part of the app runtime.
 
+The app also declares DuckDB directly so Xcode embeds the shared package
+framework used by both WitnessKit and RuruAlerting. Keep this dependency even
+though the app's SwiftUI code does not import DuckDB. A successful link alone
+does not prove that the distributed bundle can find all its libraries.
+
 ## Tests and preview
 
 The RuruClient package has its own unit tests:
@@ -68,6 +73,18 @@ Run the read-only built-bundle preflight after building:
 ```sh
 swift Scripts/validate_sparkle.swift /path/to/Ruru.app --allow-unconfigured
 ```
+
+For a universal Release bundle, run the full artifact check:
+
+```sh
+swift Scripts/validate_release.swift /path/to/Ruru.app --allow-unconfigured
+```
+
+It validates required binaries, every bundled Mach-O's Intel/Apple silicon
+slices and Sequoia deployment target, and non-system library references, then
+runs the Sparkle preflight. Always launch an isolated preview of the final
+bundle as well. Strict mode (without `--allow-unconfigured`) refuses the missing
+ShipHook public key; development checks do not certify signing or installation.
 
 Omit `--allow-unconfigured` for release validation; it then rejects a missing
 public key. The script checks generated Info.plist values, embedded Sparkle and

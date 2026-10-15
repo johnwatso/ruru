@@ -198,6 +198,13 @@ private struct WitnessGuardedServiceDetails: View {
             }
         }
         if let removalError { ConsoleIssue(title: "Service could not be removed", detail: removalError) }
+        ConsoleSettingRow(title: "Resource sharing", subtitle: model.configuration.coordinationPolicy(for: service.id).enabled
+                          ? "Resource catalogue enabled for this service." : "Optional. Guarding works without resource sharing.") {
+            Button("Open Coordination") {
+                model.pendingCoordinationServiceID = service.id
+                model.selectedPage = .coordination
+            }
+        }.consoleRowGroup()
         if !model.pairingRequests(for: service.clusterID).isEmpty {
             ConsoleSection(title: "Pairing Requests", accessory: { Text("Expire after 10 minutes") }, content: {
                 WitnessPairingRequestList(service: service)
@@ -305,7 +312,7 @@ private struct WitnessGuardedServiceDetails: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Its servers will no longer be able to acquire or renew ownership. Existing permission expires within 30 seconds. Ownership terms and history are retained, and other services keep running.")
+            Text("Its servers will no longer be able to acquire or renew ownership. Existing permission lasts only until each client's current lease deadline. Ownership terms and history are retained, and other services keep running.")
         }
         .sheet(isPresented: Binding(get: { selectedNode != nil }, set: { if !$0 { selectedNode = nil } })) {
             if let node = selectedNode {

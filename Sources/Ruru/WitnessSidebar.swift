@@ -75,6 +75,7 @@ struct WitnessSidebar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(page.purpose)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 

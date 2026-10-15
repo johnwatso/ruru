@@ -55,12 +55,19 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
   the saved value. The app menu’s Settings command (⌘,), menu bar
   Settings and Overview actions open the same window without changing console
   navigation. Closing either window leaves the menu bar service running.
-- Alerts is a three-pane page (rules list, editor, inspector) in console surfaces:
-  a searchable list with icon, name, summary and switch; an editor with When /
-  Then / Recovery / Advanced that adapts to the trigger (events show no threshold
-  or recovery); and a status/history/preview inspector that becomes a popover
-  below about 1,080 pt of detail width. History lists open incidents (unverified
-  ones in orange, never green) and per-destination delivery results.
+- Alerts uses a searchable rules list and a single editor in console surfaces,
+  within the normal 1120pt content width. Edit the name and enabled state in the
+  editor header. The main form has two sections: Alert me when (one condition
+  menu grouped by source, targets and applicable thresholds) and Notify me
+  (destinations and optional recovery). Events show no threshold or recovery.
+  Keep cooldown, repeats, quiet hours, severity and Activity recording under a
+  collapsed More options disclosure; its summary exposes configured overrides.
+  Rule Info opens status, recent triggers and notification previews in a popover.
+  Open incidents explain what to check next and offer a Review action opening
+  the affected target, service or Ruru connection page. Unverified incidents
+  require fresh evidence and never offer a manual "mark healthy" action.
+  History lists open incidents (unverified ones in orange, never green) and
+  per-destination delivery results. Existing rules retain all saved settings.
 - Settings → Alerts links to Alerts for rules and groups "Deliver To" (macOS
   notifications, Discord and Notify! with Set Up…/Replace…/Remove, Send Test).
   If rules cannot be saved it shows the earlier "Alert Me When" toggles (service
@@ -183,6 +190,15 @@ including SwiftBot; an empty list explains how to add another service. A SQLite
 startup block exposes Set Up DuckDB in Overview, Guarding and Connection Settings. Its modal
 requires explicit offline/unpaired acknowledgements, explains the local archive
 and fresh pairing details, and leaves the authority stopped after setup.
+
+Guarding and Coordination details link directly to the same service in the
+other capability. Name the distinction in the row: ownership guarding versus
+optional resource sharing. Sidebar help describes each page's purpose. Connection
+Details explains shared service-token trust; server names/IDs are not separately
+authenticated, and remembered participants are observations rather than membership.
+Removal copy refers to existing client deadlines, never a fixed 30-second expiry.
+Backup/restore copy uses the actual maximum restore quarantine and distinguishes
+settings-only restores. Preserve the warning about reconciling newer lost terms.
 
 ## Coordination
 

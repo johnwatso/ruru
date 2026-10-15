@@ -75,6 +75,7 @@
 		9C236983C632424FBD0A7289 /* AlertModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 018E55EAAC79EE713E6E1F50 /* AlertModels.swift */; };
 		9C9009ED2B71AD1D37FDAC3E /* RuruDiagnosticExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B4C35408498C1ADAC3E35D3 /* RuruDiagnosticExport.swift */; };
 		9F4FC631F800A074F5698106 /* RuruUpdateConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B2014C61EC1C9648C1C16D /* RuruUpdateConfiguration.swift */; };
+		A3C441FC738F346EFB5AA116 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = BFC20F58A33E9AACC1DBA1E3 /* Sparkle */; };
 		A54D0D26BFE03D2436063183 /* AlertService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DEE86D2F0E01FB158724B8C /* AlertService.swift */; };
 		A60FBBB431EDCC98AE7186F4 /* AlertStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE5F9423E6D5E47B73BDE8A3 /* AlertStore.swift */; };
 		A6D2DECF9CA7BA2287D961CE /* RuruClient in Frameworks */ = {isa = PBXBuildFile; productRef = 1A12FE85F83EEA79AFFD4B99 /* RuruClient */; };
@@ -97,7 +98,7 @@
 		C9FE61A5DAAC88510E26E2E5 /* RuruServiceIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FE5AC3DF036A99A62C67FF9 /* RuruServiceIcons.swift */; };
 		CBC9FE3B360C1075A67A8F7A /* MonitoringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2180BE79B01BBF57CDB1BB61 /* MonitoringTests.swift */; };
 		CFAB746C6CEF50B156A55383 /* RuruDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C18D94F4F0CF8D0A34DAA6FA /* RuruDiagnosticsTests.swift */; };
-		D13008D67C966B7313B57B1A /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = BFC20F58A33E9AACC1DBA1E3 /* Sparkle */; };
+		D13008D67C966B7313B57B1A /* DuckDB in Frameworks */ = {isa = PBXBuildFile; productRef = E7FD66C4FB6B85E5E1DCB8DF /* DuckDB */; };
 		D19D9B1FCB678B93439A2B98 /* TunnelManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1600100A033FF4455132B5E /* TunnelManagerTests.swift */; };
 		D2FADF8394FB1B32F87E46FF /* CoordinationCatalogue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0485423B78D36235B557FD09 /* CoordinationCatalogue.swift */; };
 		D4BFB6989A980A99E28D253D /* LeaseBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4F804C58282C87C3F86B4E8 /* LeaseBackup.swift */; };
@@ -317,7 +318,8 @@
 			files = (
 				AED7BC71F13AA14CD7D1FF56 /* WitnessKit.framework in Frameworks */,
 				F3DE3C454952D76767FB7B30 /* RuruAlerting.framework in Frameworks */,
-				D13008D67C966B7313B57B1A /* Sparkle in Frameworks */,
+				D13008D67C966B7313B57B1A /* DuckDB in Frameworks */,
+				A3C441FC738F346EFB5AA116 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -641,6 +643,7 @@
 			);
 			name = Ruru;
 			packageProductDependencies = (
+				E7FD66C4FB6B85E5E1DCB8DF /* DuckDB */,
 				BFC20F58A33E9AACC1DBA1E3 /* Sparkle */,
 			);
 			productName = Ruru;
@@ -1352,6 +1355,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 8EE8C21633D7C4D7F7DD03FD /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		E7FD66C4FB6B85E5E1DCB8DF /* DuckDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3EC90959819AD983E1E0CF43 /* XCRemoteSwiftPackageReference "duckdb-swift" */;
+			productName = DuckDB;
 		};
 		F3DA6EE84E94B0C7A81A1098 /* RuruClient */ = {
 			isa = XCSwiftPackageProductDependency;

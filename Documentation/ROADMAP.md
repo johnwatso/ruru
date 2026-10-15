@@ -1,5 +1,74 @@
 # Development log and next steps
 
+## 2026-10-16 — Recovery guidance and independent Ruru visibility
+
+- SwiftBot's existing Ruru health check now flags unreachable/recovering Ruru
+  on native Overview, SwiftMesh, WebUI Overview and the backup status page.
+  Local Activity records observed outage/recovery edges without duplicate
+  entries on unchanged polls. Guidance distinguishes a valid local lease from
+  missing permission; no new probes, Discord sends or ownership decisions.
+- Open alert incidents now explain what to check and offer a Review action
+  opening the affected monitor or service, Internet Access or Overview.
+  Unverified incidents still require fresh evidence. Guarding and Coordination
+  details link to the same service, and sidebar help explains each capability.
+- Corrected restore/removal guidance that assumed a fixed 30-second lease.
+  Restore explains the actual maximum quarantine, its start at database reopen,
+  settings-only restores, and reconciliation of newer lost terms. Backup copy
+  distinguishes included rules from excluded incident/history data.
+- Connection Details now explains shared-token trust. Added a concrete
+  [individual server credential design](SERVER_IDENTITY.md), including
+  node-bound route authorization, revocation, durable failure handling and
+  removal of SwiftMesh's shared-token forwarding. Following the operator's
+  single-user deployment decision, adoption requires fresh pairing on every
+  Mac, without mixed admission, token migration or migration tracking. Lease
+  state and terms are retained. This is a proposal, not enabled per-node
+  authentication; the follow-up revision was documentation-only and checked
+  with `git diff --check`, without changing live credentials or storage.
+- Release launch testing found that WitnessKit and RuruAlerting referenced
+  Xcode's shared DuckDB package framework without embedding it in the app.
+  The app now declares DuckDB directly in `project.yml`; XcodeGen's regenerated
+  project embeds the shared product. The repaired universal app launches in an
+  isolated preview without storage, Keychain, listener or login-item changes.
+- Added a read-only whole-bundle release validator and wired it into CI. It
+  checks every Mach-O's Intel/Apple silicon slices, Sequoia compatibility and
+  bundled non-system library references, then runs the Sparkle preflight. It
+  rejected the earlier missing-DuckDB artifact and passes the repaired bundle
+  in development mode. Strict mode still rejects the missing ShipHook public
+  key; signing, notarisation, feeds and real update installation remain external
+  release work. No release key was generated or exported.
+- Validation: XcodeGen, Release-universal build and whole-bundle preflight
+  passed. All 238 Ruru Debug Xcode tests passed (231 WitnessKit/app tests and
+  7 client-package tests), including incident guidance and maximum restore
+  quarantine coverage. Release preview verified incident-to-target navigation, both service
+  cross-links and the trust notice. SwiftBot's Debug build and 57 focused tests
+  passed; its unchanged coordinator-watch snapshot test failed twice and was
+  excluded from the final run (recorded in SwiftBot's roadmap). WebUI scripts
+  parse and an isolated backup-page rendering check passed.
+- The operator reported deployment testing underway and working well on
+  15 October. Exact hardware/build/scenario acceptance remains part of that
+  ongoing testing; this change did not run a physical multi-Mac drill or a
+  production restore.
+
+## 2026-10-15 — Simpler alert rule builder
+
+- Replaced the three-pane Alerts layout with a searchable rules list and one
+  editor at the normal console width. Rule Info opens status, recent triggers
+  and notification previews on demand.
+- Reduced the main form to Alert me when and Notify me. One condition menu
+  groups all existing triggers by source; name and enabled state live in the
+  header, and recovery sits beside delivery. More options retains cooldown,
+  repeats, quiet hours, severity and Activity recording, with a collapsed
+  summary of configured overrides. Saved rules and alert engine contracts
+  are unchanged.
+- Corrected the editor's event-to-condition switch to restore the recovery
+  default using the previous trigger, before replacing it.
+- Validation: XcodeGen and Debug Xcode build succeeded; all 41 focused alert
+  engine, latency and service tests passed. An isolated, storage-free preview
+  exercised the grouped condition menu, event/condition controls, Revert,
+  existing advanced values and Rule Info. Preview saves intentionally have
+  no backing service; persisted rule edits are covered by the service tests.
+  No Release-universal build, Intel Mac mini or Sequoia execution was performed.
+
 ## 2026-10-15 — v1 scope control and validation freeze
 
 - Established a v1 feature gate in `ARCHITECTURE.md`: Ruru remains an

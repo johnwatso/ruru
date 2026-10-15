@@ -56,6 +56,19 @@ extension WitnessAppModel {
     func openIncidents(for rule: AlertRule) -> [AlertIncident] {
         alertSnapshot.openIncidents.filter { $0.ruleID == rule.id }
     }
+
+    func reviewIncident(_ incident: AlertIncident) {
+        switch RuruIncidentGuidance(incident).destination {
+        case .monitor(let id):
+            pendingMonitorTargetID = id
+            selectedPage = .monitoring
+        case .service(let id):
+            pendingGuardedServiceID = id
+            selectedPage = .guarding
+        case .internet: selectedPage = .internet
+        case .overview: selectedPage = .overview
+        }
+    }
 }
 
 private extension String {
@@ -75,8 +88,6 @@ struct WitnessAlertsPage: View {
     @State private var mode: Mode = .rules
     @State private var selectedID: UUID?
     @State private var search = ""
-    @State private var inspectorShown = true
-    @State private var inspectorPopover = false
     @State private var error: String?
 
     private var snapshot: AlertSnapshot { model.alertSnapshot }
@@ -91,19 +102,16 @@ struct WitnessAlertsPage: View {
     private var selectedRule: AlertRule? { snapshot.rules.first { $0.id == selectedID } }
 
     var body: some View {
-        GeometryReader { proxy in
-            let inline = proxy.size.width >= 1_080
-            VStack(alignment: .leading, spacing: 18) {
-                ConsolePageHeader(title: "Alerts", subtitle: subtitle) { headerAccessory }
-                banners
-                switch mode {
-                case .rules: rulesLayout(inline: inline)
-                case .history: WitnessAlertHistoryView()
-                }
+        VStack(alignment: .leading, spacing: 18) {
+            ConsolePageHeader(title: "Alerts", subtitle: subtitle) { headerAccessory }
+            banners
+            switch mode {
+            case .rules: rulesLayout
+            case .history: WitnessAlertHistoryView()
             }
-            .padding(.horizontal, 36).padding(.top, 32).padding(.bottom, 28)
-            .frame(maxWidth: 1_400, alignment: .topLeading).frame(maxWidth: .infinity)
         }
+        .padding(.horizontal, 36).padding(.top, 32).padding(.bottom, 28)
+        .frame(maxWidth: 1_120, maxHeight: .infinity, alignment: .topLeading).frame(maxWidth: .infinity)
         .onAppear { if selectedID == nil { selectedID = snapshot.rules.first?.id } }
         .onChange(of: snapshot.rules.map(\.id)) { _, ids in
             if let selectedID, !ids.contains(selectedID) { self.selectedID = ids.first }
@@ -148,7 +156,7 @@ struct WitnessAlertsPage: View {
                 }
             }
         } label: {
-            Label("New Alert Rule", systemImage: "plus")
+            Label("New Rule", systemImage: "plus")
         } primaryAction: { addBlank() }
         .menuStyle(.borderedButton).buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
         .disabled(!model.alertRulesActive)
@@ -175,7 +183,7 @@ struct WitnessAlertsPage: View {
 
     // MARK: Rules layout
 
-    @ViewBuilder private func rulesLayout(inline: Bool) -> some View {
+    @ViewBuilder private var rulesLayout: some View {
         if snapshot.rules.isEmpty && snapshot.started {
             ConsoleSection("No alert rules yet") {
                 ConsoleEmptyState(symbol: "bell.badge", title: "Nothing will notify you",
@@ -188,21 +196,13 @@ struct WitnessAlertsPage: View {
                     .frame(width: 250)
                 Group {
                     if let rule = selectedRule {
-                        AlertRuleEditor(rule: rule, onError: { error = $0 },
-                                        inspectorToggle: inline ? $inspectorShown : nil,
-                                        showInfo: inline ? nil : { inspectorPopover = true })
+                        AlertRuleEditor(rule: rule, onError: { error = $0 })
                             .id(rule.id)
-                            .popover(isPresented: $inspectorPopover, arrowEdge: .bottom) {
-                                AlertRuleInspector(rule: rule).frame(width: 320, height: 520).environmentObject(model)
-                            }
                     } else {
                         ConsoleEmptyState(symbol: "bell", title: "Choose a rule", detail: "Select a rule to see and edit what triggers it.")
                             .consoleSurface()
                     }
                 }.frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
-                if inline, inspectorShown, let rule = selectedRule {
-                    AlertRuleInspector(rule: rule).frame(width: 300)
-                }
             }.frame(maxHeight: .infinity)
         }
     }
@@ -319,22 +319,21 @@ private struct AlertRulesList: View {
     }
 }
 
-// MARK: Centre — editor
+// MARK: Rule editor
 
 private struct AlertRuleEditor: View {
     @EnvironmentObject private var model: WitnessAppModel
     @Environment(\.openSettings) private var openSettings
     let rule: AlertRule
     let onError: (String) -> Void
-    var inspectorToggle: Binding<Bool>?
-    var showInfo: (() -> Void)?
     @State private var draft: AlertRule
     @State private var saving = false
     @State private var confirmingDelete = false
     @State private var advancedOpen = false
+    @State private var infoShown = false
 
-    init(rule: AlertRule, onError: @escaping (String) -> Void, inspectorToggle: Binding<Bool>?, showInfo: (() -> Void)?) {
-        self.rule = rule; self.onError = onError; self.inspectorToggle = inspectorToggle; self.showInfo = showInfo
+    init(rule: AlertRule, onError: @escaping (String) -> Void) {
+        self.rule = rule; self.onError = onError
         _draft = State(initialValue: rule)
     }
 
@@ -347,10 +346,8 @@ private struct AlertRuleEditor: View {
             header
             Divider()
             Form {
-                nameSection
                 whenSection
                 thenSection
-                if descriptor?.supportsRecovery == true { recoverySection }
                 advancedSection
             }
             .formStyle(.grouped).scrollContentBackground(.hidden)
@@ -374,37 +371,21 @@ private struct AlertRuleEditor: View {
         HStack(spacing: 12) {
             ConsoleIconTile(symbol: draft.symbol, active: draft.enabled, size: 34)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Rule").font(.caption).foregroundStyle(.secondary)
-                Text(rule.name).font(.headline).lineLimit(1)
+                Text("Rule name").font(.caption).foregroundStyle(.secondary)
+                TextField("Rule name", text: $draft.name).font(.headline).textFieldStyle(.plain)
             }
             Spacer()
-            if let showInfo {
-                Button { showInfo() } label: { Label("Rule Info", systemImage: "info.circle") }
-                    .labelStyle(.iconOnly).buttonStyle(.borderless).help("Status, history and notification preview")
-            }
-            if let inspectorToggle {
-                Button { inspectorToggle.wrappedValue.toggle() } label: { Label("Inspector", systemImage: "sidebar.right") }
-                    .labelStyle(.iconOnly).buttonStyle(.borderless)
-                    .help(inspectorToggle.wrappedValue ? "Hide the inspector" : "Show the inspector")
-            }
+            Toggle("Rule enabled", isOn: $draft.enabled).labelsHidden().toggleStyle(.switch).controlSize(.small)
+                .help(draft.enabled ? "Rule enabled" : "Rule disabled")
+            Button { infoShown = true } label: { Label("Rule Info", systemImage: "info.circle") }
+                .labelStyle(.iconOnly).buttonStyle(.borderless).help("Status, history and notification preview")
+                .popover(isPresented: $infoShown, arrowEdge: .bottom) {
+                    AlertRuleInspector(rule: rule).frame(width: 320, height: 520).environmentObject(model)
+                }
         }.padding(.horizontal, 16).padding(.vertical, 12)
     }
 
     // MARK: Sections
-
-    private var nameSection: some View {
-        Section {
-            TextField("Name", text: $draft.name, prompt: Text("Website unavailable"))
-            Toggle("Enabled", isOn: $draft.enabled)
-        }
-    }
-
-    private var sourceBinding: Binding<AlertSource> {
-        Binding(get: { descriptor?.source ?? .monitoring }, set: { source in
-            guard source != descriptor?.source, let first = TriggerCatalogue.triggers(for: source).first else { return }
-            setTrigger(first.id)
-        })
-    }
 
     private var triggerBinding: Binding<TriggerID> {
         Binding(get: { draft.trigger }, set: { setTrigger($0) })
@@ -412,34 +393,37 @@ private struct AlertRuleEditor: View {
 
     private func setTrigger(_ id: TriggerID) {
         guard let next = TriggerCatalogue.descriptor(for: id) else { return }
-        let sameTargets = descriptor?.subjectNoun == next.subjectNoun
+        let previous = descriptor
+        let sameTargets = previous?.subjectNoun == next.subjectNoun
         draft.trigger = id
         draft.threshold = next.defaultThreshold
         draft.limit = next.limit?.defaultValue
         if !sameTargets { draft.scope = .all }
         if next.lifecycle == .event { draft.notifyOnRecovery = false; draft.repeatSeconds = nil }
-        else if descriptor?.lifecycle == .event { draft.notifyOnRecovery = true }
-        draft.severity = draft.severity == nil ? nil : draft.severity
+        else if previous?.lifecycle == .event { draft.notifyOnRecovery = true }
     }
 
     private var whenSection: some View {
         Section {
-            Picker("Source", selection: sourceBinding) {
-                ForEach(AlertSource.allCases, id: \.self) { Label($0.title, systemImage: $0.symbol).tag($0) }
-            }
-            Picker("Trigger", selection: triggerBinding) {
-                ForEach(TriggerCatalogue.triggers(for: descriptor?.source ?? .monitoring)) { Text($0.title).tag($0.id) }
+            Picker("Condition", selection: triggerBinding) {
+                ForEach(AlertSource.allCases, id: \.self) { source in
+                    let triggers = TriggerCatalogue.triggers(for: source)
+                    if !triggers.isEmpty {
+                        Section(source.title) {
+                            ForEach(triggers) { Text($0.title).tag($0.id) }
+                        }
+                    }
+                }
                 if descriptor == nil { Text("Unavailable").tag(draft.trigger) }
-            }
+            }.pickerStyle(.menu)
             if let descriptor {
-                Text(descriptor.summary).font(.callout).foregroundStyle(.secondary)
                 targetRows(descriptor)
                 if let spec = descriptor.limit { limitRow(spec) }
                 if descriptor.supportsThreshold { thresholdRows(descriptor) }
-                Label(descriptor.basis.label, systemImage: "scope").font(.callout).foregroundStyle(.secondary)
-                    .help("What Ruru's knowledge about this condition is based on")
             }
-        } header: { Text("When") }
+        } header: { Text("Alert me when") } footer: {
+            if let descriptor { Text(descriptor.summary) }
+        }
     }
 
     @ViewBuilder private func targetRows(_ descriptor: TriggerDescriptor) -> some View {
@@ -484,7 +468,7 @@ private struct AlertRuleEditor: View {
     }
 
     @ViewBuilder private func thresholdRows(_ descriptor: TriggerDescriptor) -> some View {
-        Picker("Alert", selection: Binding(get: { draft.threshold.kind }, set: { kind in
+        Picker("Notify", selection: Binding(get: { draft.threshold.kind }, set: { kind in
             switch kind {
             case .immediately: draft.threshold = .immediately
             case .sourceDefault: draft.threshold = .sourceDefault
@@ -520,8 +504,8 @@ private struct AlertRuleEditor: View {
     private var thenSection: some View {
         Section {
             Picker("Send to", selection: Binding(get: { draft.delivery.useAllEnabled }, set: { draft.delivery.useAllEnabled = $0 })) {
-                Text("All enabled destinations").tag(true)
-                Text("Choose destinations").tag(false)
+                Text("Default destinations").tag(true)
+                Text("Choose for this rule").tag(false)
             }
             if draft.delivery.useAllEnabled {
                 let enabled = model.enabledAlertDestinations
@@ -540,24 +524,18 @@ private struct AlertRuleEditor: View {
                     }
                 }
             }
-            Toggle("Record in Activity", isOn: $draft.recordActivity)
-            Button("Manage Destinations in Settings…") { NSApplication.shared.activate(); openSettings() }
-                .buttonStyle(.link)
-        } header: { Text("Then") }
-    }
-
-    private var recoverySection: some View {
-        Section {
-            Toggle(isOn: $draft.notifyOnRecovery) {
-                Text("Notify when the condition resolves")
-                Text("One rule covers both: a single incident opens, and its recovery is announced only if the opening was.")
+            if descriptor?.supportsRecovery == true {
+                Toggle("Also notify when resolved", isOn: $draft.notifyOnRecovery)
+                    .help("Recovery is announced only if the opening notification was sent.")
             }
-        } header: { Text("Recovery") }
+            Button("Set Up Destinations…") { NSApplication.shared.activate(); openSettings() }
+                .buttonStyle(.link)
+        } header: { Text("Notify me") }
     }
 
     private var advancedSection: some View {
         Section {
-            DisclosureGroup("Cooldown, repeats, quiet hours and severity", isExpanded: $advancedOpen) {
+            DisclosureGroup(isExpanded: $advancedOpen) {
                 Picker("Severity", selection: Binding(get: { draft.severity }, set: { draft.severity = $0 })) {
                     Text("Default (\(descriptor?.defaultSeverity.title ?? "Warning"))").tag(AlertSeverity?.none)
                     ForEach(AlertSeverity.allCases, id: \.self) { Text($0.title).tag(AlertSeverity?.some($0)) }
@@ -589,8 +567,24 @@ private struct AlertRuleEditor: View {
                     Text("Notifications held back during quiet hours are sent afterwards if the problem is still open.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Toggle("Record in Activity", isOn: $draft.recordActivity)
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("More options")
+                    Text(optionsSummary).font(.caption).foregroundStyle(.secondary)
+                }
             }
-        } header: { Text("Advanced") }
+        }
+    }
+
+    private var optionsSummary: String {
+        var parts: [String] = []
+        if let severity = draft.severity { parts.append(severity.title + " severity") }
+        if draft.cooldownSeconds > 0 { parts.append("Cooldown: " + Threshold.durationText(draft.cooldownSeconds)) }
+        if let repeatSeconds = draft.repeatSeconds { parts.append("Remind every " + Threshold.durationText(repeatSeconds)) }
+        if draft.quietHours != nil { parts.append("Quiet hours on") }
+        if !draft.recordActivity { parts.append("Activity off") }
+        return parts.isEmpty ? "Timing, quiet hours, severity and activity" : parts.joined(separator: " · ")
     }
 
     private func minuteBinding(_ minute: Int, set: @escaping (Int) -> Void) -> Binding<Date> {
@@ -626,7 +620,21 @@ private struct AlertRuleEditor: View {
     }
 }
 
-// MARK: Right — inspector
+private struct WitnessIncidentAdvice: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    let incident: AlertIncident
+
+    var body: some View {
+        let guidance = RuruIncidentGuidance(incident)
+        VStack(alignment: .leading, spacing: 5) {
+            Text(guidance.detail).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(guidance.action) { model.reviewIncident(incident) }.buttonStyle(.link).font(.caption)
+        }.padding(.top, 4)
+    }
+}
+
+// MARK: Rule information
 
 struct AlertRuleInspector: View {
     @EnvironmentObject private var model: WitnessAppModel
@@ -666,6 +674,7 @@ struct AlertRuleInspector: View {
                              ? "Ruru restarted and hasn't observed this since. It stays open until fresh checks show it has recovered."
                              : "Open since \(incident.openedAt.formatted(date: .abbreviated, time: .shortened))")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        WitnessIncidentAdvice(incident: incident)
                     }
                 }
             }
@@ -829,11 +838,12 @@ struct WitnessAlertHistoryView: View {
                         .font(.caption).foregroundStyle(.orange)
                 }
                 if incident.flapping { Text("Flapping — individual notifications are paused.").font(.caption).foregroundStyle(.orange) }
+                WitnessIncidentAdvice(incident: incident)
             }
             Spacer(minLength: 8)
             WitnessStatusBadge(text: incident.verification == .unverified ? "Unverified" : "Open",
                                health: incident.verification == .unverified ? .warning : .error)
-        }.padding(14).accessibilityElement(children: .combine)
+        }.padding(14).accessibilityElement(children: .contain)
     }
 
     private func historyRow(_ entry: AlertHistoryEntry) -> some View {

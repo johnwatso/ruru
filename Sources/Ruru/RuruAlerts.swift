@@ -2,6 +2,45 @@ import Foundation
 import RuruAlerting
 import WitnessKit
 
+/// Local operator guidance; it never clears an incident or changes authority state.
+struct RuruIncidentGuidance {
+    enum Destination: Equatable {
+        case monitor(String), service(String), internet, overview
+    }
+    let detail: String
+    let action: String
+    let destination: Destination
+
+    init(_ incident: AlertIncident) {
+        let prefix = incident.verification == .unverified
+            ? "Awaiting fresh evidence after restart. " : ""
+        switch incident.subject.source {
+        case .monitoring:
+            detail = prefix + (incident.trigger == .monitorSlow
+                ? "Check this target's response time from the Ruru Mac, then use Check Now. A successful check at or below the rule's limit confirms recovery; a failed or inconclusive check does not."
+                : "Check this target from the Ruru Mac, then use Check Now. A successful check confirms recovery; an inconclusive check leaves the incident open.")
+            action = "Review Target"
+            destination = .monitor(incident.subject.id)
+        case .guarding, .coordination, .operationalStatus:
+            detail = prefix + "Check the service's servers and their application status. Restore connectivity or resolve the reported problem, then wait for fresh reports. Presence alone does not confirm readiness or grant ownership."
+            action = "Review Service"
+            destination = .service(incident.subject.groupID ?? incident.subject.id)
+        case .authority:
+            if incident.trigger == .internetAccessDown {
+                detail = prefix + "Check this Mac's network and the connector in Internet Access. Restoring the route does not bypass lease recovery or change ownership."
+                action = "Review Internet Access"
+                destination = .internet
+            } else {
+                detail = prefix + (incident.trigger == .snapshotFailed
+                    ? "Open Settings → Backup and check the snapshot error, free space and storage access. Keep the current database and its safety markers intact."
+                    : "Review Ruru's authority status and error. If storage cannot open, preserve the database and safety markers; use the documented backup/restore process rather than deleting them.")
+                action = "Review Ruru"
+                destination = .overview
+            }
+        }
+    }
+}
+
 /// Which problems Ruru reports, and where. The Discord webhook URL itself is a
 /// secret and lives in Keychain; only whether to use it is stored here.
 struct RuruAlertPreferences: Codable, Equatable {

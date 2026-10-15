@@ -8,6 +8,49 @@ itself while Ruru cannot be reached.
 Use this runbook for the initial two-SwiftBot deployment and after changes to
 the Ruru Mac, its network path, or Internet Access.
 
+Deployment testing is underway; the operator reported it working well on
+15 October 2026. Record exact builds, machines and completed scenarios in the
+acceptance record below before treating that report as coverage of every drill.
+
+## When SwiftBot reports Ruru unreachable
+
+SwiftBot checks Ruru from its own Mac. Its Overview and SwiftMesh views flag an
+unreachable authority, and Activity records outage/recovery transitions. The
+WebUI Overview and backup-node status page also show this condition. These are
+local observations: a failed check can mean a failed Mac, tunnel, WAN path or
+just that SwiftBot's own network is unavailable. A reachable recovering Ruru is
+shown separately from an unreachable one.
+
+Check the Ruru Mac, its network and Internet Access first. A current owner may
+continue only until its local lease deadline; a standby cannot acquire while
+Ruru is unavailable. A green health check never grants ownership. These flags
+do not send Discord messages or bypass standby output restrictions. They need
+SwiftBot to be running and reachable; independent external monitoring is still
+needed to detect loss of both applications or their shared network path.
+
+## Recovering from a backup
+
+1. Stop the previous authority and affected servers. Preserve the damaged or
+   current database, safety markers and available diagnostic reports.
+2. In Settings → Backup, choose Restore and review the file's date, included
+   ownership data and settings. Credentials, alert incidents and alert history
+   are not portable; alert rules are included with settings.
+3. If newer authority data was lost, reconcile the participants' latest durable
+   terms and any protected resource's fence before restarting. A fixed term
+   margin cannot reconstruct an arbitrarily newer lost authority.
+4. Restore explicitly. Ruru archives current storage and opens the restored
+   authority without restoring any owner. A restored ownership snapshot starts
+   a 300-second quarantine when its database is reopened; waiting in the stopped
+   state counts toward it. A settings-only restore does not create that new
+   quarantine.
+5. Review services, Internet Access and alert destinations. On a new Mac, set
+   up credentials and pair servers again. Start Ruru and allow any remaining
+   quarantine to finish before expecting acquisitions.
+
+An unverified incident after restart is unresolved, not healthy. Use its Review
+action to inspect the target or service. Fresh evidence must verify or recover
+it; deleting a rule archives it without establishing recovery.
+
 ## Steady-state checklist
 
 - Run one independent Ruru Mac, not a second unreplicated Ruru instance.

@@ -4,6 +4,17 @@ import WitnessKit
 enum WitnessPage: String, CaseIterable, Identifiable {
     case overview = "Overview", guarding = "Guarding", coordination = "Coordination", monitoring = "Monitoring", alerts = "Alerts", internet = "Internet Access", activity = "Activity"
     var id: Self { self }
+    var purpose: String {
+        switch self {
+        case .overview: "Ruru status, service ownership and issues needing attention."
+        case .guarding: "Manage which server may perform a service's exclusive work."
+        case .coordination: "Manage resource sharing and approved websites for each service."
+        case .monitoring: "Check whether configured servers and addresses are reachable."
+        case .alerts: "Choose when Ruru notifies you and review open incidents."
+        case .internet: "Manage the public HTTPS route to this Ruru."
+        case .activity: "Review ownership changes, server reports and alert activity."
+        }
+    }
     var symbol: String {
         switch self {
         case .overview: "square.grid.2x2"

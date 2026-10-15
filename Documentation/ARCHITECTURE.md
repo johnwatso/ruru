@@ -1,13 +1,15 @@
 # Ruru architecture
 
-This repository is independent from SwiftBot. It has four Xcode targets,
+This repository is independent from SwiftBot. It has six Xcode targets,
 including a helper built only for storage tests:
 
 | Target | Responsibility |
 | --- | --- |
 | `Ruru` | Sequoia-compatible SwiftUI menu bar app, native sidebar console, host settings, Keychain credentials, login control, and Internet Access setup. |
 | `WitnessKit` | Actor-isolated lease authority, durable DuckDB store through the official Swift API, HTTP parser/router, bounded Network listener, Cloudflare API setup and connector supervision. No SwiftUI dependency. |
+| `RuruAlerting` | UI-free alert rules, incidents, bounded delivery queues and a separate DuckDB history store. No WitnessKit dependency. |
 | `WitnessKitTests` | Unhosted XCTest tests; isolated temporary databases and loopback sockets, no real Keychain or login items. |
+| `RuruClientTests` | Isolated tests for the public Swift client package. |
 | `WitnessStorageProbe` | Test-only native process used to verify recovery after SIGKILL; never shipped inside the app. |
 
 The application owns the lease store for its whole lifetime, independently of

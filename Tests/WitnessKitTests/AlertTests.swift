@@ -405,3 +405,35 @@ final class AlertAuthorityFailureTests: XCTestCase {
         }
     }
 }
+
+final class IncidentGuidanceTests: XCTestCase {
+    private func incident(_ trigger: TriggerID, source: AlertSource, group: String? = nil,
+                          verification: AlertIncident.Verification = .verified) -> AlertIncident {
+        AlertIncident(ruleID: UUID(), ruleName: "Example", trigger: trigger,
+                      subject: SubjectRef(source: source, kind: "example", id: "subject", name: "Example", groupID: group),
+                      severity: .warning, basis: .ruruObserved, verification: verification,
+                      title: "Example", detail: "", openedAt: Date())
+    }
+
+    func testUnverifiedReadinessGuidanceKeepsEvidenceAndOwnershipSeparate() {
+        let guidance = RuruIncidentGuidance(incident(.nodeDegraded, source: .operationalStatus,
+                                                   group: "service", verification: .unverified))
+        XCTAssertEqual(guidance.destination, .service("service"))
+        XCTAssertTrue(guidance.detail.contains("Awaiting fresh evidence"))
+        XCTAssertTrue(guidance.detail.contains("Presence alone does not confirm readiness or grant ownership"))
+    }
+
+    func testSlowMonitorGuidanceRequiresSuccessfulMeasurementBelowLimit() {
+        let guidance = RuruIncidentGuidance(incident(.monitorSlow, source: .monitoring))
+        XCTAssertEqual(guidance.destination, .monitor("subject"))
+        XCTAssertTrue(guidance.detail.contains("below the rule's limit"))
+        XCTAssertTrue(guidance.detail.contains("failed or inconclusive check does not"))
+    }
+
+    func testAuthorityAndTunnelFailuresHaveDifferentRecoveryActions() {
+        XCTAssertEqual(RuruIncidentGuidance(incident(.internetAccessDown, source: .authority)).destination, .internet)
+        let storage = RuruIncidentGuidance(incident(.serviceStopped, source: .authority))
+        XCTAssertEqual(storage.destination, .overview)
+        XCTAssertTrue(storage.detail.contains("preserve the database and safety markers"))
+    }
+}

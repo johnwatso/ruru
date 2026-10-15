@@ -141,7 +141,8 @@ public enum LeaseRestoreError: LocalizedError, Equatable {
 /// Explicit, offline disaster restore. Ordinary startup never invokes this path.
 public enum LeaseRestore {
     /// Added to the highest term known from the backup or the replaced database,
-    /// so no participant can be granted a term it has already been issued.
+    /// to fence terms present in those sources. An arbitrarily newer lost
+    /// authority still requires reconciliation with participants/resources.
     public static let termMargin: Int64 = 1_000_000
 
     public struct Result: Sendable {

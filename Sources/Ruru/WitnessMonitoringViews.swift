@@ -86,6 +86,12 @@ struct WitnessMonitoringPage: View {
                 .frame(maxWidth: 1120, alignment: .leading).frame(maxWidth: .infinity)
         }
         .sheet(isPresented: $adding) { WitnessMonitorTargetSheet(target: nil).environmentObject(model) }
+        .onAppear {
+            if let id = model.pendingMonitorTargetID {
+                model.pendingMonitorTargetID = nil
+                if model.configuration.monitorTargets.contains(where: { $0.id == id }) { selectedID = id }
+            }
+        }
         .sheet(isPresented: Binding(get: { selected != nil }, set: { if !$0 { selectedID = nil } })) {
             if let selected { WitnessMonitorDetailSheet(target: selected).environmentObject(model).id(selected.id) }
         }

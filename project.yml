@@ -67,6 +67,9 @@ targets:
     dependencies:
       - target: WitnessKit
       - target: RuruAlerting
+      # Both frameworks use DuckDB; the app must embed Xcode's shared package product.
+      - package: DuckDB
+        product: DuckDB
       - package: Sparkle
         product: Sparkle
     info:

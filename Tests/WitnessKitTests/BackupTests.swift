@@ -42,6 +42,7 @@ final class BackupTests: XCTestCase {
         let blocked = await restored.apply(.acquire, request: LeaseRequest(clusterID: "bot", nodeID: "home", term: 0))
         XCTAssertEqual(blocked.status, 503)
         let quarantined = try await restored.snapshot()
+        XCTAssertEqual(quarantined.recoverySeconds, LeaseStore.leaseDurationRange.upperBound)
         XCTAssertTrue(quarantined.leases.allSatisfy { $0.ownerNodeID.isEmpty && $0.remainingSeconds == 0 })
         XCTAssertEqual(quarantined.events.count, backup.events.count)
         clock.advance(LeaseStore.leaseDurationRange.upperBound + 1)

@@ -14,6 +14,8 @@ final class WitnessAppModel: ObservableObject {
     @Published var selectedPage: WitnessPage? = .overview
     /// A service Overview asked Guarding to open; Guarding consumes it when it appears.
     var pendingGuardedServiceID: String?
+    var pendingCoordinationServiceID: String?
+    var pendingMonitorTargetID: String?
     @Published private(set) var state: ServiceState = .stopped
     @Published private(set) var coordinationLocations: [CoordinationLocation] = []
     @Published private(set) var coordinationEnrollments: [CoordinationEnrollment] = []

@@ -42,9 +42,17 @@ and `Clients/RuruClient`.
 
 ## Gaps and decisions
 
+A concrete fresh-pairing proposal is in
+[Individual server credentials](SERVER_IDENTITY.md). It includes the SwiftMesh
+pairing change needed to avoid copying one server's credential to another.
+The operator accepts re-pairing every Mac; no mixed-admission period or token
+migration is planned. Existing lease state and public client contracts remain
+protected.
+The proposal is not an implemented authentication capability.
+
 | Area | Current gap | Phase-one action / decision |
 | --- | --- | --- |
-| Node membership and trust | No durable authoritative node registry; presence is an ephemeral observation. Pairing delivers a shared service token, so a trusted participant can report another node ID. | Decide whether the SwiftBot migration needs per-node credentials and revocation now, or whether service-scoped trust is an accepted first cut. If adding identity, specify enrollment, stable ID binding, rotation/revocation, and behavior for existing service tokens before changing the wire contract. |
+| Node membership and trust | No durable authoritative node registry; presence is an ephemeral observation. Pairing delivers a shared service token, so a trusted participant can report another node ID. | Implement and review the proposed node-bound credentials, independent pairing and revocation as a separate security change. Adoption requires fresh pairing and refuses old shared client tokens; no mixed-mode migration is needed. Preserve lease state and public client compatibility with older authorities. |
 | Desired roles and readiness | Preferred Primary stores operator intent; participant role is self-reported. Neither establishes readiness or permits promotion. | Preserve this separation. If readiness is needed, define an app-owned readiness report and show it as observed/untrusted input; Ruru must not turn it into lease authority implicitly. |
 | Ownership lifecycle | Core APIs and client state machine already exist. App-specific drain/readiness and side-effect fencing remain the integrator's responsibility. | No new generic lease route indicated. Validate SwiftBot's stop/drain-before-release behavior and fencing obligations as part of migration; only extend RuruClient for a demonstrated reusable gap. |
 | Failure semantics | Single authority by design. Authority outage pauses guarded work after the local deadline; no quorum or automatic authority failover. | Keep the single-authority model for this phase. Document/test outage, restart quarantine, expired lease, process recovery, and stale-term rejection. Treat replicated Ruru authority as a separate project. |

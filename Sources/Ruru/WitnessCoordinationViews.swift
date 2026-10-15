@@ -41,6 +41,12 @@ struct WitnessCoordinationPage: View {
             WitnessAddServiceSheet(subtitle: "Connect an app or service with its own coordination group.", symbol: "server.rack")
                 .environmentObject(model)
         }
+        .onAppear {
+            if let id = model.pendingCoordinationServiceID {
+                model.pendingCoordinationServiceID = nil
+                if model.configuration.guardedServices.contains(where: { $0.id == id }) { selectedID = id }
+            }
+        }
     }
 
     private func serviceCard(_ service: GuardedService) -> some View {
@@ -120,6 +126,12 @@ private struct WitnessCoordinationServiceDetails: View {
         }
         if let removalError { ConsoleIssue(title: "Service could not be removed", detail: removalError) }
         if let enrollmentError { ConsoleIssue(title: "Website request could not be approved", detail: enrollmentError) }
+        ConsoleSettingRow(title: "Ownership guarding", subtitle: model.guardOwner(for: service.clusterID)) {
+            Button("Open Guarding") {
+                model.pendingGuardedServiceID = service.id
+                model.selectedPage = .guarding
+            }
+        }.consoleRowGroup()
         let requests = model.coordinationEnrollments.filter { $0.clusterID == service.clusterID }
         if !requests.isEmpty {
             ConsoleSection("Website requests") {
@@ -210,7 +222,7 @@ private struct WitnessCoordinationServiceDetails: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Removes this service from Coordination and Guarding and clears its reported locations. Its servers can no longer report resources or acquire/renew ownership; existing permission expires within 30 seconds. Hosted files, ownership terms and history are retained. Other services continue running.")
+            Text("Removes this service from Coordination and Guarding and clears its reported locations. Its servers can no longer report resources or acquire/renew ownership; existing permission lasts only until each client's current lease deadline. Hosted files, ownership terms and history are retained. Other services continue running.")
         }
     }
 
