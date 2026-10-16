@@ -220,12 +220,24 @@ public actor WitnessHTTPServer {
         case .reject(let status): send(.error("invalid_request", status: status), id: id)
         case .request(let request):
             if Self.isWebPath(Substring(request.path)), let webHandler,
-               let response = await webHandler(WitnessWebRequest(request)) {
+               let response = await webHandler(WitnessWebRequest(request, isLoopbackPeer: connections[id].map { Self.isLoopback($0.network.endpoint) } ?? false)) {
                 send(response, id: id)
                 return
             }
             let reply = await router.route(request)
             send(reply, id: id)
+        }
+    }
+
+    private static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
+        guard case .hostPort(let host, _) = endpoint else { return false }
+        switch host {
+        case .ipv4(let address): return address.isLoopback
+        case .ipv6(let address):
+            if address.isLoopback { return true }
+            if let mapped = address.asIPv4 { return mapped.isLoopback }
+            return false
+        default: return false
         }
     }
 
@@ -239,7 +251,7 @@ public actor WitnessHTTPServer {
 
     private func send(_ reply: WitnessWebResponse, id: UUID) {
         let reasons = [200: "OK", 202: "Accepted", 410: "Gone", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict",
-                       429: "Too Many Requests", 411: "Length Required", 413: "Content Too Large", 431: "Request Header Fields Too Large", 503: "Service Unavailable"]
+                       429: "Too Many Requests", 500: "Internal Server Error", 411: "Length Required", 413: "Content Too Large", 431: "Request Header Fields Too Large", 503: "Service Unavailable"]
         let type = Self.safeHeaderValue(reply.contentType) ?? "application/octet-stream"
         var bytes = Data("HTTP/1.1 \(reply.status) \(reasons[reply.status] ?? "Error")\r\nContent-Type: \(type)\r\nContent-Length: \(reply.body.count)\r\nCache-Control: no-store\r\nConnection: close\r\n".utf8)
         for (name, value) in reply.headers.sorted(by: { $0.key < $1.key }) where Self.safeHeaderName(name) && Self.safeHeaderValue(value) != nil {

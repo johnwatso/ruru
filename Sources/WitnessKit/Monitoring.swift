@@ -88,6 +88,36 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
+    /// Targets the browser console may create. LAN and internet hosts are fine;
+    /// this Mac itself, link-local and unspecified addresses (including cloud
+    /// metadata endpoints) are not, so a web operator cannot probe local services.
+    public var isWebPermitted: Bool {
+        guard isValid else { return false }
+        let hostText: String
+        switch kind {
+        case .http: hostText = Self.validURL(url)?.host ?? ""
+        case .tcp, .dns: hostText = host
+        }
+        return !Self.isRestrictedHost(hostText)
+    }
+
+    static func isRestrictedHost(_ host: String) -> Bool {
+        let name = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]."))
+        if name.isEmpty || name == "localhost" || name.hasSuffix(".localhost") { return true }
+        if name.contains(":") {
+            return name == "::" || name == "::1" || name.hasPrefix("fe80") || name.hasPrefix("::ffff:")
+                || name.hasPrefix("ff")
+        }
+        let octets = name.split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
+        if octets.count == 4, octets.allSatisfy({ $0 != nil && (0...255).contains($0!) }) {
+            let a = octets[0]!, b = octets[1]!
+            return a == 0 || a == 127 || a >= 224 || (a == 169 && b == 254)
+        }
+        // Single-label decimal/hex forms such as 2130706433 or 0x7f000001.
+        if Int(name) != nil || name.hasPrefix("0x") { return true }
+        return false
+    }
+
     /// Host names and IP literals only: no whitespace, paths, credentials or ports.
     public static func validHost(_ host: String) -> Bool {
         guard !host.isEmpty, host.utf8.count <= 253 else { return false }

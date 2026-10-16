@@ -235,3 +235,23 @@ final class MonitorTargetAttentionTests: XCTestCase {
         XCTAssertTrue(decoded.needsAttention)
     }
 }
+
+final class MonitorWebPermissionTests: XCTestCase {
+    func testWebConsoleRejectsLocalAndMetadataTargets() {
+        let blocked: [MonitorTarget] = [
+            MonitorTarget(name: "a", kind: .tcp, host: "127.0.0.1", port: 22),
+            MonitorTarget(name: "b", kind: .tcp, host: "localhost", port: 22),
+            MonitorTarget(name: "c", kind: .http, url: "http://169.254.169.254/latest"),
+            MonitorTarget(name: "d", kind: .dns, host: "::1", port: 53),
+            MonitorTarget(name: "e", kind: .tcp, host: "2130706433", port: 22),
+            MonitorTarget(name: "f", kind: .http, url: "http://0.0.0.0:8080")
+        ]
+        for target in blocked { XCTAssertFalse(target.isWebPermitted, target.name) }
+    }
+
+    func testWebConsoleAllowsLANAndInternetTargets() {
+        XCTAssertTrue(MonitorTarget(name: "nas", kind: .tcp, host: "192.168.1.20", port: 445).isWebPermitted)
+        XCTAssertTrue(MonitorTarget(name: "site", kind: .http, url: "https://status.example.com").isWebPermitted)
+        XCTAssertTrue(MonitorTarget(name: "dns", kind: .dns, host: "192.168.1.1", port: 53).isWebPermitted)
+    }
+}

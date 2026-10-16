@@ -16,9 +16,14 @@ public struct WitnessWebRequest: Sendable {
     public let path: String
     public let headers: [String: String]
     public let body: Data
+    /// True only when the TCP peer is this Mac. The bundled cloudflared helper
+    /// connects locally, so handlers can refuse a LAN peer that forges
+    /// Cloudflare Access headers.
+    public let isLoopbackPeer: Bool
 
-    init(_ request: HTTPRequest) {
+    init(_ request: HTTPRequest, isLoopbackPeer: Bool) {
         method = request.method; path = request.path; headers = request.headers; body = request.body
+        self.isLoopbackPeer = isLoopbackPeer
     }
 }
 

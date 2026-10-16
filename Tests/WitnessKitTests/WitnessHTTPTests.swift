@@ -386,6 +386,7 @@ final class WitnessHTTPTests: XCTestCase {
         let server = try WitnessHTTPServer(store: database, clusterID: "bot", token: token,
             webHandler: { request in
                 guard request.path == "/" else { return nil }
+                XCTAssertTrue(request.isLoopbackPeer)
                 return WitnessWebResponse(contentType: "text/plain; charset=utf-8", body: Data("Ruru Web UI".utf8),
                                           headers: ["X-Ruru-Web": "present"])
             })

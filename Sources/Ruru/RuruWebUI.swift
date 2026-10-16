@@ -102,6 +102,9 @@ actor RuruWebUI {
     }
 
     func route(_ request: WitnessWebRequest) async -> WitnessWebResponse? {
+        // Access headers are only trustworthy when the request came through the
+        // local tunnel helper; a LAN peer could forge them.
+        guard request.isLoopbackPeer else { return Self.jsonError("tunnel_required", status: 403) }
         guard let origin = await origin() else { return Self.jsonError("web_ui_unavailable", status: 503) }
         guard !passkeyStoreUnavailable else { return Self.jsonError("passkey_store_unavailable", status: 503) }
         guard let email = Self.accessEmail(request.headers["cf-access-authenticated-user-email"]) else {
@@ -136,12 +139,21 @@ actor RuruWebUI {
             guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
             guard role(for: email) == .owner else { return Self.jsonError("owner_required", status: 403) }
             return createOperatorInvite(request)
+        case ("POST", "/api/web/logout"):
+            guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
+            if let id = Self.cookie(named: "ruru_session", from: request.headers["cookie"]) { sessions.removeValue(forKey: id) }
+            return Self.json(["loggedOut": true], headers: ["Set-Cookie": Self.cookie("ruru_session", value: "", age: 0)])
+        case ("POST", "/api/web/operators/remove"):
+            guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
+            guard role(for: email) == .owner else { return Self.jsonError("owner_required", status: 403) }
+            return removeOperator(request, actingEmail: email)
         case ("GET", "/api/web/monitors"):
             return Self.json(await monitorSnapshot())
         case ("POST", "/api/web/monitors"):
             guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
             do {
                 let target = try JSONDecoder().decode(MonitorTarget.self, from: request.body)
+                guard target.isWebPermitted else { return Self.jsonError("monitor_target_not_permitted", status: 400) }
                 try await monitorSave(target)
                 return Self.json(["saved": true])
             } catch { return Self.jsonError("invalid_monitor", status: 400) }
@@ -179,6 +191,19 @@ actor RuruWebUI {
             enrollment = Enrollment(code: code, email: invitedEmail, kind: .operatorInvite, expires: expiry)
             return Self.json(OperatorInvitation(code: code, expiresAt: expiry, email: invitedEmail))
         } catch { return Self.jsonError("enrollment_unavailable", status: 503) }
+    }
+
+    private func removeOperator(_ request: WitnessWebRequest, actingEmail: String) -> WitnessWebResponse {
+        guard let value = try? JSONDecoder().decode(OperatorInvitationRequest.self, from: request.body),
+              let target = Self.accessEmail(value.email), target != actingEmail,
+              let index = passkeys.firstIndex(where: { $0.email == target }), passkeys[index].role != .owner else {
+            return Self.jsonError("invalid_operator", status: 400)
+        }
+        let removed = passkeys.remove(at: index)
+        do { try Self.savePasskeys(passkeys) }
+        catch { passkeys.insert(removed, at: index); return Self.jsonError("passkey_store_unavailable", status: 503) }
+        sessions = sessions.filter { $0.value.email != target }
+        return Self.json(["removed": true])
     }
 
     private func beginRegistration(_ request: WitnessWebRequest, email: String, origin: String) -> WitnessWebResponse {
@@ -346,10 +371,10 @@ actor RuruWebUI {
         return .init(contentType: "application/json; charset=utf-8", body: data, headers: headers)
     }
     private static func jsonError(_ code: String, status: Int) -> WitnessWebResponse {
-        .init(status: status, contentType: "application/json; charset=utf-8", body: Data("{\"error\":\"\(code)\"}".utf8))
+        .init(status: status, contentType: "application/json; charset=utf-8", body: (try? JSONEncoder().encode(["error": code])) ?? Data())
     }
     private static func html(_ value: String) -> WitnessWebResponse {
-        .init(contentType: "text/html; charset=utf-8", body: Data(value.utf8), headers: ["Content-Security-Policy": "default-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"])
+        .init(contentType: "text/html; charset=utf-8", body: Data(value.utf8), headers: ["Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"])
     }
 
     private static func javascript(_ value: String) -> WitnessWebResponse {
@@ -363,7 +388,7 @@ actor RuruWebUI {
     private static let page = #"""
     <!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
     <title>Ruru</title><style>body{margin:0;background:#11151c;color:#eef2f7;font:16px -apple-system,sans-serif}main{max-width:720px;margin:10vh auto;padding:28px}button,input{font:inherit;padding:10px;border-radius:8px;border:1px solid #4b5563}button{background:#5c8dff;color:white}li{padding:10px;margin:8px 0;background:#1b2430;border-radius:8px}.muted{color:#aab4c2}</style>
-    <main><h1>Ruru</h1><p class=muted id=message>Checking secure access…</p><section id=login hidden><button id=signIn>Use passkey</button><p>First operator? Enter the one-time enrolment code displayed in Ruru’s native console. Invited operators must use the code their owner shared.</p><input id=code autocomplete=one-time-code placeholder="Enrolment code"><button id=enrol>Register passkey</button></section><section id=console hidden><h2>Monitors</h2><p class=muted>Checks are bounded and observational; they never affect lease ownership.</p><form id=add><input id=name required placeholder="Name"><select id=kind><option value=HTTP>HTTP(S)</option><option value=TCP>TCP</option><option value=DNS>DNS</option></select><input id=address required placeholder="https://status.example.com"><input id=port type=number value=443 min=1 max=65535><button>Add monitor</button></form><ul id=monitors></ul><section id=operators hidden><h2>Operators</h2><p class=muted>Invitees must also be admitted by the Cloudflare Access policy for this hostname. A notification email verification alone does not grant Ruru access.</p><form id=invite><input id=operatorEmail required type=email placeholder="admin@example.com"><button>Invite operator</button></form><p class=muted id=inviteResult></p><ul id=operatorList></ul></section></section></main>
+    <main><h1>Ruru</h1><p class=muted id=message>Checking secure access…</p><section id=login hidden><button id=signIn>Use passkey</button><p>First operator? Enter the one-time enrolment code displayed in Ruru’s native console. Invited operators must use the code their owner shared.</p><input id=code autocomplete=one-time-code placeholder="Enrolment code"><button id=enrol>Register passkey</button></section><section id=console hidden><h2>Monitors</h2><button id=logout>Sign out</button><p class=muted>Checks are bounded and observational; they never affect lease ownership.</p><form id=add><input id=name required placeholder="Name"><select id=kind><option value=HTTP>HTTP(S)</option><option value=TCP>TCP</option><option value=DNS>DNS</option></select><input id=address required placeholder="https://status.example.com"><input id=port type=number value=443 min=1 max=65535><input id=dnsName placeholder="DNS name to query" value=example.com><input id=interval type=number value=60 min=30 max=3600 title="Interval (s)"><input id=timeout type=number value=10 min=1 max=60 title="Timeout (s)"><input id=threshold type=number value=3 min=1 max=10 title="Failures before down"><button>Add monitor</button></form><ul id=monitors></ul><section id=operators hidden><h2>Operators</h2><p class=muted>Invitees must also be admitted by the Cloudflare Access policy for this hostname. A notification email verification alone does not grant Ruru access.</p><form id=invite><input id=operatorEmail required type=email placeholder="admin@example.com"><button>Invite operator</button></form><p class=muted id=inviteResult></p><ul id=operatorList></ul></section></section></main>
     <script src="/web/app.js"></script>
     """#
 
@@ -372,11 +397,12 @@ actor RuruWebUI {
     const adapt=o=>{o.challenge=b64(o.challenge);if(o.user)o.user.id=b64(o.user.id);for(const c of o.allowCredentials||[])c.id=b64(c.id);for(const c of o.excludeCredentials||[])c.id=b64(c.id);return o};
     const credential=c=>({id:c.id,rawId:enc(c.rawId),type:c.type,response:Object.fromEntries(['clientDataJSON','attestationObject','authenticatorData','signature','userHandle'].filter(k=>c.response[k]).map(k=>[k,enc(c.response[k])])),authenticatorAttachment:c.authenticatorAttachment});
     async function api(path,opts={}){let r=await fetch(path,{credentials:'same-origin',...opts});let j=await r.json();if(!r.ok)throw Error(j.error||'request_failed');return j}
-    async function authenticate(register){let path=register?'registration':'authentication',opts=register?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:document.querySelector('#code').value)}:{};let o=adapt(await api('/api/web/passkeys/'+path+'/options',opts));let c=register?await navigator.credentials.create({publicKey:o}):await navigator.credentials.get({publicKey:o});let done=await api('/api/web/passkeys/'+path+'/finish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(credential(c))});csrf=done.csrf;await show()}
-    async function show(){let monitors=await api('/api/web/monitors');document.querySelector('#login').hidden=true;document.querySelector('#console').hidden=false;document.querySelector('#message').textContent='Signed in with Cloudflare Access and a passkey.';document.querySelector('#monitors').replaceChildren(...monitors.map(m=>Object.assign(document.createElement('li'),{textContent:m.name+' · '+m.kind+' · '+(m.kind==='HTTP'?m.url:(m.host+':'+m.port))+(m.enabled?'':' · paused')})));try{let operators=await api('/api/web/operators');document.querySelector('#operators').hidden=false;document.querySelector('#operatorList').replaceChildren(...operators.map(o=>Object.assign(document.createElement('li'),{textContent:o.email+' · '+o.role})))}catch(e){document.querySelector('#operators').hidden=true}}
+    async function authenticate(register){let path=register?'registration':'authentication',opts=register?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:document.querySelector('#code').value})}:{};let o=adapt(await api('/api/web/passkeys/'+path+'/options',opts));let c=register?await navigator.credentials.create({publicKey:o}):await navigator.credentials.get({publicKey:o});let done=await api('/api/web/passkeys/'+path+'/finish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(credential(c))});csrf=done.csrf;await show()}
+    async function show(){let monitors=await api('/api/web/monitors');document.querySelector('#login').hidden=true;document.querySelector('#console').hidden=false;document.querySelector('#message').textContent='Signed in with Cloudflare Access and a passkey.';document.querySelector('#monitors').replaceChildren(...monitors.map(m=>Object.assign(document.createElement('li'),{textContent:m.name+' · '+m.kind+' · '+(m.kind==='HTTP'?m.url:(m.host+':'+m.port))+(m.enabled?'':' · paused')})));try{let operators=await api('/api/web/operators');document.querySelector('#operators').hidden=false;document.querySelector('#operatorList').replaceChildren(...operators.map(o=>{let li=Object.assign(document.createElement('li'),{textContent:o.email+' · '+o.role+' '});if(o.role!=='owner'){let b=Object.assign(document.createElement('button'),{textContent:'Remove'});b.onclick=()=>api('/api/web/operators/remove',{method:'POST',headers:{'Content-Type':'application/json','X-Ruru-CSRF':csrf},body:JSON.stringify({email:o.email})}).then(show).catch(x=>document.querySelector('#message').textContent=x.message);li.append(b)}return li}))}catch(e){document.querySelector('#operators').hidden=true}}
     document.querySelector('#signIn').onclick=()=>authenticate(false).catch(e=>document.querySelector('#message').textContent=e.message);document.querySelector('#enrol').onclick=()=>authenticate(true).catch(e=>document.querySelector('#message').textContent=e.message);
-    document.querySelector('#add').onsubmit=e=>{e.preventDefault();let kind=document.querySelector('#kind').value,address=document.querySelector('#address').value,port=Number(document.querySelector('#port').value),target={id:crypto.randomUUID(),name:document.querySelector('#name').value,kind,host:kind==='HTTP'?'':address,port:kind==='HTTP'?0:port,url:kind==='HTTP'?address:'',dnsQueryName:kind==='DNS'?'example.com':'example.com',intervalSeconds:60,timeoutSeconds:10,failureThreshold:3,enabled:true,needsAttention:false};api('/api/web/monitors',{method:'POST',headers:{'Content-Type':'application/json','X-Ruru-CSRF':csrf},body:JSON.stringify(target)}).then(show).catch(x=>document.querySelector('#message').textContent=x.message)};
+    document.querySelector('#add').onsubmit=e=>{e.preventDefault();let kind=document.querySelector('#kind').value,address=document.querySelector('#address').value,port=Number(document.querySelector('#port').value),target={id:crypto.randomUUID(),name:document.querySelector('#name').value,kind,host:kind==='HTTP'?'':address,port:kind==='HTTP'?0:port,url:kind==='HTTP'?address:'',dnsQueryName:document.querySelector('#dnsName').value||'example.com',intervalSeconds:Number(document.querySelector('#interval').value),timeoutSeconds:Number(document.querySelector('#timeout').value),failureThreshold:Number(document.querySelector('#threshold').value),enabled:true,needsAttention:false};api('/api/web/monitors',{method:'POST',headers:{'Content-Type':'application/json','X-Ruru-CSRF':csrf},body:JSON.stringify(target)}).then(show).catch(x=>document.querySelector('#message').textContent=x.message)};
+    document.querySelector('#logout').onclick=()=>api('/api/web/logout',{method:'POST',headers:{'X-Ruru-CSRF':csrf}}).then(()=>location.reload()).catch(x=>document.querySelector('#message').textContent=x.message);
     document.querySelector('#invite').onsubmit=e=>{e.preventDefault();api('/api/web/operators/invitations',{method:'POST',headers:{'Content-Type':'application/json','X-Ruru-CSRF':csrf},body:JSON.stringify({email:document.querySelector('#operatorEmail').value})}).then(i=>{document.querySelector('#inviteResult').textContent='Share this one-time code privately with '+i.email+': '+i.code+' (expires '+new Date(i.expiresAt).toLocaleTimeString()+'). They must sign in via Cloudflare Access as that same email.';document.querySelector('#operatorEmail').value=''}).catch(x=>document.querySelector('#inviteResult').textContent=x.message)};
     api('/api/web/status').then(s=>{document.querySelector('#message').textContent=s.passkeyEnrolled?'Use your passkey to open the console.':'A native one-time enrolment code is required to register the first passkey.';document.querySelector('#login').hidden=false}).catch(e=>document.querySelector('#message').textContent=e.message);
-    """
+    """#
 }
