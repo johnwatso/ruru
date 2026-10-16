@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		001251692BBC01E44BE02992 /* LeaseModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2197E021E81DE5F0EC0DD31C /* LeaseModels.swift */; };
+		0480A3CDEC014D2C5C2B49B5 /* ruru-owl.png in Resources */ = {isa = PBXBuildFile; fileRef = 4BD4896B0361EB91DEE25C32 /* ruru-owl.png */; };
 		0611C44293AF11BE8FF249C1 /* RuruDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61995EA39FB30EDA18A0328A /* RuruDiagnostics.swift */; };
 		07C9A19F3C40DA17B86619EC /* WitnessKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 4E8147699CA289B1F065001B /* WitnessKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		09E392C237912E4BA94838F6 /* WitnessConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AC48CD1649D9EC56E0B2A88 /* WitnessConfiguration.swift */; };
@@ -58,6 +59,7 @@
 		5F44C38191639314373AFE79 /* AppUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC039156A34B2774A50AC5D8 /* AppUpdater.swift */; };
 		6475CF92FE41D745F5FE317D /* WitnessGuardingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53A80BFD855DE6B16681EEB9 /* WitnessGuardingViews.swift */; };
 		64F8A516B09601780E0419CF /* RuruDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61995EA39FB30EDA18A0328A /* RuruDiagnostics.swift */; };
+		67E9BDE9A56A541ECDA8696A /* RuruWebAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C212F1FC5D7647119F29A797 /* RuruWebAssets.swift */; };
 		6850F2CFF02B787F343D7F26 /* Monitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B593CCB86129D4F176F104 /* Monitoring.swift */; };
 		69BD77EA1B6F27200A668986 /* PairingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B99CFFEA11C279D778755A7 /* PairingTests.swift */; };
 		71BCE4D9DD0B3213874E984D /* WitnessConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AC48CD1649D9EC56E0B2A88 /* WitnessConfiguration.swift */; };
@@ -223,6 +225,7 @@
 		4A163ADE0242C15F834D9531 /* ruru.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = ruru.icon; sourceTree = "<group>"; };
 		4B0C7A44BE370460F30CA7AE /* BackupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupTests.swift; sourceTree = "<group>"; };
 		4B380632F23DD7AD163F98FF /* RuruBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruBackup.swift; sourceTree = "<group>"; };
+		4BD4896B0361EB91DEE25C32 /* ruru-owl.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "ruru-owl.png"; sourceTree = "<group>"; };
 		4E8147699CA289B1F065001B /* WitnessKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = WitnessKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		4EB1D944D9DF13483B3F58F9 /* WitnessHTTPServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessHTTPServer.swift; sourceTree = "<group>"; };
 		4EC614478546A63BBFE4B88E /* RuruUpdateConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruUpdateConfigurationTests.swift; sourceTree = "<group>"; };
@@ -267,6 +270,7 @@
 		BCC680F6E57E9994BE1BC16D /* WitnessHTTPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessHTTPTests.swift; sourceTree = "<group>"; };
 		C18D94F4F0CF8D0A34DAA6FA /* RuruDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruDiagnosticsTests.swift; sourceTree = "<group>"; };
 		C1DE3631D1C6B019ACC043EE /* RuruSetupAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruSetupAssistant.swift; sourceTree = "<group>"; };
+		C212F1FC5D7647119F29A797 /* RuruWebAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruWebAssets.swift; sourceTree = "<group>"; };
 		C25D22615849F5D68ABBDD49 /* WitnessKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WitnessKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CC039156A34B2774A50AC5D8 /* AppUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdater.swift; sourceTree = "<group>"; };
 		CC03BBDD0785666314B400F4 /* AlertDispatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertDispatcher.swift; sourceTree = "<group>"; };
@@ -390,6 +394,7 @@
 				F018A0414FBFE44DE1E447D5 /* cloudflared */,
 				63879848CC86E8B53CE30747 /* cloudflared-LICENSE.txt */,
 				7F578465B5907701B1A9B525 /* DuckDB-LICENSE.txt */,
+				4BD4896B0361EB91DEE25C32 /* ruru-owl.png */,
 				53BAEA3F57493AEC0AD71AD3 /* Sparkle-LICENSE.txt */,
 				71D3C228A732FABCE91E9177 /* ThirdPartyNotices.md */,
 			);
@@ -412,6 +417,7 @@
 				1FE5AC3DF036A99A62C67FF9 /* RuruServiceIcons.swift */,
 				C1DE3631D1C6B019ACC043EE /* RuruSetupAssistant.swift */,
 				31B2014C61EC1C9648C1C16D /* RuruUpdateConfiguration.swift */,
+				C212F1FC5D7647119F29A797 /* RuruWebAssets.swift */,
 				A8F93F0B323D6AFD02C8FFCE /* RuruWebUI.swift */,
 				AA714710207684117CA4DD8F /* UpToDateUserDriver.swift */,
 				6B9DAC3EC172A3ED226F717D /* WitnessActivityFeed.swift */,
@@ -733,6 +739,7 @@
 				DDA8F9D69E61651CFEB1E197 /* ThirdPartyNotices.md in Resources */,
 				7755A053AE3C76E6AE729A03 /* cloudflared in Resources */,
 				85075B9DF2F33F14C790EA1C /* cloudflared-LICENSE.txt in Resources */,
+				0480A3CDEC014D2C5C2B49B5 /* ruru-owl.png in Resources */,
 				0FD9EB7791C9DBEB5C3038EC /* ruru.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -772,6 +779,7 @@
 				124C797EB14704E94C7FDB8C /* RuruServiceIcons.swift in Sources */,
 				E9C377BBD2F3E6EECA3F571D /* RuruSetupAssistant.swift in Sources */,
 				9F4FC631F800A074F5698106 /* RuruUpdateConfiguration.swift in Sources */,
+				67E9BDE9A56A541ECDA8696A /* RuruWebAssets.swift in Sources */,
 				56D348F58DEEC4238CB35229 /* RuruWebUI.swift in Sources */,
 				94CC5799968C03A87B27F47A /* UpToDateUserDriver.swift in Sources */,
 				0F4BE7CEF3403CC556D9DD6F /* WitnessActivityFeed.swift in Sources */,

@@ -9,10 +9,62 @@ import WitnessKit
 /// verified passkey is the second factor before any Ruru operation is exposed.
 actor RuruWebUI {
     typealias OriginProvider = @Sendable () async -> String?
-    typealias MonitorSnapshot = @Sendable () async -> [MonitorTarget]
+    typealias MonitorSnapshot = @Sendable () async -> [WebMonitor]
+    typealias ServiceSnapshot = @Sendable () async -> WebService
+    typealias GuardedSnapshot = @Sendable () async -> [WebGuardedService]
     typealias MonitorSave = @Sendable (MonitorTarget) async throws -> Void
     typealias MonitorRemove = @Sendable (String) async throws -> Void
     typealias MonitorCheck = @Sendable (String) async -> Void
+
+    /// Whether Ruru's authority is running, for the console header.
+    struct WebService: Encodable, Sendable {
+        let running: Bool
+        let startedAt: Date?
+    }
+
+    /// A read-only view of one guarded service. It deliberately omits cluster
+    /// IDs, node IDs, credentials and participant-reported URLs: the browser can
+    /// see who owns a service, never act on ownership.
+    struct WebGuardedService: Encodable, Sendable {
+        let id: String
+        let name: String
+        let kind: String
+        let leaseSeconds: Int
+        /// "owned", "waiting" or "recovering".
+        let state: String
+        let recoverySeconds: Double
+        let owner: Owner?
+        let participants: [Participant]
+        let activity: [Activity]
+
+        struct Owner: Encodable, Sendable { let name: String; let term: Int64; let remainingSeconds: Double }
+        struct Participant: Encodable, Sendable { let name: String; let role: String; let fresh: Bool; let ageSeconds: Double }
+        struct Activity: Encodable, Sendable { let time: Date; let action: String; let name: String; let term: Int64 }
+    }
+
+    /// A monitor target plus its live state, flattened for the browser.
+    struct WebMonitor: Encodable, Sendable {
+        let target: MonitorTarget
+        let status: String
+        let latencyMilliseconds: Int?
+        let detail: String?
+        let history: [Sample]
+        let changes: [Change]
+
+        struct Sample: Encodable, Sendable { let ok: Bool; let ms: Int?; let inconclusive: Bool }
+        struct Change: Encodable, Sendable { let time: Date; let status: String; let detail: String }
+        private enum Keys: String, CodingKey { case status, latencyMilliseconds, detail, history, changes }
+
+        func encode(to encoder: Encoder) throws {
+            try target.encode(to: encoder)
+            var values = encoder.container(keyedBy: Keys.self)
+            try values.encode(status, forKey: .status)
+            try values.encodeIfPresent(latencyMilliseconds, forKey: .latencyMilliseconds)
+            try values.encodeIfPresent(detail, forKey: .detail)
+            try values.encode(history, forKey: .history)
+            try values.encode(changes, forKey: .changes)
+        }
+    }
 
     private enum OperatorRole: String, Codable, Sendable {
         case owner
@@ -68,6 +120,8 @@ actor RuruWebUI {
 
     private let origin: OriginProvider
     private let monitorSnapshot: MonitorSnapshot
+    private let serviceSnapshot: ServiceSnapshot
+    private let guardedSnapshot: GuardedSnapshot
     private let monitorSave: MonitorSave
     private let monitorRemove: MonitorRemove
     private let monitorCheck: MonitorCheck
@@ -79,11 +133,14 @@ actor RuruWebUI {
     private var sessions: [String: Session] = [:]
     private var enrollment: Enrollment?
 
-    init(origin: @escaping OriginProvider, monitorSnapshot: @escaping MonitorSnapshot,
+    init(origin: @escaping OriginProvider, monitorSnapshot: @escaping MonitorSnapshot, serviceSnapshot: @escaping ServiceSnapshot,
+         guardedSnapshot: @escaping GuardedSnapshot,
          monitorSave: @escaping MonitorSave, monitorRemove: @escaping MonitorRemove,
          monitorCheck: @escaping MonitorCheck) {
         self.origin = origin
         self.monitorSnapshot = monitorSnapshot
+        self.serviceSnapshot = serviceSnapshot
+        self.guardedSnapshot = guardedSnapshot
         self.monitorSave = monitorSave
         self.monitorRemove = monitorRemove
         self.monitorCheck = monitorCheck
@@ -113,9 +170,15 @@ actor RuruWebUI {
         prune()
         switch (request.method, request.path) {
         case ("GET", "/"):
-            return Self.html(Self.page)
+            return Self.html(RuruWebAssets.page)
+        case ("GET", "/web/ruru.png"):
+            guard let data = Self.owlPNG else { return nil }
+            return .init(contentType: "image/png", body: data,
+                         headers: ["Content-Security-Policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"])
+        case ("GET", "/web/app.css"):
+            return Self.stylesheet(RuruWebAssets.stylesheet)
         case ("GET", "/web/app.js"):
-            return Self.javascript(Self.script)
+            return Self.javascript(RuruWebAssets.script)
         case ("GET", "/api/web/status"):
             return Self.json(["passkeyEnrolled": !passkeys.isEmpty])
         case ("GET", "/api/web/passkeys/authentication/options"):
@@ -147,6 +210,10 @@ actor RuruWebUI {
             guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
             guard role(for: email) == .owner else { return Self.jsonError("owner_required", status: 403) }
             return removeOperator(request, actingEmail: email)
+        case ("GET", "/api/web/guarded"):
+            return Self.json(await guardedSnapshot())
+        case ("GET", "/api/web/service"):
+            return Self.json(await serviceSnapshot())
         case ("GET", "/api/web/monitors"):
             return Self.json(await monitorSnapshot())
         case ("POST", "/api/web/monitors"):
@@ -367,6 +434,7 @@ actor RuruWebUI {
 
     private static func json<T: Encodable>(_ body: T, headers: [String: String] = [:]) -> WitnessWebResponse {
         let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(body) else { return jsonError("encoding_failed", status: 500) }
         return .init(contentType: "application/json; charset=utf-8", body: data, headers: headers)
     }
@@ -374,7 +442,15 @@ actor RuruWebUI {
         .init(status: status, contentType: "application/json; charset=utf-8", body: (try? JSONEncoder().encode(["error": code])) ?? Data())
     }
     private static func html(_ value: String) -> WitnessWebResponse {
-        .init(contentType: "text/html; charset=utf-8", body: Data(value.utf8), headers: ["Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"])
+        .init(contentType: "text/html; charset=utf-8", body: Data(value.utf8), headers: ["Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"])
+    }
+
+    /// The app's owl artwork (the Icon Composer layer), bundled as a resource.
+    private static let owlPNG: Data? = Bundle.main.url(forResource: "ruru-owl", withExtension: "png")
+        .flatMap { try? Data(contentsOf: $0) }
+
+    private static func stylesheet(_ value: String) -> WitnessWebResponse {
+        .init(contentType: "text/css; charset=utf-8", body: Data(value.utf8), headers: ["Content-Security-Policy": "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"])
     }
 
     private static func javascript(_ value: String) -> WitnessWebResponse {
@@ -384,25 +460,4 @@ actor RuruWebUI {
     enum WebUIError: LocalizedError { case randomUnavailable, tooManyOperators, firstOperatorAlreadyEnrolled, passkeyStoreInvalid
         var errorDescription: String? { "Web UI enrolment is unavailable." }
     }
-
-    private static let page = #"""
-    <!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-    <title>Ruru</title><style>body{margin:0;background:#11151c;color:#eef2f7;font:16px -apple-system,sans-serif}main{max-width:720px;margin:10vh auto;padding:28px}button,input{font:inherit;padding:10px;border-radius:8px;border:1px solid #4b5563}button{background:#5c8dff;color:white}li{padding:10px;margin:8px 0;background:#1b2430;border-radius:8px}.muted{color:#aab4c2}</style>
-    <main><h1>Ruru</h1><p class=muted id=message>Checking secure access…</p><section id=login hidden><button id=signIn>Use passkey</button><p>First operator? Enter the one-time enrolment code displayed in Ruru’s native console. Invited operators must use the code their owner shared.</p><input id=code autocomplete=one-time-code placeholder="Enrolment code"><button id=enrol>Register passkey</button></section><section id=console hidden><h2>Monitors</h2><button id=logout>Sign out</button><p class=muted>Checks are bounded and observational; they never affect lease ownership.</p><form id=add><input id=name required placeholder="Name"><select id=kind><option value=HTTP>HTTP(S)</option><option value=TCP>TCP</option><option value=DNS>DNS</option></select><input id=address required placeholder="https://status.example.com"><input id=port type=number value=443 min=1 max=65535><input id=dnsName placeholder="DNS name to query" value=example.com><input id=interval type=number value=60 min=30 max=3600 title="Interval (s)"><input id=timeout type=number value=10 min=1 max=60 title="Timeout (s)"><input id=threshold type=number value=3 min=1 max=10 title="Failures before down"><button>Add monitor</button></form><ul id=monitors></ul><section id=operators hidden><h2>Operators</h2><p class=muted>Invitees must also be admitted by the Cloudflare Access policy for this hostname. A notification email verification alone does not grant Ruru access.</p><form id=invite><input id=operatorEmail required type=email placeholder="admin@example.com"><button>Invite operator</button></form><p class=muted id=inviteResult></p><ul id=operatorList></ul></section></section></main>
-    <script src="/web/app.js"></script>
-    """#
-
-    private static let script = #"""
-    let csrf='';const b64=b=>Uint8Array.from(atob(b.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(b.length/4)*4,'=')),c=>c.charCodeAt(0));const enc=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-    const adapt=o=>{o.challenge=b64(o.challenge);if(o.user)o.user.id=b64(o.user.id);for(const c of o.allowCredentials||[])c.id=b64(c.id);for(const c of o.excludeCredentials||[])c.id=b64(c.id);return o};
-    const credential=c=>({id:c.id,rawId:enc(c.rawId),type:c.type,response:Object.fromEntries(['clientDataJSON','attestationObject','authenticatorData','signature','userHandle'].filter(k=>c.response[k]).map(k=>[k,enc(c.response[k])])),authenticatorAttachment:c.authenticatorAttachment});
-    async function api(path,opts={}){let r=await fetch(path,{credentials:'same-origin',...opts});let j=await r.json();if(!r.ok)throw Error(j.error||'request_failed');return j}
-    async function authenticate(register){let path=register?'registration':'authentication',opts=register?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:document.querySelector('#code').value})}:{};let o=adapt(await api('/api/web/passkeys/'+path+'/options',opts));let c=register?await navigator.credentials.create({publicKey:o}):await navigator.credentials.get({publicKey:o});let done=await api('/api/web/passkeys/'+path+'/finish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(credential(c))});csrf=done.csrf;await show()}
-    async function show(){let monitors=await api('/api/web/monitors');document.querySelector('#login').hidden=true;document.querySelector('#console').hidden=false;document.querySelector('#message').textContent='Signed in with Cloudflare Access and a passkey.';document.querySelector('#monitors').replaceChildren(...monitors.map(m=>Object.assign(document.createElement('li'),{textContent:m.name+' · '+m.kind+' · '+(m.kind==='HTTP'?m.url:(m.host+':'+m.port))+(m.enabled?'':' · paused')})));try{let operators=await api('/api/web/operators');document.querySelector('#operators').hidden=false;document.querySelector('#operatorList').replaceChildren(...operators.map(o=>{let li=Object.assign(document.createElement('li'),{textContent:o.email+' · '+o.role+' '});if(o.role!=='owner'){let b=Object.assign(document.createElement('button'),{textContent:'Remove'});b.onclick=()=>api('/api/web/operators/remove',{method:'POST',headers:{'Content-Type':'application/json','X-Ruru-CSRF':csrf},body:JSON.stringify({email:o.email})}).then(show).catch(x=>document.querySelector('#message').textContent=x.message);li.append(b)}return li}))}catch(e){document.querySelector('#operators').hidden=true}}
-    document.querySelector('#signIn').onclick=()=>authenticate(false).catch(e=>document.querySelector('#message').textContent=e.message);document.querySelector('#enrol').onclick=()=>authenticate(true).catch(e=>document.querySelector('#message').textContent=e.message);
-    document.querySelector('#add').onsubmit=e=>{e.preventDefault();let kind=document.querySelector('#kind').value,address=document.querySelector('#address').value,port=Number(document.querySelector('#port').value),target={id:crypto.randomUUID(),name:document.querySelector('#name').value,kind,host:kind==='HTTP'?'':address,port:kind==='HTTP'?0:port,url:kind==='HTTP'?address:'',dnsQueryName:document.querySelector('#dnsName').value||'example.com',intervalSeconds:Number(document.querySelector('#interval').value),timeoutSeconds:Number(document.querySelector('#timeout').value),failureThreshold:Number(document.querySelector('#threshold').value),enabled:true,needsAttention:false};api('/api/web/monitors',{method:'POST',headers:{'Content-Type':'application/json','X-Ruru-CSRF':csrf},body:JSON.stringify(target)}).then(show).catch(x=>document.querySelector('#message').textContent=x.message)};
-    document.querySelector('#logout').onclick=()=>api('/api/web/logout',{method:'POST',headers:{'X-Ruru-CSRF':csrf}}).then(()=>location.reload()).catch(x=>document.querySelector('#message').textContent=x.message);
-    document.querySelector('#invite').onsubmit=e=>{e.preventDefault();api('/api/web/operators/invitations',{method:'POST',headers:{'Content-Type':'application/json','X-Ruru-CSRF':csrf},body:JSON.stringify({email:document.querySelector('#operatorEmail').value})}).then(i=>{document.querySelector('#inviteResult').textContent='Share this one-time code privately with '+i.email+': '+i.code+' (expires '+new Date(i.expiresAt).toLocaleTimeString()+'). They must sign in via Cloudflare Access as that same email.';document.querySelector('#operatorEmail').value=''}).catch(x=>document.querySelector('#inviteResult').textContent=x.message)};
-    api('/api/web/status').then(s=>{document.querySelector('#message').textContent=s.passkeyEnrolled?'Use your passkey to open the console.':'A native one-time enrolment code is required to register the first passkey.';document.querySelector('#login').hidden=false}).catch(e=>document.querySelector('#message').textContent=e.message);
-    """#
 }

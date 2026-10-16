@@ -668,7 +668,9 @@ final class WitnessAppModel: ObservableObject {
             let authorityBuild = appBundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
             let webUI = RuruWebUI(
                 origin: { [weak self] in await MainActor.run { self?.webUIOrigin } },
-                monitorSnapshot: { [weak self] in await MainActor.run { self?.configuration.monitorTargets ?? [] } },
+                monitorSnapshot: { [weak self] in await MainActor.run { self?.webMonitorSnapshot() ?? [] } },
+                serviceSnapshot: { [weak self] in await MainActor.run { self?.webServiceSnapshot() ?? .init(running: false, startedAt: nil) } },
+                guardedSnapshot: { [weak self] in await MainActor.run { self?.webGuardedSnapshot() ?? [] } },
                 monitorSave: { [weak self] target in
                     guard let self else { throw WitnessStorage.ConfigurationError.invalid }
                     try await self.saveMonitorTarget(target)
@@ -724,6 +726,54 @@ final class WitnessAppModel: ObservableObject {
     func beginWebUIEnrollment() async throws -> String {
         guard state == .running, let webUI, webUIOrigin != nil else { throw WitnessStorage.ConfigurationError.invalid }
         return try await webUI.beginEnrollment()
+    }
+
+    /// Targets with their live state for the browser console. Bounded by the
+    /// monitor target and history limits.
+    func webMonitorSnapshot() -> [RuruWebUI.WebMonitor] {
+        configuration.monitorTargets.map { target in
+            let state = monitorStates[target.id]
+            return .init(target: target, status: state?.status.rawValue ?? "unknown",
+                         latencyMilliseconds: state?.last?.latencyMilliseconds, detail: state?.last?.detail,
+                         history: (state?.history.suffix(60) ?? []).map { .init(ok: $0.ok, ms: $0.latencyMilliseconds, inconclusive: $0.inconclusive) },
+                         changes: (state?.changes.suffix(10) ?? []).map { .init(time: $0.time, status: $0.status.rawValue, detail: $0.detail) })
+        }
+    }
+
+    /// Read-only guarded service state for the browser console. Bounded by the
+    /// configured service count, five activity rows and sixteen participants each.
+    func webGuardedSnapshot() -> [RuruWebUI.WebGuardedService] {
+        configuration.guardedServices.map { service in
+            let lease = lease(for: service.clusterID)
+            let owned = (lease?.remainingSeconds ?? 0) > 0
+            let owner = lease.flatMap { lease -> RuruWebUI.WebGuardedService.Owner? in
+                guard owned else { return nil }
+                return .init(name: nodeDisplayName(for: lease.ownerNodeID, reportedName: lease.ownerNodeName, clusterID: service.clusterID),
+                             term: lease.term, remainingSeconds: lease.remainingSeconds)
+            }
+            let participants = participantObservations.filter { $0.clusterID == service.clusterID }.prefix(16).map { observation in
+                RuruWebUI.WebGuardedService.Participant(
+                    name: nodeDisplayName(for: observation.nodeID, reportedName: observation.nodeName, clusterID: service.clusterID),
+                    role: observation.role.rawValue, fresh: observation.fresh, ageSeconds: observation.ageSeconds)
+            }
+            let activity = (snapshot?.events ?? []).filter { $0.clusterID == service.clusterID && $0.action != "renew" }
+                .sorted { $0.time > $1.time }.prefix(5).map { event in
+                    RuruWebUI.WebGuardedService.Activity(
+                        time: event.time, action: event.action,
+                        name: nodeDisplayName(for: event.nodeID, reportedName: event.nodeName, clusterID: service.clusterID), term: event.term)
+                }
+            return .init(id: service.id, name: service.name, kind: service.kind.rawValue, leaseSeconds: service.leaseSeconds,
+                         state: owned ? "owned" : isRecovering ? "recovering" : "waiting", recoverySeconds: snapshot?.recoverySeconds ?? 0,
+                         owner: owner, participants: Array(participants), activity: Array(activity))
+        }
+    }
+
+    func webServiceSnapshot() -> RuruWebUI.WebService {
+        let started = serviceStartedAt.map { instant -> Date in
+            let elapsed = instant.duration(to: .now)
+            return Date().addingTimeInterval(-(Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18))
+        }
+        return .init(running: state == .running, startedAt: state == .running ? started : nil)
     }
 
     var webUIOrigin: String? {
