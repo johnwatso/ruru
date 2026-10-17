@@ -5,8 +5,9 @@ import WitnessKit
 
 /// The browser operator surface. It is intentionally app-owned: WitnessKit
 /// continues to own the bounded listener and every `/v1` authority route.
-/// Cloudflare Access is the perimeter identity provider; a resident, user-
-/// verified passkey is the second factor before any Ruru operation is exposed.
+/// A resident, user-verified passkey is the only credential: Ruru never trusts
+/// identity headers a proxy may add. Cloudflare Access can still sit in front as
+/// an optional extra layer, but nothing here depends on it.
 actor RuruWebUI {
     typealias OriginProvider = @Sendable () async -> String?
     typealias MonitorSnapshot = @Sendable () async -> [WebMonitor]
@@ -132,6 +133,11 @@ actor RuruWebUI {
     private var ceremonies: [String: Ceremony] = [:]
     private var sessions: [String: Session] = [:]
     private var enrollment: Enrollment?
+    /// Recent failed sign-in or enrolment attempts per client. Bounded in both
+    /// keys and entries; a flood of distinct clients evicts the oldest.
+    private var failures: [String: [Date]] = [:]
+    private static let maxFailuresPerMinute = 8
+    private static let maxCeremonies = 64
 
     init(origin: @escaping OriginProvider, monitorSnapshot: @escaping MonitorSnapshot, serviceSnapshot: @escaping ServiceSnapshot,
          guardedSnapshot: @escaping GuardedSnapshot,
@@ -164,10 +170,8 @@ actor RuruWebUI {
         guard request.isLoopbackPeer else { return Self.jsonError("tunnel_required", status: 403) }
         guard let origin = await origin() else { return Self.jsonError("web_ui_unavailable", status: 503) }
         guard !passkeyStoreUnavailable else { return Self.jsonError("passkey_store_unavailable", status: 503) }
-        guard let email = Self.accessEmail(request.headers["cf-access-authenticated-user-email"]) else {
-            return Self.jsonError("cloudflare_access_required", status: 401)
-        }
         prune()
+        let client = Self.clientKey(request)
         switch (request.method, request.path) {
         case ("GET", "/"):
             return Self.html(RuruWebAssets.page)
@@ -182,32 +186,33 @@ actor RuruWebUI {
         case ("GET", "/api/web/status"):
             return Self.json(["passkeyEnrolled": !passkeys.isEmpty])
         case ("GET", "/api/web/passkeys/authentication/options"):
-            return beginAuthentication(email: email, origin: origin)
+            return beginAuthentication(client: client, origin: origin)
         case ("POST", "/api/web/passkeys/authentication/finish"):
-            return finishAuthentication(request, email: email, origin: origin)
+            return finishAuthentication(request, client: client, origin: origin)
         case ("POST", "/api/web/passkeys/registration/options"):
-            return beginRegistration(request, email: email, origin: origin)
+            return beginRegistration(request, client: client, origin: origin)
         case ("POST", "/api/web/passkeys/registration/finish"):
-            return await finishRegistration(request, email: email, origin: origin)
+            return await finishRegistration(request, client: client, origin: origin)
         default:
             break
         }
 
-        guard let session = session(for: request, email: email) else { return Self.jsonError("passkey_required", status: 401) }
+        guard let session = session(for: request) else { return Self.jsonError("passkey_required", status: 401) }
+        let email = session.email
         switch (request.method, request.path) {
         case ("GET", "/api/web/operators"):
             guard role(for: email) == .owner else { return Self.jsonError("owner_required", status: 403) }
             return Self.json(passkeys.map { OperatorSummary(email: $0.email, role: $0.role.rawValue) })
         case ("POST", "/api/web/operators/invitations"):
-            guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
+            guard Self.constantTimeEqual(request.headers["x-ruru-csrf"] ?? "", session.csrf) else { return Self.jsonError("csrf_required", status: 403) }
             guard role(for: email) == .owner else { return Self.jsonError("owner_required", status: 403) }
             return createOperatorInvite(request)
         case ("POST", "/api/web/logout"):
-            guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
+            guard Self.constantTimeEqual(request.headers["x-ruru-csrf"] ?? "", session.csrf) else { return Self.jsonError("csrf_required", status: 403) }
             if let id = Self.cookie(named: "ruru_session", from: request.headers["cookie"]) { sessions.removeValue(forKey: id) }
             return Self.json(["loggedOut": true], headers: ["Set-Cookie": Self.cookie("ruru_session", value: "", age: 0)])
         case ("POST", "/api/web/operators/remove"):
-            guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
+            guard Self.constantTimeEqual(request.headers["x-ruru-csrf"] ?? "", session.csrf) else { return Self.jsonError("csrf_required", status: 403) }
             guard role(for: email) == .owner else { return Self.jsonError("owner_required", status: 403) }
             return removeOperator(request, actingEmail: email)
         case ("GET", "/api/web/guarded"):
@@ -217,20 +222,23 @@ actor RuruWebUI {
         case ("GET", "/api/web/monitors"):
             return Self.json(await monitorSnapshot())
         case ("POST", "/api/web/monitors"):
-            guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
+            guard Self.constantTimeEqual(request.headers["x-ruru-csrf"] ?? "", session.csrf) else { return Self.jsonError("csrf_required", status: 403) }
             do {
-                let target = try JSONDecoder().decode(MonitorTarget.self, from: request.body)
+                var target = try JSONDecoder().decode(MonitorTarget.self, from: request.body)
+                // Persist the stricter remote-origin policy. Do not trust a
+                // client-supplied false value for this server-side invariant.
+                target.requiresNumericHost = true
                 guard target.isWebPermitted else { return Self.jsonError("monitor_target_not_permitted", status: 400) }
                 try await monitorSave(target)
                 return Self.json(["saved": true])
             } catch { return Self.jsonError("invalid_monitor", status: 400) }
         case ("POST", "/api/web/monitors/delete"):
-            guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
+            guard Self.constantTimeEqual(request.headers["x-ruru-csrf"] ?? "", session.csrf) else { return Self.jsonError("csrf_required", status: 403) }
             guard let id = try? JSONDecoder().decode(MonitorID.self, from: request.body).id else { return Self.jsonError("invalid_monitor", status: 400) }
             do { try await monitorRemove(id); return Self.json(["deleted": true]) }
             catch { return Self.jsonError("invalid_monitor", status: 400) }
         case ("POST", "/api/web/monitors/check"):
-            guard request.headers["x-ruru-csrf"] == session.csrf else { return Self.jsonError("csrf_required", status: 403) }
+            guard Self.constantTimeEqual(request.headers["x-ruru-csrf"] ?? "", session.csrf) else { return Self.jsonError("csrf_required", status: 403) }
             guard let id = try? JSONDecoder().decode(MonitorID.self, from: request.body).id else { return Self.jsonError("invalid_monitor", status: 400) }
             await monitorCheck(id)
             return Self.json(["checking": true])
@@ -240,7 +248,7 @@ actor RuruWebUI {
     }
 
     private struct MonitorID: Decodable { let id: String }
-    private struct EnrollmentRequest: Decodable { let code: String }
+    private struct EnrollmentRequest: Decodable { let code: String; let email: String? }
     private struct AuthenticationResult: Encodable { let authenticated: Bool; let csrf: String }
     private struct OperatorInvitationRequest: Decodable { let email: String }
     private struct OperatorInvitation: Encodable { let code: String; let expiresAt: Date; let email: String }
@@ -273,11 +281,16 @@ actor RuruWebUI {
         return Self.json(["removed": true])
     }
 
-    private func beginRegistration(_ request: WitnessWebRequest, email: String, origin: String) -> WitnessWebResponse {
+    private func beginRegistration(_ request: WitnessWebRequest, client: String, origin: String) -> WitnessWebResponse {
+        guard !isThrottled(client) else { return Self.jsonError("too_many_attempts", status: 429) }
         guard let value = try? JSONDecoder().decode(EnrollmentRequest.self, from: request.body),
-              let enrollment, enrollment.expires > Date(), enrollment.code == value.code,
-              enrollment.email == nil || enrollment.email == email else {
+              let enrollment, enrollment.expires > Date(), Self.constantTimeEqual(enrollment.code, value.code) else {
+            recordFailure(client)
             return Self.jsonError("enrollment_code_required", status: 403)
+        }
+        // An invitation fixes the operator's identity; the first owner names themself.
+        guard let email = enrollment.email ?? Self.accessEmail(value.email) else {
+            return Self.jsonError("email_required", status: 400)
         }
         guard !passkeys.contains(where: { $0.email == email }), passkeys.count < 8 else {
             return Self.jsonError("operator_already_enrolled", status: 409)
@@ -290,44 +303,52 @@ actor RuruWebUI {
         return startCeremony(.registration, email: email, challenge: options.challenge, body: options)
     }
 
-    private func finishRegistration(_ request: WitnessWebRequest, email: String, origin: String) async -> WitnessWebResponse {
-        guard let ceremony = ceremony(for: request, kind: .registration, email: email),
+    private func finishRegistration(_ request: WitnessWebRequest, client: String, origin: String) async -> WitnessWebResponse {
+        guard let ceremony = ceremony(for: request, kind: .registration),
               (enrollment?.expires ?? .distantPast) > Date() else { return Self.jsonError("ceremony_expired", status: 401) }
         defer { ceremonies.removeValue(forKey: ceremony.0) }
+        let email = ceremony.1.email
         do {
             let submitted = try JSONDecoder().decode(RegistrationCredential.self, from: request.body)
             let existing = passkeys
+            guard !existing.contains(where: { $0.email == email }), existing.count < 8,
+                  enrollment?.email == nil || enrollment?.email == email else { return Self.jsonError("operator_already_enrolled", status: 409) }
             let credential = try await Self.manager(for: origin).finishRegistration(challenge: ceremony.1.challenge,
                 credentialCreationData: submitted, requireUserVerification: true,
                 confirmCredentialIDNotRegisteredYet: { id in !existing.contains(where: { $0.id == id }) })
+            // Another registration may have completed while this one awaited.
+            guard !passkeys.contains(where: { $0.email == email }), passkeys.count < 8, enrollment != nil else {
+                return Self.jsonError("operator_already_enrolled", status: 409)
+            }
             let role: OperatorRole = enrollment?.kind == .firstOwner ? .owner : .administrator
             passkeys.append(.init(id: credential.id, publicKey: credential.publicKey, signCount: credential.signCount, email: email, role: role))
             do { try Self.savePasskeys(passkeys) }
             catch { passkeys.removeLast(); return Self.jsonError("passkey_store_unavailable", status: 503) }
             enrollment = nil
             return createSession(email: email)
-        } catch { return Self.jsonError("passkey_registration_failed", status: 400) }
+        } catch { recordFailure(client); return Self.jsonError("passkey_registration_failed", status: 400) }
     }
 
-    private func beginAuthentication(email: String, origin: String) -> WitnessWebResponse {
-        let records = passkeys.filter { $0.email == email }
-        guard !records.isEmpty else { return Self.jsonError("passkey_not_enrolled", status: 404) }
-        let descriptors = records.compactMap { record in
-            Self.base64URLBytes(record.id).map { PublicKeyCredentialDescriptor(id: $0) }
-        }
-        guard descriptors.count == records.count else { return Self.jsonError("passkey_unavailable", status: 503) }
-        let options = Self.manager(for: origin).beginAuthentication(timeout: .seconds(120), allowCredentials: descriptors, userVerification: .required)
-        return startCeremony(.authentication, email: email, challenge: options.challenge, body: options)
+    /// Discoverable sign-in: the browser offers the passkeys it holds for this
+    /// site, so the response is identical whether or not anyone is enrolled and
+    /// reveals nothing about operators.
+    private func beginAuthentication(client: String, origin: String) -> WitnessWebResponse {
+        guard !isThrottled(client) else { return Self.jsonError("too_many_attempts", status: 429) }
+        let options = Self.manager(for: origin).beginAuthentication(timeout: .seconds(120), allowCredentials: nil, userVerification: .required)
+        return startCeremony(.authentication, email: "", challenge: options.challenge, body: options)
     }
 
-    private func finishAuthentication(_ request: WitnessWebRequest, email: String, origin: String) -> WitnessWebResponse {
-        guard let ceremony = ceremony(for: request, kind: .authentication, email: email) else { return Self.jsonError("ceremony_expired", status: 401) }
+    private func finishAuthentication(_ request: WitnessWebRequest, client: String, origin: String) -> WitnessWebResponse {
+        guard !isThrottled(client) else { return Self.jsonError("too_many_attempts", status: 429) }
+        guard let ceremony = ceremony(for: request, kind: .authentication) else { return Self.jsonError("ceremony_expired", status: 401) }
         defer { ceremonies.removeValue(forKey: ceremony.0) }
         do {
             let submitted = try JSONDecoder().decode(AuthenticationCredential.self, from: request.body)
-            guard let index = passkeys.firstIndex(where: { $0.id == submitted.id.asString() && $0.email == email }) else {
-                return Self.jsonError("passkey_not_enrolled", status: 401)
+            guard let index = passkeys.firstIndex(where: { $0.id == submitted.id.asString() }) else {
+                recordFailure(client)
+                return Self.jsonError("passkey_authentication_failed", status: 401)
             }
+            let email = passkeys[index].email
             let verified = try Self.manager(for: origin).finishAuthentication(credential: submitted, expectedChallenge: ceremony.1.challenge,
                 credentialPublicKey: passkeys[index].publicKey, credentialCurrentSignCount: passkeys[index].signCount, requireUserVerification: true)
             let previous = passkeys[index].signCount
@@ -335,10 +356,39 @@ actor RuruWebUI {
             do { try Self.savePasskeys(passkeys) }
             catch { passkeys[index].signCount = previous; return Self.jsonError("passkey_store_unavailable", status: 503) }
             return createSession(email: email)
-        } catch { return Self.jsonError("passkey_authentication_failed", status: 401) }
+        } catch { recordFailure(client); return Self.jsonError("passkey_authentication_failed", status: 401) }
+    }
+
+    private func isThrottled(_ client: String) -> Bool {
+        (failures[client] ?? []).count >= Self.maxFailuresPerMinute
+    }
+
+    private func recordFailure(_ client: String) {
+        if failures[client] == nil, failures.count >= 256,
+           let oldest = failures.min(by: { ($0.value.last ?? .distantPast) < ($1.value.last ?? .distantPast) })?.key {
+            failures.removeValue(forKey: oldest)
+        }
+        failures[client, default: []].append(Date())
+    }
+
+    /// Cloudflare overwrites `CF-Connecting-IP`; every tunnelled request arrives
+    /// from loopback, so this is the only per-visitor signal available.
+    private static func clientKey(_ request: WitnessWebRequest) -> String {
+        guard let value = request.headers["cf-connecting-ip"], value.utf8.count <= 45,
+              value.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) || (65...70).contains($0) || $0 == 46 || $0 == 58 })
+        else { return "local" }
+        return value.lowercased()
+    }
+
+    private static func constantTimeEqual(_ a: String, _ b: String) -> Bool {
+        let x = Array(a.utf8), y = Array(b.utf8)
+        var difference = x.count ^ y.count
+        for index in 0..<max(x.count, y.count) { difference |= Int(index < x.count ? x[index] : 0) ^ Int(index < y.count ? y[index] : 0) }
+        return difference == 0
     }
 
     private func startCeremony<T: Encodable>(_ kind: Ceremony.Kind, email: String, challenge: [UInt8], body: T) -> WitnessWebResponse {
+        guard ceremonies.count < Self.maxCeremonies else { return Self.jsonError("web_ui_busy", status: 429) }
         do {
             let id = try Self.randomToken()
             ceremonies[id] = Ceremony(kind: kind, email: email, challenge: challenge, expires: Date().addingTimeInterval(120))
@@ -355,15 +405,15 @@ actor RuruWebUI {
         } catch { return Self.jsonError("session_unavailable", status: 503) }
     }
 
-    private func ceremony(for request: WitnessWebRequest, kind: Ceremony.Kind, email: String) -> (String, Ceremony)? {
+    private func ceremony(for request: WitnessWebRequest, kind: Ceremony.Kind) -> (String, Ceremony)? {
         guard let id = Self.cookie(named: "ruru_ceremony", from: request.headers["cookie"]), let ceremony = ceremonies[id],
-              ceremony.kind == kind, ceremony.email == email, ceremony.expires > Date() else { return nil }
+              ceremony.kind == kind, ceremony.expires > Date() else { return nil }
         return (id, ceremony)
     }
 
-    private func session(for request: WitnessWebRequest, email: String) -> Session? {
+    private func session(for request: WitnessWebRequest) -> Session? {
         guard let id = Self.cookie(named: "ruru_session", from: request.headers["cookie"]), let session = sessions[id],
-              session.email == email, session.expires > Date() else { return nil }
+              session.expires > Date(), role(for: session.email) != nil else { return nil }
         return session
     }
 
@@ -375,6 +425,7 @@ actor RuruWebUI {
         let now = Date()
         ceremonies = ceremonies.filter { $0.value.expires > now }
         sessions = sessions.filter { $0.value.expires > now }
+        failures = failures.compactMapValues { let recent = $0.filter { now.timeIntervalSince($0) < 60 }; return recent.isEmpty ? nil : recent }
         if (enrollment?.expires ?? .distantPast) <= now { enrollment = nil }
     }
 

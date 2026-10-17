@@ -75,6 +75,7 @@
 		8B9A58ADF82F7B7DDF648233 /* WitnessInternetAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB0DE86CD88FFB20F836FC48 /* WitnessInternetAccess.swift */; };
 		923E40413DA4BD8CD0E94162 /* WebAuthn in Frameworks */ = {isa = PBXBuildFile; productRef = 0ADC2B0D2273D90FFB473859 /* WebAuthn */; };
 		94CC5799968C03A87B27F47A /* UpToDateUserDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA714710207684117CA4DD8F /* UpToDateUserDriver.swift */; };
+		958BC47721CC0CA4CB53F021 /* KnownNodeGrouping.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11052FE24BA69DEF1C275219 /* KnownNodeGrouping.swift */; };
 		9B76015878362B39C11E17E4 /* AlertEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A02A442579CED3138E66E9F /* AlertEngineTests.swift */; };
 		9BB7D0589625396D14C05F45 /* DuckDB-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 7F578465B5907701B1A9B525 /* DuckDB-LICENSE.txt */; };
 		9C236983C632424FBD0A7289 /* AlertModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 018E55EAAC79EE713E6E1F50 /* AlertModels.swift */; };
@@ -95,9 +96,11 @@
 		BECFD308F35EC7A73DA09916 /* Pairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9932375055BEB2EE0933958E /* Pairing.swift */; };
 		C02AD9E3718D2FAD4B493B1C /* CloudflareSPFRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2203AACC6712D8920165055A /* CloudflareSPFRecord.swift */; };
 		C0AA717F3FDC78F0C740CF24 /* WitnessTransportDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0047855EA2F1733C68587BC /* WitnessTransportDiagnosticsTests.swift */; };
+		C0BF16048F8DE254F7CFC8C4 /* NodeTokenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 742BA0ECD7B1326678627048 /* NodeTokenTests.swift */; };
 		C137E10FA5B102C47816647B /* WitnessOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139481AB632E0A52F5FEB8B2 /* WitnessOverview.swift */; };
 		C18BF56767ACE5A3B67E30D9 /* RuruAlerts.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF39C444DFA7AB19816451D7 /* RuruAlerts.swift */; };
 		C49D294B2238269ECF6490AE /* RuruUpdateConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B2014C61EC1C9648C1C16D /* RuruUpdateConfiguration.swift */; };
+		C73D1C156AC931B62814CF69 /* CredentialRotationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 624A2689B2A341F9EFBD4900 /* CredentialRotationTests.swift */; };
 		C744A28064A35E1032A4A6BC /* DuckDB in Frameworks */ = {isa = PBXBuildFile; productRef = 674B660F5AB6C0CC2AD2B4CB /* DuckDB */; };
 		C8461F6722857D6A3A9AF5B5 /* RuruBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B380632F23DD7AD163F98FF /* RuruBackup.swift */; };
 		C9BD57CAD645E11895040F51 /* LeaseFencingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120B98F2D24A44275C2F392F /* LeaseFencingTests.swift */; };
@@ -115,6 +118,7 @@
 		E5E13F03418D35D816E9AF8D /* LeaseDatabaseSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC05E7778A1E41F80FAE8557 /* LeaseDatabaseSetup.swift */; };
 		E9C377BBD2F3E6EECA3F571D /* RuruSetupAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1DE3631D1C6B019ACC043EE /* RuruSetupAssistant.swift */; };
 		EAFF82D7959153A9307D74D8 /* RuruAlertTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8574A11B318E28B0689DF64 /* RuruAlertTransport.swift */; };
+		ECE9355D5CB554C0501DFC94 /* KnownNodeGroupingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 586EBC0DA94DFAED75EF6299 /* KnownNodeGroupingTests.swift */; };
 		EEE9B3D345E31C7AF9B2C3F6 /* LeaseStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26B9F3DF5E6D5909C8F67940 /* LeaseStore.swift */; };
 		EF166EA26D016898775159F2 /* TunnelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82E99408450D5C7987BC03E9 /* TunnelManager.swift */; };
 		F1AB34C16AAFBC8C7788CD53 /* WitnessAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 009C66BAB02995987EF84403 /* WitnessAppModel.swift */; };
@@ -201,6 +205,7 @@
 		072A55EE0516065DBFAD2DCD /* LegacyAuthorityReplacement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyAuthorityReplacement.swift; sourceTree = "<group>"; };
 		0ABF87C6AD71482A1F6264BA /* WitnessDashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessDashboard.swift; sourceTree = "<group>"; };
 		0C2B6A412A802552345A9762 /* ParticipantPresence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParticipantPresence.swift; sourceTree = "<group>"; };
+		11052FE24BA69DEF1C275219 /* KnownNodeGrouping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownNodeGrouping.swift; sourceTree = "<group>"; };
 		120B98F2D24A44275C2F392F /* LeaseFencingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseFencingTests.swift; sourceTree = "<group>"; };
 		137FFD2E32735C0F299A0186 /* WitnessSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessSidebar.swift; sourceTree = "<group>"; };
 		139481AB632E0A52F5FEB8B2 /* WitnessOverview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessOverview.swift; sourceTree = "<group>"; };
@@ -233,10 +238,12 @@
 		51F6CF473E7675161D24736E /* RuruClient */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RuruClient; path = Clients/RuruClient; sourceTree = SOURCE_ROOT; };
 		53A80BFD855DE6B16681EEB9 /* WitnessGuardingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessGuardingViews.swift; sourceTree = "<group>"; };
 		53BAEA3F57493AEC0AD71AD3 /* Sparkle-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Sparkle-LICENSE.txt"; sourceTree = "<group>"; };
+		586EBC0DA94DFAED75EF6299 /* KnownNodeGroupingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnownNodeGroupingTests.swift; sourceTree = "<group>"; };
 		589E62B4FD29AA9A5364881D /* WitnessCoordinationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessCoordinationViews.swift; sourceTree = "<group>"; };
 		5B4C35408498C1ADAC3E35D3 /* RuruDiagnosticExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruDiagnosticExport.swift; sourceTree = "<group>"; };
 		5E1B5D897C377F00727C1B42 /* RuruClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruClientTests.swift; sourceTree = "<group>"; };
 		61995EA39FB30EDA18A0328A /* RuruDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuruDiagnostics.swift; sourceTree = "<group>"; };
+		624A2689B2A341F9EFBD4900 /* CredentialRotationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialRotationTests.swift; sourceTree = "<group>"; };
 		63879848CC86E8B53CE30747 /* cloudflared-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "cloudflared-LICENSE.txt"; sourceTree = "<group>"; };
 		661580073990BB810644BED5 /* LeaseStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaseStoreTests.swift; sourceTree = "<group>"; };
 		665E47E1E6268C552D5F5490 /* DuckDBStorageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuckDBStorageTests.swift; sourceTree = "<group>"; };
@@ -246,6 +253,7 @@
 		6B9DAC3EC172A3ED226F717D /* WitnessActivityFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessActivityFeed.swift; sourceTree = "<group>"; };
 		6E642B2BFDC2E9B39904B319 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		71D3C228A732FABCE91E9177 /* ThirdPartyNotices.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ThirdPartyNotices.md; sourceTree = "<group>"; };
+		742BA0ECD7B1326678627048 /* NodeTokenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeTokenTests.swift; sourceTree = "<group>"; };
 		749B022E5B633D085B7DD68E /* ServiceIconTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceIconTests.swift; sourceTree = "<group>"; };
 		7DEE86D2F0E01FB158724B8C /* AlertService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertService.swift; sourceTree = "<group>"; };
 		7F578465B5907701B1A9B525 /* DuckDB-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "DuckDB-LICENSE.txt"; sourceTree = "<group>"; };
@@ -366,11 +374,14 @@
 				90F4329634CEDD1178A75E99 /* ClientConformanceTests.swift */,
 				EDACAF90AB146C9E8B3F178D /* CloudflareSPFRecordTests.swift */,
 				D0425971E5EFD8DD4C38C82F /* CoordinationTests.swift */,
+				624A2689B2A341F9EFBD4900 /* CredentialRotationTests.swift */,
 				665E47E1E6268C552D5F5490 /* DuckDBStorageTests.swift */,
+				586EBC0DA94DFAED75EF6299 /* KnownNodeGroupingTests.swift */,
 				D97E8AAAF34560CCDBDFD0D6 /* LeaseDurationTests.swift */,
 				120B98F2D24A44275C2F392F /* LeaseFencingTests.swift */,
 				661580073990BB810644BED5 /* LeaseStoreTests.swift */,
 				2180BE79B01BBF57CDB1BB61 /* MonitoringTests.swift */,
+				742BA0ECD7B1326678627048 /* NodeTokenTests.swift */,
 				2006424C788DF3112944C3C4 /* OperationalStatusTests.swift */,
 				6B99CFFEA11C279D778755A7 /* PairingTests.swift */,
 				E781CE2113EE42FD5459A118 /* ParticipantPresenceTests.swift */,
@@ -475,6 +486,7 @@
 				29634F205646A0A16F47ABEF /* CoordinationModels.swift */,
 				30683891C4D2D3A7A796B86F /* DatabaseInstanceLock.swift */,
 				50C7050FD1324FC6941EE508 /* DuckDBDatabase.swift */,
+				11052FE24BA69DEF1C275219 /* KnownNodeGrouping.swift */,
 				A4F804C58282C87C3F86B4E8 /* LeaseBackup.swift */,
 				BC05E7778A1E41F80FAE8557 /* LeaseDatabaseSetup.swift */,
 				2197E021E81DE5F0EC0DD31C /* LeaseModels.swift */,
@@ -812,6 +824,7 @@
 				22D6B330228246AA32E8920F /* CoordinationModels.swift in Sources */,
 				FC398F74FCB765BDA3E3E4F2 /* DatabaseInstanceLock.swift in Sources */,
 				4CA3FB9A9A0716FD44C06BE3 /* DuckDBDatabase.swift in Sources */,
+				958BC47721CC0CA4CB53F021 /* KnownNodeGrouping.swift in Sources */,
 				D4BFB6989A980A99E28D253D /* LeaseBackup.swift in Sources */,
 				E5E13F03418D35D816E9AF8D /* LeaseDatabaseSetup.swift in Sources */,
 				001251692BBC01E44BE02992 /* LeaseModels.swift in Sources */,
@@ -855,11 +868,14 @@
 				11131DCADCE7F20807F0FC98 /* ClientConformanceTests.swift in Sources */,
 				7FD94689AFC66BD8F7EC13B5 /* CloudflareSPFRecordTests.swift in Sources */,
 				78DCF4BD209CECEA1DBC9E4E /* CoordinationTests.swift in Sources */,
+				C73D1C156AC931B62814CF69 /* CredentialRotationTests.swift in Sources */,
 				FD995F83B6EFB5D9F2D8855D /* DuckDBStorageTests.swift in Sources */,
+				ECE9355D5CB554C0501DFC94 /* KnownNodeGroupingTests.swift in Sources */,
 				5A7A0715F1F8EF3FFF74E1DC /* LeaseDurationTests.swift in Sources */,
 				C9BD57CAD645E11895040F51 /* LeaseFencingTests.swift in Sources */,
 				445C8F7AF2DD571A2DE2DFBD /* LeaseStoreTests.swift in Sources */,
 				CBC9FE3B360C1075A67A8F7A /* MonitoringTests.swift in Sources */,
+				C0BF16048F8DE254F7CFC8C4 /* NodeTokenTests.swift in Sources */,
 				1F7FB343D5F14EC550ADA791 /* OperationalStatusTests.swift in Sources */,
 				69BD77EA1B6F27200A668986 /* PairingTests.swift in Sources */,
 				1CE4C97197BA1DDFB518DAA2 /* ParticipantPresenceTests.swift in Sources */,
@@ -1070,7 +1086,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2026101612;
+				CURRENT_PROJECT_VERSION = 2026101617;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -1233,7 +1249,7 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2026101612;
+				CURRENT_PROJECT_VERSION = 2026101617;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;

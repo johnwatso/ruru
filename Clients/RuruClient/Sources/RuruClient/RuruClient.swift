@@ -91,10 +91,24 @@ public struct RuruServiceDescription: Decodable, Sendable, Equatable {
     public let recoverySeconds: Double
     public let capabilities: [String: Capability]
     public let lease: Lease?
+    /// True when this Ruru supports `rotateCredential()`. Absent on older releases.
+    public let credentialRotation: Bool?
+    /// True when the token this client used has been replaced: call `rotateCredential()` to collect the current one.
+    public let credentialRotationPending: Bool?
+
+    public var isCredentialRotationPending: Bool { credentialRotationPending == true }
 
     public func supports(_ capability: String, version: Int = 1) -> Bool {
         capabilities[capability].map { $0.enabled && $0.version >= version } ?? false
     }
+}
+
+/// A credential issued by `RuruLeaseClient.rotateCredential()`.
+public struct RuruRotatedCredential: Sendable, Equatable {
+    /// The new bearer token. Save it to Keychain before using it, then make a client with it.
+    public let token: String
+    /// How long the token that made the request keeps working, so a lost response can be retried.
+    public let previousValidSeconds: Double
 }
 
 /// What `maintain` reports as ownership changes.
@@ -170,6 +184,34 @@ public actor RuruLeaseClient {
         let data = try await send("/v1/service", body: nil)
         do { return try JSONDecoder().decode(RuruServiceDescription.self, from: data) }
         catch { throw RuruError.server(status: 200, code: "invalid_response") }
+    }
+
+    /// Asks Ruru for a fresh credential, or the current one after an operator rotated the service key.
+    ///
+    /// A paired server (its own node token) always receives a newly issued token and may rotate at most once a
+    /// minute. A holder of the shared service token can only collect a token an operator already rotated; it
+    /// otherwise throws `.server(status: 409, code: "no_rotation_pending")`. The caller must persist the returned
+    /// token **before** using it. The token used for this request stays valid for `previousValidSeconds`, so
+    /// retrying after a lost response is safe. This client keeps using its own token; create a new one.
+    /// Discover `credentialRotation` through `describe()` first.
+    public func rotateCredential() async throws -> RuruRotatedCredential {
+        struct Request: Encodable { let clusterID: String }
+        struct Reply: Decodable { let version: Int; let clusterID: String; let token: String; let previousValidSeconds: Double }
+        let data = try await send("/v1/credential/rotate", body: try JSONEncoder().encode(Request(clusterID: configuration.clusterID)))
+        guard let reply = try? JSONDecoder().decode(Reply.self, from: data), reply.version == 1,
+              reply.clusterID == configuration.clusterID, reply.token.utf8.count >= 32, reply.token.utf8.count <= 512,
+              !reply.token.contains(where: \.isWhitespace), reply.token != configuration.token,
+              reply.previousValidSeconds.isFinite, reply.previousValidSeconds >= 0 else {
+            throw RuruError.server(status: 200, code: "invalid_response")
+        }
+        return RuruRotatedCredential(token: reply.token, previousValidSeconds: reply.previousValidSeconds)
+    }
+
+    /// Collects a pending rotation, if any: `nil` when nothing was rotated. Safe to call on every start-up.
+    public func collectPendingCredential() async throws -> RuruRotatedCredential? {
+        let description = try await describe()
+        guard description.isCredentialRotationPending else { return nil }
+        return try await rotateCredential()
     }
 
     /// Call every 15 seconds, independently of lease acquisition/renewal.

@@ -95,14 +95,20 @@ public actor CoordinationCatalogue {
               ["/v1/coordination/capabilities", "/v1/coordination/report", "/v1/coordination/catalogue", "/v1/coordination/enrollment"].contains(request.path) else {
             return .error("not_found", status: 404)
         }
-        guard let cluster = authorization.cluster(for: request.headers["authorization"]) else {
+        guard let identity = authorization.identity(for: request.headers["authorization"]) else {
             return .error("unauthorized", status: 401)
         }
+        let cluster = identity.clusterID
         guard !request.body.isEmpty, request.body.count <= HTTPParser.maxBodyBytes,
               let scope = try? JSONDecoder().decode(CoordinationScopeRequest.self, from: request.body) else {
             return .error("invalid_request", status: 400)
         }
         guard scope.clusterID == cluster else { return .error("forbidden_cluster", status: 403) }
+        // Node tokens may only name their own node in reports and enrolments.
+        struct NodeProbe: Decodable { let nodeID: String? }
+        guard identity.permits(nodeID: (try? JSONDecoder().decode(NodeProbe.self, from: request.body))?.nodeID) else {
+            return .error("forbidden_node", status: 403)
+        }
         guard scope.version == 1 else { return .error("unsupported_version", status: 409) }
         guard let service = services[cluster] else { return .error("unknown_cluster", status: 403) }
         let policy = service.coordinationPolicy

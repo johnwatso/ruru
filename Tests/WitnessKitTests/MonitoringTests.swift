@@ -244,14 +244,34 @@ final class MonitorWebPermissionTests: XCTestCase {
             MonitorTarget(name: "c", kind: .http, url: "http://169.254.169.254/latest"),
             MonitorTarget(name: "d", kind: .dns, host: "::1", port: 53),
             MonitorTarget(name: "e", kind: .tcp, host: "2130706433", port: 22),
-            MonitorTarget(name: "f", kind: .http, url: "http://0.0.0.0:8080")
+            MonitorTarget(name: "f", kind: .http, url: "http://0.0.0.0:8080"),
+            MonitorTarget(name: "g", kind: .tcp, host: "0:0:0:0:0:ffff:7f00:1", port: 22),
+            MonitorTarget(name: "h", kind: .tcp, host: "::ffff:127.0.0.1", port: 22),
+            MonitorTarget(name: "i", kind: .tcp, host: "::7f00:1", port: 22),
+            MonitorTarget(name: "j", kind: .tcp, host: "0:0:0:0:0:ffff:a9fe:a9fe", port: 80)
         ]
         for target in blocked { XCTAssertFalse(target.isWebPermitted, target.name) }
     }
 
-    func testWebConsoleAllowsLANAndInternetTargets() {
-        XCTAssertTrue(MonitorTarget(name: "nas", kind: .tcp, host: "192.168.1.20", port: 445).isWebPermitted)
-        XCTAssertTrue(MonitorTarget(name: "site", kind: .http, url: "https://status.example.com").isWebPermitted)
-        XCTAssertTrue(MonitorTarget(name: "dns", kind: .dns, host: "192.168.1.1", port: 53).isWebPermitted)
+    func testWebConsoleAllowsNonLocalNumericTargets() {
+        XCTAssertTrue(MonitorTarget(name: "test host", kind: .tcp, host: "198.51.100.20", port: 445).isWebPermitted)
+        XCTAssertTrue(MonitorTarget(name: "site", kind: .http, url: "https://8.8.8.8/health").isWebPermitted)
+        XCTAssertTrue(MonitorTarget(name: "dns", kind: .dns, host: "203.0.113.53", port: 53).isWebPermitted)
+    }
+
+    func testWebConsoleRejectsHostNamesToPreventDNSRebinding() {
+        XCTAssertFalse(MonitorTarget(name: "site", kind: .http, url: "https://status.example.com").isWebPermitted)
+        XCTAssertFalse(MonitorTarget(name: "host", kind: .tcp, host: "monitor.example.com", port: 443).isWebPermitted)
+        XCTAssertTrue(MonitorTarget.isAddressAssignedToThisMac("127.0.0.1"))
+    }
+
+    func testPersistedWebRestrictionIsEnforcedAtProbeTime() async throws {
+        let target = MonitorTarget(name: "unsafe", kind: .tcp, host: "monitor.example.com", port: 443,
+                                   requiresNumericHost: true)
+        let decoded = try JSONDecoder().decode(MonitorTarget.self, from: JSONEncoder().encode(target))
+        XCTAssertTrue(decoded.requiresNumericHost)
+        let result = await MonitorProbe.run(decoded)
+        XCTAssertFalse(result.ok)
+        XCTAssertEqual(result.detail, "Web monitor requires a numeric non-local address")
     }
 }

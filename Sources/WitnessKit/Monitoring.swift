@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Network
 
@@ -34,13 +35,18 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
     /// Whether this target being down counts as something needing attention on
     /// Overview. Off by default; the check and its alerts are unaffected.
     public var needsAttention: Bool
+    /// Targets made through the remotely exposed web console must keep using a
+    /// numeric, non-local address. This is persisted so a later DNS change
+    /// cannot turn a safe browser-created target into a probe of this Mac.
+    public var requiresNumericHost: Bool
 
     public init(id: String = UUID().uuidString.lowercased(), name: String, kind: Kind, host: String = "", port: Int = 0,
                 url: String = "", dnsQueryName: String = "example.com", intervalSeconds: Int = MonitorTarget.defaultInterval,
                 timeoutSeconds: Int = MonitorTarget.defaultTimeout,
                 failureThreshold: Int = MonitorTarget.defaultThreshold, enabled: Bool = true,
-                needsAttention: Bool = false) {
+                needsAttention: Bool = false, requiresNumericHost: Bool = false) {
         self.needsAttention = needsAttention
+        self.requiresNumericHost = requiresNumericHost
         self.id = id; self.name = name; self.kind = kind; self.host = host; self.port = port; self.url = url
         self.dnsQueryName = dnsQueryName
         self.intervalSeconds = intervalSeconds; self.timeoutSeconds = timeoutSeconds
@@ -48,7 +54,7 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, kind, host, port, url, dnsQueryName, intervalSeconds, timeoutSeconds, failureThreshold, enabled, needsAttention
+        case id, name, kind, host, port, url, dnsQueryName, intervalSeconds, timeoutSeconds, failureThreshold, enabled, needsAttention, requiresNumericHost
     }
 
     public init(from decoder: Decoder) throws {
@@ -65,6 +71,7 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
         failureThreshold = try values.decode(Int.self, forKey: .failureThreshold)
         enabled = try values.decode(Bool.self, forKey: .enabled)
         needsAttention = try values.decodeIfPresent(Bool.self, forKey: .needsAttention) ?? false
+        requiresNumericHost = try values.decodeIfPresent(Bool.self, forKey: .requiresNumericHost) ?? false
     }
 
     /// What the target points at, for display.
@@ -88,9 +95,10 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
-    /// Targets the browser console may create. LAN and internet hosts are fine;
-    /// this Mac itself, link-local and unspecified addresses (including cloud
-    /// metadata endpoints) are not, so a web operator cannot probe local services.
+    /// Targets the browser console may create. Browser-created targets use only
+    /// numeric addresses: resolving a hostname at validation time would leave a
+    /// DNS-rebinding gap before the later network connection. Native monitoring
+    /// remains able to use a trusted operator's host names.
     public var isWebPermitted: Bool {
         guard isValid else { return false }
         let hostText: String
@@ -98,7 +106,54 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
         case .http: hostText = Self.validURL(url)?.host ?? ""
         case .tcp, .dns: hostText = host
         }
-        return !Self.isRestrictedHost(hostText)
+        // IPv4-mapped and IPv4-compatible IPv6 forms (::ffff:7f00:1, 0:0:0:0:0:ffff:7f00:1)
+        // reach the same machine as their IPv4 form, so judge them as that IPv4 address.
+        let canonical = Self.canonicalHost(hostText)
+        return Self.isNumericHost(canonical) && !Self.isRestrictedHost(canonical) && !Self.isAddressAssignedToThisMac(canonical)
+    }
+
+    static func canonicalHost(_ host: String) -> String {
+        let name = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if let v6 = IPv6Address(name), let v4 = v6.asIPv4 { return "\(v4)" }
+        return host
+    }
+
+    static func isNumericHost(_ host: String) -> Bool {
+        let name = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        return IPv4Address(name) != nil || IPv6Address(name) != nil
+    }
+
+    /// A remote operator must not be able to use an otherwise permitted LAN
+    /// literal to reach Ruru itself. Re-evaluate this at each probe so DHCP and
+    /// VPN address changes do not weaken the restriction.
+    static func isAddressAssignedToThisMac(_ host: String) -> Bool {
+        let name = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        let expectedV4 = IPv4Address(name)?.rawValue
+        let expectedV6 = IPv6Address(name)?.rawValue
+        guard expectedV4 != nil || expectedV6 != nil else { return false }
+
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        // The remote-origin policy fails closed if the local address set cannot
+        // be inspected; otherwise a temporary system failure could expose a
+        // service newly assigned to this Mac.
+        guard getifaddrs(&interfaces) == 0, let first = interfaces else { return true }
+        defer { freeifaddrs(first) }
+        var current: UnsafeMutablePointer<ifaddrs>? = first
+        while let entry = current {
+            defer { current = entry.pointee.ifa_next }
+            guard let address = entry.pointee.ifa_addr,
+                  address.pointee.sa_family == sa_family_t(AF_INET) || address.pointee.sa_family == sa_family_t(AF_INET6),
+                  address.pointee.sa_len > 0 else { continue }
+            var numericHost = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            guard getnameinfo(address, socklen_t(address.pointee.sa_len), &numericHost, socklen_t(numericHost.count), nil, 0, NI_NUMERICHOST) == 0 else {
+                continue
+            }
+            let bytes = numericHost.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+            let value = String(decoding: bytes, as: UTF8.self)
+            if let expectedV4, IPv4Address(value)?.rawValue == expectedV4 { return true }
+            if let expectedV6, IPv6Address(value)?.rawValue == expectedV6 { return true }
+        }
+        return false
     }
 
     static func isRestrictedHost(_ host: String) -> Bool {
@@ -223,7 +278,13 @@ public struct MonitorState: Equatable, Sendable {
 
 public enum MonitorProbe {
     public static func run(_ target: MonitorTarget) async -> MonitorResult {
-        switch target.kind {
+        // Enforce the browser-origin safety invariant at execution time too.
+        // Configuration can outlive the request that created it, and checking
+        // the literal immediately before any connection closes DNS rebinding.
+        if target.requiresNumericHost && !target.isWebPermitted {
+            return MonitorResult(ok: false, detail: "Web monitor requires a numeric non-local address")
+        }
+        return switch target.kind {
         case .tcp: await tcp(host: target.host, port: target.port, timeout: target.timeoutSeconds)
         case .http: await http(url: target.url, timeout: target.timeoutSeconds)
         case .dns: await dns(host: target.host, port: target.port, queryName: target.dnsQueryName, timeout: target.timeoutSeconds)

@@ -89,14 +89,16 @@ public actor OperationalStatusRegistry {
         guard request.method == "POST", request.path == "/v1/operational-status/report" else {
             return .error("not_found", status: 404)
         }
-        guard let cluster = authorization.cluster(for: request.headers["authorization"]) else {
+        guard let identity = authorization.identity(for: request.headers["authorization"]) else {
             return .error("unauthorized", status: 401)
         }
+        let cluster = identity.clusterID
         guard !request.body.isEmpty, request.body.count <= HTTPParser.maxBodyBytes,
               let report = try? JSONDecoder().decode(OperationalStatusReport.self, from: request.body),
               report.version == 1, report.clusterID == cluster,
               WitnessPrimaryPreference.validNodeID(report.nodeID),
               report.nodeName == nil || WitnessNodeName.normalized(report.nodeName) != nil,
+              identity.permits(nodeID: report.nodeID),
               report.components.count <= Self.maxComponents,
               isValid(report.components) else {
             return .error("invalid_request", status: 400)

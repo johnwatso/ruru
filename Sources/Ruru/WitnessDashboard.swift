@@ -230,13 +230,13 @@ private struct WitnessInternetPage: View {
                 ConsoleSection("Web Console", content: {
                     VStack(alignment: .leading, spacing: 12) {
                         if let origin = model.webUIOrigin {
-                            ConsoleSettingRow(title: "Operator address", subtitle: "Cloudflare Access and a passkey are required before Ruru exposes monitors.") {
+                            ConsoleSettingRow(title: "Operator address", subtitle: "A passkey is required before Ruru exposes monitors.") {
                                 VStack(alignment: .trailing, spacing: 6) {
                                     Text(origin).font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
                                     Button("Copy Address", systemImage: "doc.on.doc") { model.copy(origin) }.buttonStyle(.borderless)
                                 }
                             }
-                            Text("Before opening this address, protect this hostname with a Cloudflare Access application that sends the authenticated-user email header. Ruru rejects every browser request without it.")
+                            Text("Sign-in uses passkeys only. Cloudflare Access can optionally sit in front of this page, but it must allow /v1/* and /health so servers keep working unattended.")
                                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             HStack(spacing: 12) {
                                 Button("Create One-Time Enrolment Code") {

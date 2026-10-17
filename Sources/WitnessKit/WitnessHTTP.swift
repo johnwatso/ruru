@@ -17,8 +17,7 @@ public struct WitnessWebRequest: Sendable {
     public let headers: [String: String]
     public let body: Data
     /// True only when the TCP peer is this Mac. The bundled cloudflared helper
-    /// connects locally, so handlers can refuse a LAN peer that forges
-    /// Cloudflare Access headers.
+    /// connects locally, so handlers can refuse a direct LAN peer.
     public let isLoopbackPeer: Bool
 
     init(_ request: HTTPRequest, isLoopbackPeer: Bool) {
@@ -94,32 +93,89 @@ enum HTTPParser {
     }
 }
 
+/// A bearer token issued to one paired server. It is accepted only for
+/// requests that name this node, so a leaked token cannot impersonate a sibling
+/// and can be revoked on its own.
+public struct WitnessNodeToken: Codable, Sendable, Equatable {
+    public let nodeID: String
+    public let token: String
+    public let name: String?
+    /// The token this one replaced. Admitted only until `previousExpires`, so a client whose
+    /// rotation response was lost can retry and collect the current token.
+    public let previousToken: String?
+    public let previousExpires: Date?
+    public init(nodeID: String, token: String, name: String? = nil,
+                previousToken: String? = nil, previousExpires: Date? = nil) {
+        self.nodeID = nodeID; self.token = token; self.name = name
+        self.previousToken = previousToken; self.previousExpires = previousExpires
+    }
+}
+
 public struct WitnessServiceCredential: Sendable {
+    public static let maxNodeTokens = 32
     public let clusterID: String
     public let token: String
+    /// The shared token this one replaced, while a rotation grace period lasts. It can still
+    /// authenticate, and `/v1/credential/rotate` returns the current token to its holder.
+    public let previousToken: String?
+    public let nodeTokens: [WitnessNodeToken]
     public let primaryPreference: WitnessPrimaryPreference
     public let coordinationPolicy: CoordinationPolicy
     public let leaseSeconds: Double
-    public init(clusterID: String, token: String, primaryPreference: WitnessPrimaryPreference = .init(),
+    public init(clusterID: String, token: String, previousToken: String? = nil, nodeTokens: [WitnessNodeToken] = [],
+                primaryPreference: WitnessPrimaryPreference = .init(),
                 coordinationPolicy: CoordinationPolicy = .init(), leaseSeconds: Double = LeaseStore.leaseDuration) {
         self.clusterID = clusterID
         self.token = token
+        self.previousToken = previousToken
+        self.nodeTokens = nodeTokens
         self.primaryPreference = primaryPreference
         self.coordinationPolicy = coordinationPolicy
         self.leaseSeconds = leaseSeconds
     }
 }
 
+/// Who a bearer token speaks for. `nodeID` is nil for the shared service token.
+struct WitnessIdentity: Sendable, Equatable {
+    let clusterID: String
+    let nodeID: String?
+    /// True when the caller presented a token that has since been replaced.
+    var usedPrevious = false
+
+    /// A node token may only act as its own node.
+    func permits(nodeID claimed: String?) -> Bool {
+        guard let nodeID else { return true }
+        return claimed == nil || claimed == nodeID
+    }
+}
+
 struct WitnessAuthorization: Sendable {
+    private struct NodeCode: Sendable { let identity: WitnessIdentity; let code: Data }
     private let codes: [String: Data]
+    private let nodeCodes: [NodeCode]
+    private let previousCodes: [String: Data]
+    private let previousNodeCodes: [NodeCode]
     private static let authContext = Data("Ruru-auth-v1".utf8)
-    init() { codes = [:] }
+    init() { codes = [:]; nodeCodes = []; previousCodes = [:]; previousNodeCodes = [] }
 
     init(services: [WitnessServiceCredential]) throws {
+        let everyToken = services.flatMap {
+            [$0.token] + [$0.previousToken].compactMap { $0 } +
+                $0.nodeTokens.flatMap { [$0.token] + [$0.previousToken].compactMap { $0 } }
+        }
         guard services.count <= 32,
               Set(services.map(\.clusterID)).count == services.count,
-              Set(services.map(\.token)).count == services.count else { throw WitnessError.invalidConfiguration }
+              Set(everyToken).count == everyToken.count else { throw WitnessError.invalidConfiguration }
         var codes: [String: Data] = [:]
+        var nodeCodes: [NodeCode] = []
+        var previousCodes: [String: Data] = [:]
+        var previousNodeCodes: [NodeCode] = []
+        func valid(_ token: String) -> Bool {
+            token.utf8.count >= 32 && token.utf8.count <= 512 && !token.contains(where: \.isWhitespace)
+        }
+        func code(_ token: String) -> Data {
+            Data(HMAC<SHA256>.authenticationCode(for: Self.authContext, using: SymmetricKey(data: Data(token.utf8))))
+        }
         for service in services {
             guard !service.clusterID.isEmpty, service.clusterID.utf8.count <= 128,
                   !service.clusterID.contains(where: { $0.isNewline }),
@@ -127,23 +183,75 @@ struct WitnessAuthorization: Sendable {
                   !service.token.contains(where: \.isWhitespace),
                   service.primaryPreference.isValid, service.coordinationPolicy.isValid,
                   LeaseStore.leaseDurationRange.contains(service.leaseSeconds) else { throw WitnessError.invalidConfiguration }
-            let key = SymmetricKey(data: Data(service.token.utf8))
-            codes[service.clusterID] = Data(HMAC<SHA256>.authenticationCode(for: Self.authContext, using: key))
+            codes[service.clusterID] = code(service.token)
+            if let previous = service.previousToken {
+                guard valid(previous) else { throw WitnessError.invalidConfiguration }
+                previousCodes[service.clusterID] = code(previous)
+            }
+            guard service.nodeTokens.count <= WitnessServiceCredential.maxNodeTokens,
+                  Set(service.nodeTokens.map(\.nodeID)).count == service.nodeTokens.count else { throw WitnessError.invalidConfiguration }
+            for node in service.nodeTokens {
+                guard WitnessPrimaryPreference.validNodeID(node.nodeID),
+                      node.token.utf8.count >= 32, node.token.utf8.count <= 512,
+                      !node.token.contains(where: \.isWhitespace) else { throw WitnessError.invalidConfiguration }
+                nodeCodes.append(NodeCode(identity: WitnessIdentity(clusterID: service.clusterID, nodeID: node.nodeID),
+                                          code: code(node.token)))
+                if let previous = node.previousToken {
+                    guard valid(previous) else { throw WitnessError.invalidConfiguration }
+                    previousNodeCodes.append(NodeCode(identity: WitnessIdentity(clusterID: service.clusterID, nodeID: node.nodeID, usedPrevious: true),
+                                                      code: code(previous)))
+                }
+            }
         }
         self.codes = codes
+        self.nodeCodes = nodeCodes
+        self.previousCodes = previousCodes
+        self.previousNodeCodes = previousNodeCodes
     }
-    func cluster(for header: String?) -> String? {
+    func cluster(for header: String?) -> String? { identity(for: header)?.clusterID }
+
+    /// Compares against every credential so timing does not reveal which one matched.
+    func identity(for header: String?) -> WitnessIdentity? {
         guard let header, header.hasPrefix("Bearer "), header.utf8.count <= 519 else { return nil }
         let suppliedKey = SymmetricKey(data: Data(header.dropFirst(7).utf8))
-        var matched: String?
+        var matched: WitnessIdentity?
         for (cluster, code) in codes {
             if HMAC<SHA256>.isValidAuthenticationCode(code, authenticating: Self.authContext, using: suppliedKey) {
-                matched = cluster
+                matched = WitnessIdentity(clusterID: cluster, nodeID: nil)
+            }
+        }
+        for node in nodeCodes {
+            if HMAC<SHA256>.isValidAuthenticationCode(node.code, authenticating: Self.authContext, using: suppliedKey) {
+                matched = node.identity
+            }
+        }
+        for (cluster, code) in previousCodes {
+            if HMAC<SHA256>.isValidAuthenticationCode(code, authenticating: Self.authContext, using: suppliedKey) {
+                matched = WitnessIdentity(clusterID: cluster, nodeID: nil, usedPrevious: true)
+            }
+        }
+        for node in previousNodeCodes {
+            if HMAC<SHA256>.isValidAuthenticationCode(node.code, authenticating: Self.authContext, using: suppliedKey) {
+                matched = node.identity
             }
         }
         return matched
     }
 }
+
+/// What the app decided about a `POST /v1/credential/rotate` request.
+public enum WitnessRotationOutcome: Sendable, Equatable {
+    /// `token` is the caller's current credential; the one they presented stays valid for `previousValidSeconds`.
+    case issued(token: String, previousValidSeconds: Double)
+    /// A shared-token caller asked while no rotation was in progress.
+    case notPending
+    case throttled
+    case failed
+}
+
+/// Supplied by the application, which owns persistence. Called only after the bearer token authenticated.
+/// `usedPrevious` is true when the caller still holds a replaced token and just needs the current one.
+public typealias WitnessCredentialRotator = @Sendable (_ clusterID: String, _ nodeID: String?, _ usedPrevious: Bool) async -> WitnessRotationOutcome
 
 struct WitnessRouter: Sendable {
     let store: LeaseStore
@@ -157,6 +265,7 @@ struct WitnessRouter: Sendable {
     private let authorityBuild: String?
     private let policies: [String: WitnessServicePolicy]
     private let leaseSeconds: [String: Double]
+    private let rotator: WitnessCredentialRotator?
 
     init(store: LeaseStore, clusterID: String, token: String, authorityVersion: String? = nil,
          authorityBuild: String? = nil) throws {
@@ -167,7 +276,8 @@ struct WitnessRouter: Sendable {
     init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil,
          pairing: PairingDesk? = nil, participants: ParticipantPresence? = nil,
          operationalStatus: OperationalStatusRegistry? = nil, authorityVersion: String? = nil,
-         authorityBuild: String? = nil) throws {
+         authorityBuild: String? = nil, rotator: WitnessCredentialRotator? = nil) throws {
+        self.rotator = rotator
         authorization = try WitnessAuthorization(services: services)
         self.services = services
         self.store = store
@@ -198,17 +308,23 @@ struct WitnessRouter: Sendable {
         if request.method == "POST", request.path == "/v1/pair" || request.path == "/v1/pair/status" {
             return await routePairing(request)
         }
+        if request.method == "POST", request.path == "/v1/credential/rotate" {
+            return await routeRotation(request)
+        }
         if request.method == "GET", request.path == "/v1/service" {
-            guard let cluster = authorization.cluster(for: request.headers["authorization"]),
-                  let service = services.first(where: { $0.clusterID == cluster }) else {
+            guard let identity = authorization.identity(for: request.headers["authorization"]),
+                  let service = services.first(where: { $0.clusterID == identity.clusterID }) else {
                 return .error("unauthorized", status: 401)
             }
+            let cluster = identity.clusterID
             do {
                 let status = try await store.status(for: cluster)
                 let body = try JSONEncoder().encode(WitnessServiceDescription(service: service, lease: status.lease,
                                                                              recoverySeconds: status.recoverySeconds,
                                                                              authorityVersion: authorityVersion,
-                                                                             authorityBuild: authorityBuild))
+                                                                             authorityBuild: authorityBuild,
+                                                                             rotationAvailable: rotator != nil,
+                                                                             rotationPending: identity.usedPrevious))
                 return LeaseReply(status: 200, body: body)
             } catch { return .error("authority_unavailable", status: 503) }
         }
@@ -229,15 +345,17 @@ struct WitnessRouter: Sendable {
               let action = LeaseAction(rawValue: String(request.path.dropFirst("/v1/lease/".count))) else {
             return .error("not_found", status: 404)
         }
-        guard let allowedCluster = authorization.cluster(for: request.headers["authorization"]) else {
+        guard let identity = authorization.identity(for: request.headers["authorization"]) else {
             return .error("unauthorized", status: 401)
         }
+        let allowedCluster = identity.clusterID
         guard !request.body.isEmpty, request.body.count <= HTTPParser.maxBodyBytes,
               let payload = try? JSONDecoder().decode(LeaseRequest.self, from: request.body) else {
             return .error("invalid_request", status: 400)
         }
         guard policies[payload.clusterID] != nil else { return .error("unknown_cluster", status: 403) }
         guard payload.clusterID == allowedCluster else { return .error("forbidden_cluster", status: 403) }
+        guard identity.permits(nodeID: payload.nodeID) else { return .error("forbidden_node", status: 403) }
         return await store.apply(action, request: payload,
                                  leaseDuration: leaseSeconds[payload.clusterID] ?? LeaseStore.leaseDuration)
     }
@@ -288,6 +406,36 @@ extension WitnessRouter {
         case .approved(let credential):
             return json(200, ["status": "approved", "clusterID": credential.clusterID,
                               "token": credential.token, "leaseSeconds": credential.leaseSeconds])
+        }
+    }
+}
+
+// MARK: Credential rotation
+
+private struct RotationRequest: Decodable { let clusterID: String }
+
+extension WitnessRouter {
+    /// A paired server (own node token) rotates its own credential; a shared-token holder can only
+    /// collect the token an operator already rotated. The caller never chooses the new value.
+    func routeRotation(_ request: HTTPRequest) async -> LeaseReply {
+        guard let rotator else { return .error("not_found", status: 404) }
+        guard let identity = authorization.identity(for: request.headers["authorization"]) else {
+            return .error("unauthorized", status: 401)
+        }
+        guard !request.body.isEmpty, request.body.count <= HTTPParser.maxBodyBytes,
+              let payload = try? JSONDecoder().decode(RotationRequest.self, from: request.body) else {
+            return .error("invalid_request", status: 400)
+        }
+        guard payload.clusterID == identity.clusterID else { return .error("forbidden_cluster", status: 403) }
+        switch await rotator(identity.clusterID, identity.nodeID, identity.usedPrevious) {
+        case .issued(let token, let seconds):
+            let body = (try? JSONSerialization.data(withJSONObject: [
+                "version": 1, "clusterID": identity.clusterID, "token": token, "previousValidSeconds": seconds
+            ] as [String: Any], options: [.sortedKeys])) ?? Data()
+            return LeaseReply(status: 200, body: body)
+        case .notPending: return .error("no_rotation_pending", status: 409)
+        case .throttled: return .error("rotation_throttled", status: 429)
+        case .failed: return .error("authority_unavailable", status: 503)
         }
     }
 }

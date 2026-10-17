@@ -21,6 +21,9 @@ struct GuardedService: Codable, Equatable, Identifiable {
     var clusterID: String
     var kind: Kind = .custom
     var nodeDisplayNames: [String: String] = [:]
+    /// Node IDs the operator hid from Known Servers. Display only: history and terms are untouched,
+    /// and an ID that reports again reappears.
+    var dismissedNodeIDs: [String] = []
     /// How long a grant lasts. Clients renew at about a third of this.
     var leaseSeconds = GuardedService.defaultLeaseSeconds
 
@@ -37,6 +40,7 @@ struct GuardedService: Codable, Equatable, Identifiable {
         clusterID = try values.decode(String.self, forKey: .clusterID)
         kind = try values.decodeIfPresent(Kind.self, forKey: .kind) ?? .custom
         nodeDisplayNames = try values.decodeIfPresent([String: String].self, forKey: .nodeDisplayNames) ?? [:]
+        dismissedNodeIDs = try values.decodeIfPresent([String].self, forKey: .dismissedNodeIDs) ?? []
         leaseSeconds = try values.decodeIfPresent(Int.self, forKey: .leaseSeconds) ?? Self.defaultLeaseSeconds
     }
 
@@ -49,7 +53,8 @@ struct GuardedService: Codable, Equatable, Identifiable {
         !clusterID.isEmpty && clusterID == clusterID.trimmingCharacters(in: .whitespacesAndNewlines) &&
         clusterID.utf8.count <= 128 && clusterID.rangeOfCharacter(from: .controlCharacters) == nil &&
         UUID(uuidString: id) != nil && Self.leaseSecondsRange.contains(leaseSeconds) &&
-        WitnessConfiguration.validNames(nodeDisplayNames)
+        WitnessConfiguration.validNames(nodeDisplayNames) &&
+        dismissedNodeIDs.count <= 256 && dismissedNodeIDs.allSatisfy { !$0.isEmpty && $0.utf8.count <= 128 }
     }
 }
 

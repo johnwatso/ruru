@@ -35,6 +35,9 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var pairingRequests: [PairingDesk.Request] = []
     /// Servers approved this session, by cluster ID, for the setup assistant.
     @Published private(set) var pairedServers: [String: [String]] = [:]
+    /// Per-server credentials issued at pairing, by service cluster ID. Tokens
+    /// live in Keychain; the console only ever shows names and node IDs.
+    @Published private(set) var pairedNodes: [String: [WitnessNodeToken]] = [:]
     /// The first-run setup assistant. Opens until setup is completed.
     @Published var showingSetup = false
     private var announcedPairings: Set<String> = []
@@ -97,6 +100,11 @@ final class WitnessAppModel: ObservableObject {
     /// browser sessions and unfinished passkey enrolments.
     private var webUI: RuruWebUI?
     private var serviceCredentials: [String: String] = [:]
+    /// Replaced shared tokens still admitted until `expires`, so a client can collect the new one.
+    struct PreviousServiceToken: Codable, Equatable { var token: String; var expires: Date }
+    @Published private(set) var previousServiceTokens: [String: PreviousServiceToken] = [:]
+    private var rotationInFlight = false
+    private var lastNodeRotation: [String: Date] = [:]
     private var savingConfiguration = false
     private var pollTask: Task<Void, Never>?
     private let preview: Bool
@@ -194,6 +202,9 @@ final class WitnessAppModel: ObservableObject {
             for service in configuration.guardedServices {
                 serviceCredentials[service.clusterID] = try WitnessKeychain.loadOrCreate(account: service.keychainAccount)
             }
+            pairedNodes = try Self.loadNodeTokens()
+            previousServiceTokens = Self.liveServiceTokens((try? Self.loadPreviousServiceTokens()) ?? [:], current: serviceCredentials)
+            pairedNodes = Self.liveNodeTokens(pairedNodes)
             refreshLoginStatus()
             beginPolling()
             if configuration.startAutomatically { Task { await start() } }
@@ -540,6 +551,62 @@ final class WitnessAppModel: ObservableObject {
         if let owner = lease(for: clusterID)?.ownerNodeID, !owner.isEmpty { nodes.insert(owner) }
         return nodes.sorted()
     }
+    /// Known nodes split into current servers and earlier identities. A node ID seen only in
+    /// history is an "earlier identity" when a live, same-named server has replaced it
+    /// (a reinstall or reset mints a new ID). Anything reporting, owning, paired or preferred stays current.
+    func groupedKnownNodes(for clusterID: String) -> (current: [String], earlier: [String]) {
+        let all = knownNodes(for: clusterID)
+        let service = service(for: clusterID)
+        let preferred = service.flatMap { configuration.primaryPreference(for: $0.id).preferredPrimaryNodeID }
+        let owner = (lease(for: clusterID)?.remainingSeconds ?? 0) > 0 ? lease(for: clusterID)?.ownerNodeID : nil
+        let paired = Set((pairedNodes[clusterID] ?? []).map(\.nodeID))
+        func name(_ node: String) -> String? {
+            let value = nodeDisplayName(for: node, reportedName: reportedName(for: node, clusterID: clusterID), clusterID: clusterID)
+            return value == "Unnamed server" ? nil : value
+        }
+        func isLive(_ node: String) -> Bool {
+            participant(for: node, clusterID: clusterID) != nil || operationalStatus(for: node, clusterID: clusterID) != nil
+                || node == owner || paired.contains(node)
+        }
+        let dismissed = Set(service?.dismissedNodeIDs ?? [])
+        let grouped = KnownNodeGrouping.group(nodes: all, names: Dictionary(uniqueKeysWithValues: all.compactMap { node in name(node).map { (node, $0) } }),
+                                       live: Set(all.filter(isLive)), pinned: Set([preferred].compactMap { $0 }))
+        // Dismissed IDs vanish unless something now makes them current again.
+        let hidden = Set(grouped.earlier.filter { dismissed.contains($0) })
+        return (grouped.current.filter { !(dismissed.contains($0) && !isLive($0) && $0 != preferred) },
+                grouped.earlier.filter { !hidden.contains($0) })
+    }
+
+    /// Hides earlier identities from Known Servers. Never edits leases, terms or history.
+    func forgetEarlierIdentities(for clusterID: String) async throws {
+        guard !busy, !internetBusy, !savingConfiguration, !shuttingDown else { throw WitnessStorage.ConfigurationError.invalid }
+        let earlier = groupedKnownNodes(for: clusterID).earlier
+        guard !earlier.isEmpty else { return }
+        var draft = configuration
+        guard let index = draft.services.firstIndex(where: { $0.clusterID == clusterID }) else {
+            throw WitnessStorage.ConfigurationError.invalid
+        }
+        draft.services[index].dismissedNodeIDs = Array((Set(draft.services[index].dismissedNodeIDs).union(earlier)).sorted().suffix(256))
+        guard draft.isValid else { throw WitnessStorage.ConfigurationError.invalid }
+        if !preview { try WitnessStorage.save(draft) }
+        configuration = draft
+    }
+    /// A reporting server that carries the preferred primary's name when the preferred ID itself is
+    /// silent: the same machine under a newer ID. Nil when absent or ambiguous; never applied automatically.
+    func liveReplacementForPreferredPrimary(for clusterID: String) -> String? {
+        guard let service = service(for: clusterID),
+              let preferred = configuration.primaryPreference(for: service.id).preferredPrimaryNodeID,
+              participant(for: preferred, clusterID: clusterID) == nil else { return nil }
+        func name(_ node: String) -> String {
+            nodeDisplayName(for: node, reportedName: reportedName(for: node, clusterID: clusterID), clusterID: clusterID)
+        }
+        let wanted = name(preferred)
+        guard wanted != "Unnamed server" else { return nil }
+        let matches = participantObservations.filter {
+            $0.clusterID == clusterID && $0.nodeID != preferred && name($0.nodeID) == wanted
+        }
+        return matches.count == 1 ? matches[0].nodeID : nil
+    }
     func reportedName(for nodeID: String, clusterID: String) -> String? {
         if let name = participant(for: nodeID, clusterID: clusterID)?.nodeName { return name }
         let lease = lease(for: clusterID)
@@ -686,7 +753,10 @@ final class WitnessAppModel: ObservableObject {
             let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue, pairing: pairing,
                                                participants: participants, operationalStatus: operationalStatus,
                                                authorityVersion: authorityVersion, authorityBuild: authorityBuild,
-                                               webHandler: { request in await webUI.route(request) })
+                                               webHandler: { request in await webUI.route(request) },
+                                               credentialRotator: { [weak self] cluster, node, usedPrevious in
+                                                   await self?.rotateCredential(clusterID: cluster, nodeID: node, usedPrevious: usedPrevious) ?? .failed
+                                               })
             self.webUI = webUI
             self.server = server
             listenerPort = try await server.start(bindAddress: configuration.bindAddress, port: UInt16(configuration.port))
@@ -722,7 +792,7 @@ final class WitnessAppModel: ObservableObject {
     }
 
     /// Shows a one-time code in the native console. The public route still
-    /// requires Cloudflare Access, and the code expires after ten minutes.
+    /// requires a passkey, and the code expires after ten minutes.
     func beginWebUIEnrollment() async throws -> String {
         guard state == .running, let webUI, webUIOrigin != nil else { throw WitnessStorage.ConfigurationError.invalid }
         return try await webUI.beginEnrollment()
@@ -958,6 +1028,8 @@ final class WitnessAppModel: ObservableObject {
         return try configuration.guardedServices.map { service in
             guard let token = tokens[service.clusterID] else { throw WitnessStorage.ConfigurationError.invalid }
             return WitnessServiceCredential(clusterID: service.clusterID, token: token,
+                                            previousToken: previousServiceTokens[service.clusterID].flatMap { $0.expires > .now && $0.token != token ? $0.token : nil },
+                                            nodeTokens: Self.liveNodeTokens(pairedNodes)[service.clusterID] ?? [],
                                             primaryPreference: configuration.primaryPreference(for: service.id),
                                             coordinationPolicy: configuration.coordinationPolicy(for: service.id),
                                             leaseSeconds: Double(service.leaseSeconds))
@@ -1038,6 +1110,13 @@ final class WitnessAppModel: ObservableObject {
         participantObservations.removeAll { $0.clusterID == service.clusterID }
         operationalObservations.removeAll { $0.clusterID == service.clusterID }
         await pairing.revoke(clusterID: service.clusterID)
+        // A service re-added under the same cluster ID must not inherit old servers.
+        if pairedNodes[service.clusterID] != nil {
+            var remaining = pairedNodes
+            remaining[service.clusterID] = nil
+            pairedNodes = remaining
+            try? Self.saveNodeTokens(remaining)
+        }
         if !preview, let access = try? accessCredentials() {
             try await catalogue.configureServices(access)
             try await participants.configureServices(access)
@@ -1423,6 +1502,7 @@ final class WitnessAppModel: ObservableObject {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
+                await self?.pruneExpiredCredentials()
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             }
         }
@@ -1842,10 +1922,197 @@ final class WitnessAppModel: ObservableObject {
         guard let service = service(for: request.clusterID), let token = serviceCredentials[request.clusterID] else {
             throw RuruBackup.Failure("This service no longer exists or its credential is unavailable.")
         }
-        try await pairing.approve(request.id, with: .init(clusterID: service.clusterID, token: token,
-                                                         leaseSeconds: Double(service.leaseSeconds)))
+        // Each server gets its own token, bound to the node ID it paired with, so
+        // it can be revoked alone. Persist and admit it before releasing it.
+        var nodes = pairedNodes
+        var forService = (nodes[service.clusterID] ?? []).filter { $0.nodeID != request.nodeID }
+        guard forService.count < WitnessServiceCredential.maxNodeTokens else {
+            throw RuruBackup.Failure("This service already has \(WitnessServiceCredential.maxNodeTokens) paired servers. Revoke one first.")
+        }
+        let nodeToken = try WitnessKeychain.randomToken()
+        forService.append(WitnessNodeToken(nodeID: request.nodeID, token: nodeToken, name: request.nodeName))
+        nodes[service.clusterID] = forService
+        try await applyNodeTokens(nodes)
+        do {
+            try await pairing.approve(request.id, with: .init(clusterID: service.clusterID, token: nodeToken,
+                                                             leaseSeconds: Double(service.leaseSeconds)))
+        } catch {
+            var undone = nodes
+            undone[service.clusterID] = (pairedNodes[service.clusterID] ?? []).filter { $0.token != nodeToken }
+            try? await applyNodeTokens(undone)
+            throw error
+        }
         pairedServers[request.clusterID, default: []].append(request.nodeName ?? request.nodeID)
         pairingRequests = await pairing.pendingRequests()
+    }
+
+    // MARK: Credential rotation
+
+    static let nodeRotationGraceSeconds: Double = 900
+    static let minimumNodeRotationInterval: Double = 60
+    static let serviceRotationGraceOptions: [(label: String, seconds: Double)] =
+        [("15 minutes", 900), ("1 hour", 3_600), ("24 hours", 86_400)]
+
+    /// Replaces a service's shared token. The old one keeps working for `graceSeconds` and, during
+    /// that time, its holder can call `/v1/credential/rotate` to collect the new one. Nothing else
+    /// about the service, its lease or its paired servers changes.
+    func rotateServiceKey(clusterID: String, graceSeconds: Double) async throws {
+        guard !busy, !internetBusy, !savingConfiguration, !shuttingDown, !rotationInFlight,
+              Self.serviceRotationGraceOptions.contains(where: { $0.seconds == graceSeconds }),
+              service(for: clusterID) != nil, let old = serviceCredentials[clusterID], let service = service(for: clusterID) else {
+            throw WitnessStorage.ConfigurationError.invalid
+        }
+        rotationInFlight = true
+        defer { rotationInFlight = false }
+        let fresh = try WitnessKeychain.randomToken()
+        let previous = PreviousServiceToken(token: old, expires: Date().addingTimeInterval(graceSeconds))
+        var allPrevious = previousServiceTokens
+        allPrevious[clusterID] = previous
+        var tokens = serviceCredentials
+        tokens[clusterID] = fresh
+        let priorPrevious = previousServiceTokens
+        if !preview {
+            // The old token is recorded before it is replaced, so a crash never loses it.
+            try Self.savePreviousServiceTokens(allPrevious)
+            do {
+                try WitnessKeychain.save(fresh, account: service.keychainAccount)
+                previousServiceTokens = allPrevious
+                serviceCredentials = tokens
+                if let server { try await server.configureServices(accessCredentials()) }
+            } catch {
+                try? WitnessKeychain.save(old, account: service.keychainAccount)
+                try? Self.savePreviousServiceTokens(priorPrevious)
+                serviceCredentials[clusterID] = old
+                previousServiceTokens = priorPrevious
+                if let server, let access = try? accessCredentials() { try? await server.configureServices(access) }
+                throw error
+            }
+        } else {
+            previousServiceTokens = allPrevious
+            serviceCredentials = tokens
+        }
+    }
+
+    /// Ends a service-key grace period early. Holders of the old token must re-pair or be given the new one.
+    func endServiceKeyGrace(clusterID: String) async {
+        guard previousServiceTokens[clusterID] != nil else { return }
+        var remaining = previousServiceTokens
+        remaining[clusterID] = nil
+        previousServiceTokens = remaining
+        if !preview { try? Self.savePreviousServiceTokens(remaining) }
+        if !preview, let server, let access = try? accessCredentials() { try? await server.configureServices(access) }
+    }
+
+    /// Serves `POST /v1/credential/rotate` after the router authenticated the caller.
+    func rotateCredential(clusterID: String, nodeID: String?, usedPrevious: Bool) async -> WitnessRotationOutcome {
+        guard !shuttingDown, !preview, service(for: clusterID) != nil else { return .failed }
+        guard let nodeID else {
+            // Shared token: only collect what an operator already rotated.
+            guard usedPrevious, let current = serviceCredentials[clusterID],
+                  let previous = previousServiceTokens[clusterID], previous.expires > .now else { return .notPending }
+            return .issued(token: current, previousValidSeconds: max(0, previous.expires.timeIntervalSinceNow))
+        }
+        guard let node = (pairedNodes[clusterID] ?? []).first(where: { $0.nodeID == nodeID }) else { return .failed }
+        if usedPrevious {
+            guard let expires = node.previousExpires, expires > .now else { return .failed }
+            return .issued(token: node.token, previousValidSeconds: max(0, expires.timeIntervalSinceNow))
+        }
+        let key = clusterID + "\u{0}" + nodeID
+        if let last = lastNodeRotation[key], Date().timeIntervalSince(last) < Self.minimumNodeRotationInterval { return .throttled }
+        guard !rotationInFlight else { return .throttled }
+        rotationInFlight = true
+        defer { rotationInFlight = false }
+        do {
+            let fresh = try WitnessKeychain.randomToken()
+            let expires = Date().addingTimeInterval(Self.nodeRotationGraceSeconds)
+            var nodes = pairedNodes
+            nodes[clusterID] = (nodes[clusterID] ?? []).map {
+                $0.nodeID == nodeID
+                    ? WitnessNodeToken(nodeID: nodeID, token: fresh, name: $0.name, previousToken: $0.token, previousExpires: expires)
+                    : $0
+            }
+            // Persisted and admitted before it is released, like every other grant.
+            try await applyNodeTokens(nodes)
+            lastNodeRotation[key] = Date()
+            return .issued(token: fresh, previousValidSeconds: Self.nodeRotationGraceSeconds)
+        } catch { return .failed }
+    }
+
+    /// Drops replaced credentials whose grace period ended.
+    func pruneExpiredCredentials() async {
+        let now = Date()
+        let expiredService = previousServiceTokens.contains { $0.value.expires <= now }
+        let expiredNode = pairedNodes.values.contains { $0.contains { ($0.previousExpires ?? .distantFuture) <= now && $0.previousToken != nil } }
+        guard !preview, expiredService || expiredNode, !rotationInFlight else { return }
+        rotationInFlight = true
+        defer { rotationInFlight = false }
+        if expiredService {
+            let kept = previousServiceTokens.filter { $0.value.expires > now }
+            previousServiceTokens = kept
+            try? Self.savePreviousServiceTokens(kept)
+        }
+        if expiredNode { try? await applyNodeTokens(Self.liveNodeTokens(pairedNodes, now: now)) }
+        else if let server, let access = try? accessCredentials() { try? await server.configureServices(access) }
+    }
+
+    private static func liveNodeTokens(_ nodes: [String: [WitnessNodeToken]], now: Date = .now) -> [String: [WitnessNodeToken]] {
+        nodes.mapValues { tokens in
+            tokens.map { node in
+                guard let previous = node.previousToken else { return node }
+                if let expires = node.previousExpires, expires > now, previous != node.token { return node }
+                return WitnessNodeToken(nodeID: node.nodeID, token: node.token, name: node.name)
+            }
+        }
+    }
+
+    private static func liveServiceTokens(_ previous: [String: PreviousServiceToken], current: [String: String]) -> [String: PreviousServiceToken] {
+        previous.filter { $0.value.expires > .now && current[$0.key] != nil && current[$0.key] != $0.value.token }
+    }
+
+    private static let previousServiceTokenAccount = "service-previous-tokens"
+    private static func loadPreviousServiceTokens() throws -> [String: PreviousServiceToken] {
+        guard let text = try WitnessKeychain.read(previousServiceTokenAccount) else { return [:] }
+        return try JSONDecoder().decode([String: PreviousServiceToken].self, from: Data(text.utf8))
+    }
+    private static func savePreviousServiceTokens(_ tokens: [String: PreviousServiceToken]) throws {
+        let data = try JSONEncoder().encode(tokens)
+        try WitnessKeychain.save(String(decoding: data, as: UTF8.self), account: previousServiceTokenAccount)
+    }
+
+    /// Stops one server's credential working immediately. Other servers, and the
+    /// service's shared token, are untouched.
+    func revokeNode(clusterID: String, nodeID: String) async throws {
+        var nodes = pairedNodes
+        nodes[clusterID] = (nodes[clusterID] ?? []).filter { $0.nodeID != nodeID }
+        if nodes[clusterID]?.isEmpty == true { nodes[clusterID] = nil }
+        try await applyNodeTokens(nodes)
+    }
+
+    private func applyNodeTokens(_ nodes: [String: [WitnessNodeToken]]) async throws {
+        let live = Set(configuration.guardedServices.map(\.clusterID))
+        let kept = nodes.filter { live.contains($0.key) }
+        let previous = pairedNodes
+        // Keychain first: a restart must never forget a credential already admitted.
+        try Self.saveNodeTokens(kept)
+        pairedNodes = kept
+        if let server {
+            do { try await server.configureServices(accessCredentials()) }
+            catch {
+                pairedNodes = previous
+                try? Self.saveNodeTokens(previous)
+                throw error
+            }
+        }
+    }
+
+    private static let nodeTokenAccount = "node-tokens"
+    private static func loadNodeTokens() throws -> [String: [WitnessNodeToken]] {
+        guard let text = try WitnessKeychain.read(nodeTokenAccount) else { return [:] }
+        return try JSONDecoder().decode([String: [WitnessNodeToken]].self, from: Data(text.utf8))
+    }
+    private static func saveNodeTokens(_ nodes: [String: [WitnessNodeToken]]) throws {
+        let data = try JSONEncoder().encode(nodes)
+        try WitnessKeychain.save(String(decoding: data, as: UTF8.self), account: nodeTokenAccount)
     }
 
     func rejectPairing(_ request: PairingDesk.Request) async {

@@ -375,6 +375,7 @@ struct ConnectionDetailsSheet: View {
                     }
                     Text("Paired servers share this service's bearer token. It grants access to the service's enabled capabilities; reported server IDs are not individually authenticated. Only pair servers you trust. Cloudflare credentials stay on this Mac.")
                         .font(.callout).foregroundStyle(.secondary)
+                    WitnessServiceKeyRotation(service: service, feedback: $feedback)
                     WitnessPairingPanel(service: service)
                     if let feedback { Label(feedback, systemImage: "checkmark.circle").font(.callout).foregroundStyle(.secondary) }
                 }.padding(.horizontal, 24).padding(.bottom, 24)
@@ -393,6 +394,53 @@ struct ConnectionDetailsSheet: View {
                 ConsoleEmptyState(symbol: "checkmark.shield", title: "No service selected", detail: "Add a service in Guarding to get its connection details.")
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }.padding(24).frame(width: 500).background(WitnessGlassBackground())
+        }
+    }
+}
+
+/// Replaces the service's shared token. Clients holding the old one can pull the new one during the grace period.
+private struct WitnessServiceKeyRotation: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    let service: GuardedService
+    @Binding var feedback: String?
+    @State private var grace = WitnessAppModel.serviceRotationGraceOptions[1].seconds
+    @State private var confirming = false
+    @State private var error: String?
+
+    private var previous: WitnessAppModel.PreviousServiceToken? { model.previousServiceTokens[service.clusterID] }
+
+    var body: some View {
+        ConsoleSection("Rotate Service Key") {
+            VStack(alignment: .leading, spacing: 10) {
+                if let previous, previous.expires > .now {
+                    ConsoleSettingRow(title: "Old key still accepted",
+                                      subtitle: "Until \(previous.expires.formatted(date: .omitted, time: .shortened)). Clients can collect the new key from Ruru while it lasts.") {
+                        Button("End Now") { Task { await model.endServiceKeyGrace(clusterID: service.clusterID) } }.buttonStyle(.bordered)
+                    }.consoleRowGroup()
+                }
+                ConsoleSettingRow(title: "New bearer token", subtitle: "Compatible clients, such as SwiftBot, pull the new token automatically while the old one is accepted. Otherwise copy it into the client.") {
+                    Picker("Keep old key for", selection: $grace) {
+                        ForEach(WitnessAppModel.serviceRotationGraceOptions, id: \.seconds) { Text($0.label).tag($0.seconds) }
+                    }.labelsHidden().fixedSize()
+                    Button("Rotate…", systemImage: "arrow.triangle.2.circlepath") { confirming = true }
+                        .buttonStyle(.bordered).disabled(model.busy || model.internetBusy || !model.hasCredential(for: service.clusterID))
+                }.consoleRowGroup()
+                if let error { ConsoleIssue(title: "Key could not be rotated", detail: error) }
+            }
+        }
+        .alert("Rotate this service's key?", isPresented: $confirming) {
+            Button("Rotate Key", role: .destructive) {
+                Task {
+                    do {
+                        try await model.rotateServiceKey(clusterID: service.clusterID, graceSeconds: grace)
+                        error = nil
+                        feedback = "Service key rotated. The old key works until the period ends."
+                    } catch { self.error = error.localizedDescription }
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("The current token stops working after the chosen period. Servers that cannot collect the new token by then must be given it by hand. Ownership, terms and paired servers are unchanged.")
         }
     }
 }

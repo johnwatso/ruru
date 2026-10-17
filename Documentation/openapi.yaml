@@ -101,6 +101,38 @@ paths:
           description: Service description
           content: { application/json: { schema: { $ref: "#/components/schemas/ServiceDescription" } } }
         "401": { $ref: "#/components/responses/Error" }
+  /v1/credential/rotate:
+    post:
+      summary: Rotate the caller's credential, or collect a credential an operator already rotated
+      description: >
+        A paired server's own node token is replaced by a newly issued one (at most once a minute); the token it
+        presented stays valid for `previousValidSeconds`, so a lost response can be retried and returns the same
+        new token. A holder of the shared service token can only collect the token after an operator rotated the
+        service key in Ruru; otherwise 409 `no_rotation_pending`. Persist the new token before using it.
+        Advertised by the `credentialRotation` field of `GET /v1/service`; `credentialRotationPending` is true
+        when the presented token has been replaced.
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, required: [clusterID], properties: { clusterID: { type: string } } }
+      responses:
+        "200":
+          description: Credential
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, clusterID, token, previousValidSeconds]
+                properties:
+                  version: { type: integer, const: 1 }
+                  clusterID: { type: string }
+                  token: { type: string }
+                  previousValidSeconds: { type: number }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /v1/service/policy:
     post:
       summary: Read the service's Preferred Primary (intent only, never permission)
@@ -217,6 +249,8 @@ components:
         clusterID: { type: string }
         leaseSeconds: { type: number, minimum: 10, maximum: 300 }
         recoverySeconds: { type: number, description: "Seconds until grants resume after a restart" }
+        credentialRotation: { type: boolean, description: "True when POST /v1/credential/rotate is available" }
+        credentialRotationPending: { type: boolean, description: "True when the presented token was replaced; call rotate to collect the current one" }
         capabilities:
           type: object
           additionalProperties:

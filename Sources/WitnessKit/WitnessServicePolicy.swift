@@ -78,9 +78,16 @@ public struct WitnessServiceDescription: Codable, Equatable, Sendable {
     public let recoverySeconds: Double
     public let capabilities: [String: Capability]
     public let lease: Lease?
+    /// True when this Ruru supports `POST /v1/credential/rotate`.
+    public let credentialRotation: Bool?
+    /// True when the presented token has been replaced: call rotate to collect the current one.
+    public let credentialRotationPending: Bool?
 
     init(service: WitnessServiceCredential, lease: LeaseStatus?, recoverySeconds: Double,
-         authorityVersion: String?, authorityBuild: String?) {
+         authorityVersion: String?, authorityBuild: String?,
+         rotationAvailable: Bool = false, rotationPending: Bool = false) {
+        credentialRotation = rotationAvailable
+        credentialRotationPending = rotationAvailable && rotationPending
         version = 1
         authority = "Ruru"
         self.authorityVersion = authorityVersion

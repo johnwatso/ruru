@@ -25,6 +25,7 @@ enum RuruWebAssets {
         <details id=firstTime>
           <summary>First time here?</summary>
           <p class=muted>Enter the one-time code shown in Ruru’s native console, or the code your owner shared with you.</p>
+          <input id=email type=email autocomplete=email placeholder="Your email (first owner only)" aria-label="Your email">
           <input id=code autocomplete=one-time-code placeholder="Enrolment code" aria-label="Enrolment code">
           <button class=block id=enrol>Register Passkey</button>
         </details>
@@ -308,9 +309,9 @@ enum RuruWebAssets {
 
     const friendly = {
       passkey_required: 'Unlock with your passkey first.', passkey_not_enrolled: 'No passkey is registered for this account.',
-      enrollment_code_required: 'That enrolment code is missing, wrong or expired.', cloudflare_access_required: 'Open Ruru through Cloudflare Access.',
+      enrollment_code_required: 'That enrolment code is missing, wrong or expired.', email_required: 'Enter your email address to register the first passkey.', too_many_attempts: 'Too many attempts. Wait a minute and try again.', operator_already_enrolled: 'This operator already has a passkey.',
       tunnel_required: 'Ruru only accepts this page through its tunnel.', invalid_monitor: 'That monitor could not be saved. Check the details.',
-      monitor_target_not_permitted: 'The web console cannot monitor this Mac or link-local addresses.',
+      monitor_target_not_permitted: 'Use a numeric, non-local IP address for a web-console monitor.',
       owner_required: 'Only the owner can do that.', web_ui_unavailable: 'The web console is not enabled yet.',
       passkey_authentication_failed: 'Passkey sign-in failed.', passkey_registration_failed: 'Passkey registration failed.',
       invalid_operator_invitation: 'That email cannot be invited. It may already have access.', too_many_operators: 'The operator limit has been reached.',
@@ -370,7 +371,7 @@ enum RuruWebAssets {
     async function authenticate(register) {
       const kind = register ? 'registration' : 'authentication';
       const options = adapt(register
-        ? await api('/api/web/passkeys/registration/options', { method: 'POST', body: { code: $('#code').value.trim() } })
+        ? await api('/api/web/passkeys/registration/options', { method: 'POST', body: { code: $('#code').value.trim(), email: $('#email').value.trim() } })
         : await api('/api/web/passkeys/authentication/options'));
       const credential = register ? await navigator.credentials.create({ publicKey: options }) : await navigator.credentials.get({ publicKey: options });
       const done = await api(`/api/web/passkeys/${kind}/finish`, { method: 'POST', body: credentialJSON(credential) });
@@ -672,7 +673,7 @@ enum RuruWebAssets {
         }
         return item;
       }));
-      return [el('header', { className: 'page-top' }, el('div', {}, el('h1', { textContent: 'Operators' }), el('p', { className: 'muted', textContent: 'People who can open this console. Each needs a Cloudflare Access policy match and their own passkey.' })), invite),
+      return [el('header', { className: 'page-top' }, el('div', {}, el('h1', { textContent: 'Operators' }), el('p', { className: 'muted', textContent: 'People who can open this console. Each signs in with their own passkey.' })), invite),
         el('div', { className: 'page-body' }, el('section', { className: 'card section' }, el('header', {}, el('h2', { textContent: 'Operators' })), list))];
     }
 
@@ -759,7 +760,7 @@ enum RuruWebAssets {
     function openAdd() {
       const name = el('input', { required: true, maxLength: 60, placeholder: 'Home router' });
       const kind = el('select', {}, ...[['HTTP', 'Website (HTTP/S)'], ['TCP', 'TCP port'], ['DNS', 'DNS server']].map(([v, t]) => el('option', { value: v, textContent: t })));
-      const url = el('input', { placeholder: 'https://status.example.com', inputMode: 'url' });
+      const url = el('input', { placeholder: 'https://203.0.113.10/health', inputMode: 'url' });
       const host = el('input', { placeholder: '192.168.1.1' });
       const port = el('input', { type: 'number', min: 1, max: 65535, value: 443 });
       const dnsName = el('input', { value: 'example.com' });

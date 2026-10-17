@@ -103,7 +103,9 @@ private struct WitnessGuardedServiceDetails: View {
     @State private var preferenceError: String?
     private var preference: WitnessPrimaryPreference { model.configuration.primaryPreference(for: service.id) }
     private var lease: LeaseStatus? { model.lease(for: service.clusterID) }
-    private var nodes: [String] { model.knownNodes(for: service.clusterID) }
+    private var grouped: (current: [String], earlier: [String]) { model.groupedKnownNodes(for: service.clusterID) }
+    private var nodes: [String] { grouped.current }
+    @State private var showingEarlier = false
     private var events: [WitnessEvent] { model.events(for: service.clusterID) }
 
     private func presenceLabel(_ role: ParticipantRole) -> String {
@@ -210,6 +212,11 @@ private struct WitnessGuardedServiceDetails: View {
                 WitnessPairingRequestList(service: service)
             })
         }
+        if !(model.pairedNodes[service.clusterID] ?? []).isEmpty {
+            ConsoleSection(title: "Paired Servers", accessory: { Text("Each has its own token") }, content: {
+                WitnessPairedServerList(service: service)
+            })
+        }
         ConsoleSection(title: "Ownership", accessory: {
             WitnessStatusBadge(text: model.guardStatus(for: service.clusterID), health: model.guardHealth(for: service.clusterID))
         }, content: {
@@ -234,7 +241,7 @@ private struct WitnessGuardedServiceDetails: View {
                 }
             }
         })
-        ConsoleSection(title: "Known Servers", accessory: { Text("\(nodes.count) observed") }, content: {
+        ConsoleSection(title: "Known Servers", accessory: { Text("\(nodes.count) \(nodes.count == 1 ? "server" : "servers")") }, content: {
             if nodes.isEmpty {
                 ConsoleEmptyState(symbol: "server.rack", title: "No servers observed yet", detail: "Compatible servers report their presence while active or in standby. Earlier clients appear after holding ownership.")
             } else {
@@ -287,7 +294,50 @@ private struct WitnessGuardedServiceDetails: View {
                     }
                 }.consoleRowGroup()
             }
+            if !grouped.earlier.isEmpty {
+                DisclosureGroup(isExpanded: $showingEarlier) {
+                    VStack(spacing: 0) {
+                        ForEach(grouped.earlier, id: \.self) { node in
+                            Button { selectedNode = node } label: {
+                                HStack {
+                                    Text(model.nodeDisplayName(for: node, reportedName: model.reportedName(for: node, clusterID: service.clusterID), clusterID: service.clusterID))
+                                        .font(.callout)
+                                    Text(node).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                                    Spacer()
+                                }.padding(.vertical, 6).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                        HStack {
+                            Button("Forget Earlier Identities") {
+                                Task {
+                                    do { try await model.forgetEarlierIdentities(for: service.clusterID); preferenceError = nil }
+                                    catch { preferenceError = error.localizedDescription }
+                                }
+                            }.disabled(model.busy || model.internetBusy)
+                            Spacer()
+                        }.padding(.top, 6)
+                        Text("These IDs appear only in ownership history. A server with the same name is reporting under a newer ID, usually after a reinstall or reset. Forgetting only hides them here; ownership history and terms are kept.")
+                            .font(.caption).foregroundStyle(.secondary).padding(.top, 4)
+                    }.padding(.top, 6)
+                } label: {
+                    Text("Earlier identities (\(grouped.earlier.count))").font(.callout).foregroundStyle(.secondary)
+                }
+            }
             preferredPrimaryRow
+            if let replacement = model.liveReplacementForPreferredPrimary(for: service.clusterID) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(.orange).accessibilityHidden(true)
+                    Text("The preferred primary is not reporting, but a server with the same name is under a newer ID.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button("Use Current") {
+                        Task {
+                            do { try await model.setPreferredPrimary(replacement, for: service.id); preferenceError = nil }
+                            catch { preferenceError = error.localizedDescription }
+                        }
+                    }.disabled(model.busy || model.internetBusy)
+                }.padding(.horizontal, 4)
+            }
             if let preferenceError { ConsoleIssue(title: "Preference could not be saved", detail: preferenceError) }
             Text("Recent contact comes from authenticated server reports. Standby and active roles are reported by each server; current ownership comes from Ruru’s lease. Contact becomes stale after 45 seconds and does not prove failover readiness.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -702,6 +752,46 @@ struct WitnessPairingCodeView: View {
         .consoleRowGroup()
         .onAppear { anchor = (code.expiresIn, Date()) }
         .onChange(of: code.code) { anchor = (code.expiresIn, Date()) }
+    }
+}
+
+/// Servers paired with their own credential. Revoking one cuts off only that
+/// server; it must pair again to return.
+struct WitnessPairedServerList: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    let service: GuardedService
+    @State private var error: String?
+    @State private var revoking: WitnessNodeToken?
+
+    var body: some View {
+        let nodes = model.pairedNodes[service.clusterID] ?? []
+        VStack(spacing: 0) {
+            ForEach(nodes, id: \.nodeID) { node in
+                HStack(spacing: 12) {
+                    ConsoleIconTile(symbol: "desktopcomputer", size: 34)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(node.name ?? "Unnamed server").font(.callout.weight(.semibold))
+                        Text(node.nodeID).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Button("Revoke…", role: .destructive) { revoking = node }.buttonStyle(.bordered)
+                }.padding(12)
+                if node.nodeID != nodes.last?.nodeID { Divider().padding(.leading, 58) }
+            }
+        }.consoleRowGroup()
+        if let error { ConsoleIssue(title: "Server could not be revoked", detail: error) }
+        Color.clear.frame(height: 0).alert("Revoke this server?", isPresented: Binding(get: { revoking != nil }, set: { if !$0 { revoking = nil } }),
+                                           presenting: revoking) { node in
+            Button("Revoke", role: .destructive) {
+                Task {
+                    do { try await model.revokeNode(clusterID: service.clusterID, nodeID: node.nodeID); error = nil }
+                    catch { self.error = error.localizedDescription }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { node in
+            Text("\(node.name ?? node.nodeID) will stop working immediately and must be paired again.")
+        }
     }
 }
 

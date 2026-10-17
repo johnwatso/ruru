@@ -7,6 +7,7 @@ public actor WitnessHTTPServer {
     private var configuringServices = false
     private var router: WitnessRouter
     private let webHandler: WitnessWebHandler?
+    private let rotator: WitnessCredentialRotator?
     public nonisolated let catalogue: CoordinationCatalogue
     public nonisolated let pairing: PairingDesk
     public nonisolated let participants: ParticipantPresence
@@ -31,6 +32,7 @@ public actor WitnessHTTPServer {
 
     public init(store: LeaseStore, clusterID: String, token: String, authorityVersion: String? = nil,
                 authorityBuild: String? = nil, webHandler: WitnessWebHandler? = nil) throws {
+        rotator = nil
         router = try WitnessRouter(store: store, clusterID: clusterID, token: token,
                                    authorityVersion: authorityVersion, authorityBuild: authorityBuild)
         catalogue = router.catalogue
@@ -45,10 +47,12 @@ public actor WitnessHTTPServer {
     public init(store: LeaseStore, services: [WitnessServiceCredential], catalogue: CoordinationCatalogue? = nil,
                 pairing: PairingDesk? = nil, participants: ParticipantPresence? = nil,
                 operationalStatus: OperationalStatusRegistry? = nil, authorityVersion: String? = nil,
-                authorityBuild: String? = nil, webHandler: WitnessWebHandler? = nil) throws {
+                authorityBuild: String? = nil, webHandler: WitnessWebHandler? = nil,
+                credentialRotator: WitnessCredentialRotator? = nil) throws {
+        rotator = credentialRotator
         router = try WitnessRouter(store: store, services: services, catalogue: catalogue, pairing: pairing, participants: participants,
                                   operationalStatus: operationalStatus, authorityVersion: authorityVersion,
-                                  authorityBuild: authorityBuild)
+                                  authorityBuild: authorityBuild, rotator: credentialRotator)
         self.catalogue = router.catalogue
         self.pairing = router.pairing
         self.participants = router.participants
@@ -63,7 +67,7 @@ public actor WitnessHTTPServer {
         guard !configuringServices else { throw WitnessError.invalidConfiguration }
         let updated = try WitnessRouter(store: router.store, services: services, catalogue: catalogue, pairing: pairing, participants: participants,
                                         operationalStatus: operationalStatus, authorityVersion: authorityVersion,
-                                        authorityBuild: authorityBuild)
+                                        authorityBuild: authorityBuild, rotator: rotator)
         configuringServices = true
         defer { configuringServices = false }
         try await catalogue.configureServices(services)

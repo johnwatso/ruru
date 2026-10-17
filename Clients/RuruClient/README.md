@@ -77,6 +77,17 @@ if (try await client.describe()).supports("operationalStatus") {
 }
 ```
 
+## Credential rotation
+
+`describe()` reports `credentialRotation` and `credentialRotationPending`.
+`collectPendingCredential()` returns a new token only when Ruru reports the one
+you used was replaced; `rotateCredential()` asks directly (a paired server
+receives a freshly issued token, a shared-token holder can only collect what an
+operator rotated). Save the returned token before using it, then build a new
+client. The old token stays valid for the grace period in
+`previousValidSeconds`, so a lost response can be retried. See
+`Documentation/INTEGRATIONS.md`.
+
 ## Compatibility
 
 The package follows semantic versioning. Patch releases preserve public API and

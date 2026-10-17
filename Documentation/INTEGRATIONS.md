@@ -70,6 +70,36 @@ pairing (429) for a minute. Nothing is released without approval, codes and
 requests live only in memory (a restart cancels them), and removing a service
 cancels its codes and requests. Ruru notifies the operator of each request.
 
+## Rotate a credential (pull)
+
+`GET /v1/service` reports `credentialRotation: true` when Ruru supports
+`POST /v1/credential/rotate` (body `{"clusterID"}`), and
+`credentialRotationPending: true` when the token you presented has been
+replaced. Two cases:
+
+- **Paired server (its own node token).** Calling rotate issues a new token for
+  that node only; at most one per minute. The old token keeps working for 15
+  minutes, so a lost response can be retried and returns the same new token.
+- **Shared service token.** An operator rotates the service key in Ruru's
+  Connection Details and picks how long the old key stays valid (15 minutes,
+  1 hour or 24 hours). During that time the old token still works and calling
+  rotate returns the new one. Without a pending rotation it returns 409
+  `no_rotation_pending`; a caller can never mint a token on its own.
+
+Save the new token to Keychain **before** using it. Ruru never pushes a token;
+the client pulls it. Ending the grace early, or letting it lapse, makes the old
+token return 401, and a server that missed the window must be paired again or
+given the new token by hand. Ownership, terms and history are unaffected.
+Restarting Ruru keeps unexpired grace periods.
+
+```swift
+let client = RuruLeaseClient(configuration: configuration)
+if let fresh = try await client.collectPendingCredential() {
+    try keychain.save(fresh.token)           // persist first
+    configuration.token = fresh.token        // then switch clients
+}
+```
+
 ## Use RuruClient (Swift)
 
 [`RuruClient`](../Clients/RuruClient) is the supported small Swift package

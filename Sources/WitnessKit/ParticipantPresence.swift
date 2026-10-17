@@ -118,9 +118,10 @@ public actor ParticipantPresence {
         guard request.method == "POST", request.path == "/v1/participants/report" else {
             return .error("not_found", status: 404)
         }
-        guard let cluster = authorization.cluster(for: request.headers["authorization"]) else {
+        guard let identity = authorization.identity(for: request.headers["authorization"]) else {
             return .error("unauthorized", status: 401)
         }
+        let cluster = identity.clusterID
         guard !request.body.isEmpty, request.body.count <= HTTPParser.maxBodyBytes,
               let report = try? JSONDecoder().decode(ParticipantReport.self, from: request.body),
               WitnessPrimaryPreference.validNodeID(report.nodeID),
@@ -134,6 +135,7 @@ public actor ParticipantPresence {
             return .error("invalid_request", status: 400)
         }
         guard report.clusterID == cluster else { return .error("forbidden_cluster", status: 403) }
+        guard identity.permits(nodeID: report.nodeID) else { return .error("forbidden_node", status: 403) }
         guard report.version == 1 else { return .error("unsupported_version", status: 409) }
         let now = clock()
         prune(at: now)

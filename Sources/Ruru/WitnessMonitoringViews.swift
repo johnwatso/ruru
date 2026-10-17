@@ -367,7 +367,7 @@ struct WitnessMonitorTargetSheet: View {
                       url: url.trimmingCharacters(in: .whitespacesAndNewlines),
                       dnsQueryName: dnsQueryName.trimmingCharacters(in: .whitespacesAndNewlines),
                       intervalSeconds: interval, timeoutSeconds: timeout, failureThreshold: threshold, enabled: enabled,
-                      needsAttention: needsAttention)
+                      needsAttention: needsAttention, requiresNumericHost: existing?.requiresNumericHost ?? false)
     }
 
     var body: some View {
