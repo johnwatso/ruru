@@ -12,11 +12,37 @@ extension MonitorTarget {
     }
 }
 
+extension MonitorStatusDocument.State {
+    var title: String {
+        switch self {
+        case .ready: "Ready"
+        case .synchronizing: "Synchronising"
+        case .outdated: "Outdated"
+        case .degraded: "Degraded"
+        case .unknown: "Unknown"
+        }
+    }
+    var health: WitnessHealth {
+        switch self {
+        case .ready: .healthy
+        case .synchronizing, .unknown: .inactive
+        case .outdated, .degraded: .warning
+        }
+    }
+}
+
 extension WitnessAppModel {
+    /// An enhanced target's current reported state, when its latest check read one.
+    func monitorReportedState(_ target: MonitorTarget) -> MonitorStatusDocument.State? {
+        guard target.enhancedStatus, let state = monitorStates[target.id], state.statusDocumentIsCurrent else { return nil }
+        return state.statusDocument?.state
+    }
+
     func monitorHealth(_ target: MonitorTarget) -> WitnessHealth {
         guard target.enabled else { return .inactive }
         switch monitorStates[target.id]?.status ?? .unknown {
-        case .up: return .healthy
+        // A reported problem is a warning only; the app still answers, so it is not down.
+        case .up: return monitorReportedState(target).map { $0 == .outdated || $0 == .degraded ? .warning : .healthy } ?? .healthy
         case .down: return .error
         case .unknown: return .inactive
         }
@@ -24,7 +50,9 @@ extension WitnessAppModel {
     func monitorStatusText(_ target: MonitorTarget) -> String {
         guard target.enabled else { return "Paused" }
         switch monitorStates[target.id]?.status ?? .unknown {
-        case .up: return "Up"
+        case .up:
+            if let reported = monitorReportedState(target), reported == .outdated || reported == .degraded { return reported.title }
+            return "Up"
         case .down: return "Down"
         case .unknown: return "Checking…"
         }
@@ -127,6 +155,9 @@ private struct WitnessMonitorRow: View {
 
     private func subtitle(_ state: MonitorState?) -> String {
         var parts = [target.kind.rawValue, target.address]
+        if target.enhancedStatus, let app = state?.statusDocument?.app {
+            parts = [[app.name, app.version].compactMap { $0 }.joined(separator: " "), target.address]
+        }
         if let last = state?.last {
             parts.append(last.ok ? (last.latencyMilliseconds.map { "\($0) ms" } ?? last.detail) : last.detail)
         }
@@ -184,6 +215,7 @@ private struct WitnessMonitorDetailSheet: View {
                 fact("Checks", "Every \(Self.duration(target.intervalSeconds)), \(target.timeoutSeconds) s timeout")
                 fact("Reported down after", "\(target.failureThreshold) failed \(target.failureThreshold == 1 ? "check" : "checks") in a row")
             }
+            if target.enhancedStatus { WitnessMonitorAppStatusSection(target: target, state: state) }
             VStack(alignment: .leading, spacing: 8) {
                 Text("Recent checks").font(.headline)
                 WitnessMonitorHistoryBar(results: state?.history ?? [], count: 60).frame(height: 28)
@@ -338,6 +370,8 @@ struct WitnessMonitorTargetSheet: View {
     @State private var threshold: Int
     @State private var enabled: Bool
     @State private var needsAttention: Bool
+    @State private var enhancedStatus: Bool
+    @State private var statusCheck: StatusCheck = .idle
     @State private var saving = false
     @State private var error: String?
 
@@ -358,6 +392,11 @@ struct WitnessMonitorTargetSheet: View {
         _threshold = State(initialValue: target?.failureThreshold ?? MonitorTarget.defaultThreshold)
         _enabled = State(initialValue: target?.enabled ?? true)
         _needsAttention = State(initialValue: target?.needsAttention ?? false)
+        _enhancedStatus = State(initialValue: target?.enhancedStatus ?? false)
+    }
+
+    private enum StatusCheck: Equatable {
+        case idle, checking, found(String), notFound(String)
     }
 
     private var draft: MonitorTarget {
@@ -367,7 +406,8 @@ struct WitnessMonitorTargetSheet: View {
                       url: url.trimmingCharacters(in: .whitespacesAndNewlines),
                       dnsQueryName: dnsQueryName.trimmingCharacters(in: .whitespacesAndNewlines),
                       intervalSeconds: interval, timeoutSeconds: timeout, failureThreshold: threshold, enabled: enabled,
-                      needsAttention: needsAttention, requiresNumericHost: existing?.requiresNumericHost ?? false)
+                      needsAttention: needsAttention, requiresNumericHost: existing?.requiresNumericHost ?? false,
+                      enhancedStatus: kind == .http && enhancedStatus)
     }
 
     var body: some View {
@@ -394,6 +434,24 @@ struct WitnessMonitorTargetSheet: View {
                     LabeledContent("Address") { TextField("Address", text: $url, prompt: Text("https://example.com/health")).labelsHidden() }
                     Text("Counts as up when the server answers with a status below 400. Redirects are not followed.")
                         .font(.callout).foregroundStyle(.secondary)
+                    Toggle("Read app status", isOn: $enhancedStatus)
+                    HStack(spacing: 10) {
+                        Text(existing == nil
+                             ? "Apps that support Ruru serve a status document at /.well-known/ruru. Ruru looks for one when you add this target and turns this on if it finds it."
+                             : "Apps that support Ruru serve a status document at /.well-known/ruru on this address. Ruru checks that instead and shows the app's version, components and metrics.")
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Button(statusCheck == .checking ? "Checking…" : "Check Address") { checkStatusDocument() }
+                            .disabled(statusCheck == .checking || MonitorTarget.validURL(draft.url) == nil)
+                    }
+                    switch statusCheck {
+                    case .found(let app):
+                        Label("Found \(app)", systemImage: "checkmark.circle.fill").font(.callout).foregroundStyle(.green)
+                    case .notFound(let reason):
+                        Label(reason, systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
+                    case .idle, .checking:
+                        EmptyView()
+                    }
                 case .dns:
                     LabeledContent("DNS server") { TextField("DNS server", text: $host, prompt: Text("IP address or name, e.g. 1.1.1.1")).labelsHidden() }
                     LabeledContent("Port") { TextField("Port", value: $port, format: .number.grouping(.never)).labelsHidden().frame(width: 100) }
@@ -448,6 +506,31 @@ struct WitnessMonitorTargetSheet: View {
             }
     }
 
+    /// One same-origin request for the status document, as a check with the
+    /// target's own restrictions would make. Nothing is saved.
+    private func checkStatusDocument() {
+        var probe = draft
+        probe.kind = .http
+        probe.enhancedStatus = true
+        statusCheck = .checking
+        Task {
+            let result = await MonitorProbe.run(probe)
+            switch result.status {
+            case .document(let document):
+                statusCheck = .found([document.app.name, document.app.version].compactMap { $0 }.joined(separator: " "))
+                enhancedStatus = true
+            case .issue(let issue):
+                statusCheck = .notFound(issue.title)
+            case nil where result.detail.hasPrefix("HTTP "):
+                // The server answered, but with an error instead of a status document
+                // (for example 401 when the app has not opened /.well-known/ruru).
+                statusCheck = .notFound("The address answered \(result.detail) for /.well-known/ruru, not a status document.")
+            case nil:
+                statusCheck = .notFound("Could not reach the address (\(result.detail)).")
+            }
+        }
+    }
+
     private var displayedIcon: NSImage? {
         guard let editedIcon else { return model.serviceIcons[targetID] }
         return editedIcon.flatMap { NSImage(data: $0) }
@@ -458,5 +541,118 @@ struct WitnessMonitorTargetSheet: View {
         iconError = nil
         // Dropping an app fills in its name unless one has been typed already.
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let suggested = pick.suggestedName { name = suggested }
+    }
+}
+
+/// The app's own report on an enhanced HTTP(S) monitor. All text is plain and
+/// was cleaned when the document was parsed.
+private struct WitnessMonitorAppStatusSection: View {
+    let target: MonitorTarget
+    let state: MonitorState?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("App status").font(.headline)
+                Spacer()
+                if let document = state?.statusDocument {
+                    WitnessStatusBadge(text: state?.statusDocumentIsCurrent == true ? document.state.title : "Stale",
+                                       health: state?.statusDocumentIsCurrent == true ? document.state.health : .inactive)
+                }
+            }
+            if let issue = state?.statusIssue {
+                Label(issue.title, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.orange)
+            }
+            if let document = state?.statusDocument {
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 18, verticalSpacing: 6) {
+                    row("App", [document.app.name, document.app.version, document.app.build.map { "(\($0))" }].compactMap { $0 }.joined(separator: " "))
+                    if let reason = document.reasonCode { row("Reason", reason) }
+                    if let uptime = document.uptimeSeconds { row("App uptime", Threshold.durationText(max(1, uptime))) }
+                    if let time = state?.statusDocumentTime {
+                        row("Reported", time.formatted(date: .omitted, time: .standard) + (state?.statusDocumentIsCurrent == true ? "" : " · last check failed"))
+                    }
+                }
+                if !document.components.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(document.components) { component in
+                            HStack(spacing: 10) {
+                                Image(systemName: component.state.health.symbol).foregroundStyle(component.state.health.tint)
+                                    .frame(width: 18).accessibilityHidden(true)
+                                Text(component.name).font(.callout.weight(.medium))
+                                if let reason = component.reasonCode { Text(reason).font(.caption).foregroundStyle(.secondary) }
+                                Spacer()
+                                Text(component.state.title).font(.callout).foregroundStyle(.secondary)
+                            }.padding(.vertical, 6).padding(.horizontal, 12)
+                            if component.id != document.components.last?.id { Divider().padding(.leading, 40) }
+                        }
+                    }.consoleRowGroup()
+                }
+                if !document.metrics.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                        ForEach(document.metrics) { metric in
+                            WitnessMonitorMetricTile(metric: metric, samples: state?.metricHistory[metric.id] ?? [])
+                        }
+                    }
+                }
+                if !document.links.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(document.links, id: \.url) { link in
+                            Link(destination: link.url) { Label(link.title, systemImage: "arrow.up.right.square") }
+                                .help(link.url.host ?? link.url.absoluteString)
+                        }
+                    }.font(.callout)
+                }
+            } else if state?.statusIssue == nil {
+                Text("Waiting for the first report from /.well-known/ruru.").font(.callout).foregroundStyle(.secondary)
+            }
+            Text("Reported by the app itself. Shown for information only; it never affects ownership or failover, and a degraded report does not count as down.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func row(_ title: String, _ value: String) -> some View {
+        GridRow {
+            Text(title).font(.callout).foregroundStyle(.secondary).gridColumnAlignment(.leading)
+            Text(value).font(.callout).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct WitnessMonitorMetricTile: View {
+    let metric: MonitorStatusDocument.Metric
+    let samples: [MonitorMetricSample]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(metric.name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(metric.value, format: .number.precision(.fractionLength(0...2))).font(.title3.weight(.semibold)).monospacedDigit()
+                if let unit = metric.unit, unit != "count" { Text(unit).font(.caption).foregroundStyle(.secondary) }
+            }
+            WitnessSparkline(values: samples.map(\.value)).frame(height: 18).accessibilityHidden(true)
+        }
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Values oldest → newest, scaled to the visible range.
+struct WitnessSparkline: View {
+    let values: [Double]
+
+    var body: some View {
+        GeometryReader { geometry in
+            if values.count > 1, let low = values.min(), let high = values.max() {
+                let span = high - low
+                Path { path in
+                    for (index, value) in values.enumerated() {
+                        let x = geometry.size.width * CGFloat(index) / CGFloat(values.count - 1)
+                        let y = span == 0 ? geometry.size.height / 2 : geometry.size.height * (1 - CGFloat((value - low) / span))
+                        index == 0 ? path.move(to: CGPoint(x: x, y: y)) : path.addLine(to: CGPoint(x: x, y: y))
+                    }
+                }.stroke(Color.accentColor, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+            }
+        }
     }
 }

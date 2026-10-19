@@ -39,13 +39,17 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
     /// numeric, non-local address. This is persisted so a later DNS change
     /// cannot turn a safe browser-created target into a probe of this Mac.
     public var requiresNumericHost: Bool
+    /// HTTP only: read the app's `/.well-known/ruru` status document on the
+    /// same origin instead of `url`. Opt-in; see ENHANCED_MONITORING.md.
+    public var enhancedStatus: Bool
 
     public init(id: String = UUID().uuidString.lowercased(), name: String, kind: Kind, host: String = "", port: Int = 0,
                 url: String = "", dnsQueryName: String = "example.com", intervalSeconds: Int = MonitorTarget.defaultInterval,
                 timeoutSeconds: Int = MonitorTarget.defaultTimeout,
                 failureThreshold: Int = MonitorTarget.defaultThreshold, enabled: Bool = true,
-                needsAttention: Bool = false, requiresNumericHost: Bool = false) {
+                needsAttention: Bool = false, requiresNumericHost: Bool = false, enhancedStatus: Bool = false) {
         self.needsAttention = needsAttention
+        self.enhancedStatus = enhancedStatus
         self.requiresNumericHost = requiresNumericHost
         self.id = id; self.name = name; self.kind = kind; self.host = host; self.port = port; self.url = url
         self.dnsQueryName = dnsQueryName
@@ -54,7 +58,7 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, kind, host, port, url, dnsQueryName, intervalSeconds, timeoutSeconds, failureThreshold, enabled, needsAttention, requiresNumericHost
+        case id, name, kind, host, port, url, dnsQueryName, intervalSeconds, timeoutSeconds, failureThreshold, enabled, needsAttention, requiresNumericHost, enhancedStatus
     }
 
     public init(from decoder: Decoder) throws {
@@ -72,13 +76,14 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
         enabled = try values.decode(Bool.self, forKey: .enabled)
         needsAttention = try values.decodeIfPresent(Bool.self, forKey: .needsAttention) ?? false
         requiresNumericHost = try values.decodeIfPresent(Bool.self, forKey: .requiresNumericHost) ?? false
+        enhancedStatus = try values.decodeIfPresent(Bool.self, forKey: .enhancedStatus) ?? false
     }
 
     /// What the target points at, for display.
     public var address: String {
         switch kind {
         case .tcp: host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
-        case .http: url
+        case .http: enhancedStatus ? (Self.validURL(url).flatMap(MonitorStatusDocument.documentURL)?.absoluteString ?? url) : url
         case .dns: "\(host.contains(":") ? "[\(host)]" : host):\(port) · \(dnsQueryName)"
         }
     }
@@ -87,7 +92,8 @@ public struct MonitorTarget: Codable, Equatable, Identifiable, Sendable {
         guard UUID(uuidString: id) != nil,
               WitnessNodeName.normalized(name) == name, name.utf8.count <= 128,
               Self.intervalRange.contains(intervalSeconds), Self.timeoutRange.contains(timeoutSeconds),
-              timeoutSeconds < intervalSeconds, Self.thresholdRange.contains(failureThreshold) else { return false }
+              timeoutSeconds < intervalSeconds, Self.thresholdRange.contains(failureThreshold),
+              !enhancedStatus || kind == .http else { return false }
         switch kind {
         case .tcp: return Self.validHost(host) && (1...65535).contains(port)
         case .http: return Self.validURL(url) != nil
@@ -210,10 +216,20 @@ public struct MonitorResult: Equatable, Sendable {
     /// this Mac had no network or the check ran late after sleep. It is neither a
     /// success nor a confirmed failure and never counts toward a failure threshold.
     public let inconclusive: Bool
+    /// Enhanced HTTP checks only: what the status document said, or why it
+    /// could not be used. `MonitorState` keeps the latest one, not every copy.
+    public let status: MonitorStatusOutcome?
 
-    public init(time: Date = Date(), ok: Bool, latencyMilliseconds: Int? = nil, detail: String, inconclusive: Bool = false) {
+    public init(time: Date = Date(), ok: Bool, latencyMilliseconds: Int? = nil, detail: String, inconclusive: Bool = false,
+                status: MonitorStatusOutcome? = nil) {
         self.time = time; self.ok = ok && !inconclusive; self.latencyMilliseconds = latencyMilliseconds
-        self.detail = detail; self.inconclusive = inconclusive
+        self.detail = detail; self.inconclusive = inconclusive; self.status = status
+    }
+
+    /// The same result without its status document, for retained history.
+    var withoutStatus: MonitorResult {
+        status == nil ? self : MonitorResult(time: time, ok: ok, latencyMilliseconds: latencyMilliseconds, detail: detail,
+                                             inconclusive: inconclusive)
     }
 
     /// A confirmed failure: the check ran with working local conditions and failed.
@@ -235,19 +251,36 @@ public struct MonitorChange: Equatable, Sendable {
 public struct MonitorState: Equatable, Sendable {
     public static let historyLimit = 120
     public static let changeLimit = 20
+    public static let statusEventLimit = 20
 
     public private(set) var status: MonitorStatus = .unknown
     public private(set) var consecutiveFailures = 0
     public private(set) var history: [MonitorResult] = []
     public private(set) var changes: [MonitorChange] = []
     public var last: MonitorResult? { history.last }
+    /// Enhanced monitors: the newest valid status document and when it was read.
+    /// It is kept, and shown as stale, when later checks fail.
+    public private(set) var statusDocument: MonitorStatusDocument?
+    public private(set) var statusDocumentTime: Date?
+    /// Why the most recent answered check had no usable document, if it had none.
+    public private(set) var statusIssue: MonitorStatusDocument.Issue?
+    /// Per-metric values for metrics in the newest document, oldest first.
+    public private(set) var metricHistory: [String: [MonitorMetricSample]] = [:]
+    public private(set) var statusEvents: [MonitorStatusEvent] = []
+
+    /// The document came from the latest conclusive check.
+    public var statusDocumentIsCurrent: Bool {
+        guard let statusDocumentTime, let latest = history.last(where: { !$0.inconclusive }) else { return false }
+        return latest.ok && latest.time == statusDocumentTime
+    }
 
     public init() {}
 
     /// Records a result and returns a status change when one occurred.
     @discardableResult
     public mutating func record(_ result: MonitorResult, failureThreshold: Int) -> MonitorChange? {
-        history.append(result)
+        if let status = result.status { recordStatus(status, at: result.time) }
+        history.append(result.withoutStatus)
         if history.count > Self.historyLimit { history.removeFirst(history.count - Self.historyLimit) }
         // An inconclusive check is kept for display but neither confirms nor
         // clears a failure, so a local outage cannot look like a remote one.
@@ -268,6 +301,43 @@ public struct MonitorState: Equatable, Sendable {
         return wasKnown || next == .down ? change : nil
     }
 
+    private mutating func recordStatus(_ outcome: MonitorStatusOutcome, at time: Date) {
+        switch outcome {
+        case .issue(let issue):
+            statusIssue = issue
+        case .document(let document):
+            statusIssue = nil
+            if let previous = statusDocument {
+                if previous.state != document.state {
+                    appendEvent(MonitorStatusEvent(time: time, kind: .stateChanged(from: previous.state, to: document.state)))
+                }
+                if let old = previous.app.version, let new = document.app.version, old != new {
+                    appendEvent(MonitorStatusEvent(time: time, kind: .versionChanged(from: old, to: new)))
+                }
+                if let old = previous.uptimeSeconds, let new = document.uptimeSeconds, new < old {
+                    appendEvent(MonitorStatusEvent(time: time, kind: .restarted))
+                }
+            }
+            statusDocument = document
+            statusDocumentTime = time
+            // Only metrics the app still reports are kept, so history stays bounded
+            // by the document's own metric limit.
+            var next: [String: [MonitorMetricSample]] = [:]
+            for metric in document.metrics {
+                var samples = metricHistory[metric.id] ?? []
+                samples.append(MonitorMetricSample(time: time, value: metric.value))
+                if samples.count > Self.historyLimit { samples.removeFirst(samples.count - Self.historyLimit) }
+                next[metric.id] = samples
+            }
+            metricHistory = next
+        }
+    }
+
+    private mutating func appendEvent(_ event: MonitorStatusEvent) {
+        statusEvents.append(event)
+        if statusEvents.count > Self.statusEventLimit { statusEvents.removeFirst(statusEvents.count - Self.statusEventLimit) }
+    }
+
     /// Share of conclusive recorded checks that succeeded, 0...1, or nil with none.
     public var uptime: Double? {
         let conclusive = history.filter { !$0.inconclusive }
@@ -286,7 +356,7 @@ public enum MonitorProbe {
         }
         return switch target.kind {
         case .tcp: await tcp(host: target.host, port: target.port, timeout: target.timeoutSeconds)
-        case .http: await http(url: target.url, timeout: target.timeoutSeconds)
+        case .http: await http(url: target.url, timeout: target.timeoutSeconds, statusDocument: target.enhancedStatus)
         case .dns: await dns(host: target.host, port: target.port, queryName: target.dnsQueryName, timeout: target.timeoutSeconds)
         }
     }
@@ -413,8 +483,14 @@ public enum MonitorProbe {
 
     // MARK: HTTP
 
-    static func http(url text: String, timeout: Int) async -> MonitorResult {
-        guard let url = MonitorTarget.validURL(text) else { return MonitorResult(ok: false, detail: "Invalid URL") }
+    /// With `statusDocument`, the single request goes to `/.well-known/ruru` on
+    /// the same origin and a 200 body (at most 16 KiB) is parsed. A missing or
+    /// invalid document never makes an answering server count as down.
+    static func http(url text: String, timeout: Int, statusDocument: Bool = false) async -> MonitorResult {
+        guard let configured = MonitorTarget.validURL(text) else { return MonitorResult(ok: false, detail: "Invalid URL") }
+        guard let url = statusDocument ? MonitorStatusDocument.documentURL(for: configured) : configured else {
+            return MonitorResult(ok: false, detail: "Invalid URL")
+        }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = TimeInterval(timeout)
         configuration.timeoutIntervalForResource = TimeInterval(timeout)
@@ -425,23 +501,56 @@ public enum MonitorProbe {
         defer { session.finishTasksAndInvalidate() }
         var request = URLRequest(url: url)
         request.setValue("Ruru-Monitor", forHTTPHeaderField: "User-Agent")
+        if statusDocument { request.setValue("application/json", forHTTPHeaderField: "Accept") }
         let started = ContinuousClock.now
         do {
-            // Only headers matter: cancel as soon as the response arrives.
             let (bytes, response) = try await session.bytes(for: request)
-            bytes.task.cancel()
-            guard let http = response as? HTTPURLResponse else { return MonitorResult(ok: false, detail: "Not an HTTP response") }
+            guard let http = response as? HTTPURLResponse else { bytes.task.cancel(); return MonitorResult(ok: false, detail: "Not an HTTP response") }
             let elapsed = started.duration(to: .now)
             let milliseconds = Int(elapsed.components.seconds * 1000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
             // A redirect proves the server is answering; it is not followed.
             let ok = (200..<400).contains(http.statusCode)
-            return MonitorResult(ok: ok, latencyMilliseconds: ok ? milliseconds : nil, detail: "HTTP \(http.statusCode)")
+            guard statusDocument, ok else {
+                // Only headers matter: cancel as soon as the response arrives.
+                bytes.task.cancel()
+                return MonitorResult(ok: ok, latencyMilliseconds: ok ? milliseconds : nil, detail: "HTTP \(http.statusCode)")
+            }
+            let outcome: MonitorStatusOutcome
+            if http.statusCode != 200 {
+                bytes.task.cancel()
+                outcome = .issue(.unavailable)
+            } else if http.expectedContentLength > Int64(MonitorStatusDocument.maxBytes) {
+                bytes.task.cancel()
+                outcome = .issue(.tooLarge)
+            } else {
+                outcome = await readStatusDocument(bytes, origin: configured)
+            }
+            return MonitorResult(ok: true, latencyMilliseconds: milliseconds, detail: "HTTP \(http.statusCode)", status: outcome)
         } catch let error as URLError {
             // Missing local connectivity says nothing about the target itself.
             let local: Set<URLError.Code> = [.notConnectedToInternet, .dataNotAllowed, .internationalRoamingOff]
             return MonitorResult(ok: false, detail: describe(error), inconclusive: local.contains(error.code))
         } catch {
             return MonitorResult(ok: false, detail: "Request failed")
+        }
+    }
+
+    /// Reads at most `MonitorStatusDocument.maxBytes`; the session's resource
+    /// timeout bounds a slow body.
+    private static func readStatusDocument(_ bytes: URLSession.AsyncBytes, origin: URL) async -> MonitorStatusOutcome {
+        var data = Data()
+        data.reserveCapacity(4096)
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count > MonitorStatusDocument.maxBytes { bytes.task.cancel(); return .issue(.tooLarge) }
+            }
+        } catch {
+            return .issue(.incomplete)
+        }
+        switch MonitorStatusDocument.parse(data, origin: origin) {
+        case .success(let document): return .document(document)
+        case .failure(let issue): return .issue(issue)
         }
     }
 

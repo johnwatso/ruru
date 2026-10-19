@@ -121,3 +121,67 @@ final class RuruClientTests: XCTestCase {
         XCTAssertEqual(body["state"] as? String, "degraded")
     }
 }
+
+final class RuruStatusDocumentTests: XCTestCase {
+    func testEncodesVersionAndOmitsEmptyLists() throws {
+        let data = try RuruStatusDocument(app: .init(id: "app.example", name: "Example"), state: .ready).encoded()
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["ruru"] as? Int, 1)
+        XCTAssertEqual(object["state"] as? String, "ready")
+        XCTAssertNil(object["components"])
+        XCTAssertNil(object["metrics"])
+        XCTAssertEqual(RuruStatusDocument.path, "/.well-known/ruru")
+    }
+
+    func testValidationCatchesBoundsBeforeServing() {
+        func rejects(_ document: RuruStatusDocument, _ expected: RuruStatusDocument.ValidationError, line: UInt = #line) {
+            XCTAssertThrowsError(try document.encoded(), line: line) { XCTAssertEqual($0 as? RuruStatusDocument.ValidationError, expected, line: line) }
+        }
+        let app = RuruStatusDocument.App(id: "app.example", name: "Example")
+        rejects(.init(app: .init(id: "Bad ID", name: "X"), state: .ready), .invalidCode("app.id"))
+        rejects(.init(app: .init(id: "a", name: " padded "), state: .ready), .invalidText("app.name"))
+        rejects(.init(app: app, state: .ready, metrics: [.init(id: "m", name: "M", value: .nan)]), .nonFiniteMetric("m"))
+        rejects(.init(app: app, state: .ready, metrics: [.init(id: "m", name: "M", value: 1), .init(id: "m", name: "M", value: 2)]),
+                .duplicateID("m"))
+        rejects(.init(app: app, state: .ready, components: (0...16).map { .init(id: "c\($0)", name: "C", state: .ready) }),
+                .tooMany("components"))
+        rejects(.init(app: app, state: .ready, uptimeSeconds: -1), .invalidUptime)
+    }
+}
+
+final class RuruStatusExposureTests: XCTestCase {
+    func testLocalNetworkRefusesProxiedAndPublicRequests() {
+        let local = RuruStatusExposure.localNetwork
+        XCTAssertTrue(local.allows(headers: ["Host": "10.0.0.5:8080"], remoteAddress: "10.0.0.9"))
+        XCTAssertTrue(local.allows(headers: [:], remoteAddress: "::1"))
+        XCTAssertTrue(local.allows(headers: [:], remoteAddress: "100.101.1.2"), "Tailscale")
+        XCTAssertFalse(local.allows(headers: ["CF-Connecting-IP": "203.0.113.4"], remoteAddress: "127.0.0.1"),
+                       "A tunnel connects from loopback but is public")
+        XCTAssertFalse(local.allows(headers: ["x-forwarded-for": "198.51.100.1"]))
+        XCTAssertFalse(local.allows(headers: [:], remoteAddress: "203.0.113.4"))
+        XCTAssertFalse(RuruStatusExposure.off.allows(headers: [:], remoteAddress: "127.0.0.1"))
+        XCTAssertTrue(RuruStatusExposure.everywhere.allows(headers: ["cf-ray": "x"], remoteAddress: "203.0.113.4"))
+    }
+
+    func testLocalAddressClassification() {
+        for address in ["127.0.0.1", "192.168.1.20", "172.16.0.1", "172.31.255.255", "10.1.2.3", "fd00::1", "fe80::1%en0", "::ffff:192.168.1.1", "[::1]"] {
+            XCTAssertTrue(RuruStatusExposure.isLocalAddress(address), address)
+        }
+        for address in ["8.8.8.8", "172.32.0.1", "192.169.0.1", "2001:db8::1", "example.com", "", "1.2.3"] {
+            XCTAssertFalse(RuruStatusExposure.isLocalAddress(address), address)
+        }
+    }
+
+    func testResponseHelper() throws {
+        let document = RuruStatusDocument(app: .init(id: "app.example", name: "Example"), state: .ready)
+        let refused = document.response(exposure: .off, requestHeaders: [:])
+        XCTAssertEqual(refused.status, 404)
+        XCTAssertTrue(refused.body.isEmpty)
+        let served = document.response(exposure: .localNetwork, requestHeaders: [:], remoteAddress: "192.168.1.5")
+        XCTAssertEqual(served.status, 200)
+        XCTAssertEqual(served.headers["Cache-Control"], "no-store")
+        XCTAssertEqual(served.body, try document.encoded())
+        let broken = RuruStatusDocument(app: .init(id: "Bad", name: "X"), state: .ready)
+        XCTAssertEqual(broken.response(exposure: .everywhere, requestHeaders: [:]).status, 500)
+    }
+}

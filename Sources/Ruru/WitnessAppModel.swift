@@ -354,7 +354,33 @@ final class WitnessAppModel: ObservableObject {
             }
             states[targets[index].id] = state
         }
-        configuration.monitorTargets = targets
+        // An enhanced monitor whose app reports a degraded component after an update.
+        var enhanced = target(8, "Example app", .http, url: "https://app.example.com")
+        enhanced.enhancedStatus = true
+        var enhancedState = MonitorState()
+        for step in 0..<60 {
+            let time = now.addingTimeInterval(-Double(60 - step) * 60)
+            let late = step >= 50
+            let json: [String: Any] = [
+                "ruru": 1, "app": ["id": "app.example", "name": "Example", "version": late ? "1.45.0" : "1.44.2", "build": late ? "2026101912" : "2026100809"],
+                "state": step >= 55 ? "degraded" : "ready", "reasonCode": step >= 55 ? "account_needs_sign_in" as Any : NSNull() as Any,
+                "uptimeSeconds": late ? (step - 50) * 60 + 30 : 86_400 + step * 60,
+                "components": [["id": "workers", "name": "Workers", "state": step >= 55 ? "degraded" : "ready",
+                                "reasonCode": step >= 55 ? "account_needs_sign_in" as Any : NSNull() as Any],
+                               ["id": "database", "name": "Database", "state": "ready"]],
+                "metrics": [["id": "accounts", "name": "Accounts", "value": 3, "unit": "count"],
+                            ["id": "active", "name": "Active now", "value": step >= 55 ? 2 : 3, "unit": "count"],
+                            ["id": "queue", "name": "Queue latency", "value": 40 + (step * 13) % 30, "unit": "ms"]],
+                "links": [["rel": "dashboard", "title": "Dashboard", "url": "https://app.example.com/app"]]
+            ]
+            let document = (try? JSONSerialization.data(withJSONObject: json)).flatMap {
+                try? MonitorStatusDocument.parse($0, origin: URL(string: enhanced.url)!).get()
+            }
+            enhancedState.record(MonitorResult(time: time, ok: true, latencyMilliseconds: 30 + (step * 11) % 25, detail: "HTTP 200",
+                                               status: document.map { .document($0) }), failureThreshold: enhanced.failureThreshold)
+        }
+        states[enhanced.id] = enhancedState
+        configuration.monitorTargets = targets + [enhanced]
         monitorStates = states
         // Demonstrates a custom icon on the preview's media server; read-only, nothing is written.
         if let pick = try? RuruServiceIcons.pick(from: URL(fileURLWithPath: "/System/Applications/Calculator.app")) {
@@ -513,12 +539,31 @@ final class WitnessAppModel: ObservableObject {
     func saveMonitorTarget(_ target: MonitorTarget) async throws {
         guard !busy, !savingConfiguration, !shuttingDown, target.isValid else { throw WitnessStorage.ConfigurationError.invalid }
         var saved = configuration
+        let isNew = !saved.monitorTargets.contains { $0.id == target.id }
         if let index = saved.monitorTargets.firstIndex(where: { $0.id == target.id }) { saved.monitorTargets[index] = target }
         else { saved.monitorTargets.append(target) }
         guard saved.isValid else { throw WitnessStorage.ConfigurationError.invalid }
         if !preview { try WitnessStorage.save(saved) }
         configuration = saved
         if !preview { await monitor.configure(saved.monitorTargets) }
+        // Any app can opt in by serving /.well-known/ruru; Ruru needs no app-specific
+        // setup. Look once when an HTTP(S) target is added, from either console.
+        if isNew, !preview, target.kind == .http, !target.enhancedStatus {
+            Task { await enableStatusDocumentIfServed(targetID: target.id) }
+        }
+    }
+
+    /// One same-origin request, with the target's own restrictions. Turns on
+    /// app status only when a valid document comes back; otherwise nothing changes.
+    private func enableStatusDocumentIfServed(targetID: String) async {
+        guard var probe = configuration.monitorTargets.first(where: { $0.id == targetID }) else { return }
+        probe.enhancedStatus = true
+        guard case .document = await MonitorProbe.run(probe).status,
+              // The operator may have edited or removed the target meanwhile.
+              var current = configuration.monitorTargets.first(where: { $0.id == targetID }),
+              current.kind == .http, !current.enhancedStatus, current.url == probe.url else { return }
+        current.enhancedStatus = true
+        try? await saveMonitorTarget(current)
     }
 
     func removeMonitorTarget(id: String) async throws {
@@ -800,13 +845,22 @@ final class WitnessAppModel: ObservableObject {
 
     /// Targets with their live state for the browser console. Bounded by the
     /// monitor target and history limits.
+    private func webAppStatus(_ state: MonitorState?) -> RuruWebUI.WebMonitor.AppStatus {
+        let document = state?.statusDocument
+        return .init(name: document?.app.name, version: document?.app.version, state: document?.state.rawValue,
+                     current: state?.statusDocumentIsCurrent ?? false, issue: state?.statusIssue?.title,
+                     components: (document?.components ?? []).map { .init(name: $0.name, state: $0.state.rawValue) },
+                     metrics: (document?.metrics ?? []).map { .init(name: $0.name, value: $0.value, unit: $0.unit) })
+    }
+
     func webMonitorSnapshot() -> [RuruWebUI.WebMonitor] {
         configuration.monitorTargets.map { target in
             let state = monitorStates[target.id]
             return .init(target: target, status: state?.status.rawValue ?? "unknown",
                          latencyMilliseconds: state?.last?.latencyMilliseconds, detail: state?.last?.detail,
                          history: (state?.history.suffix(60) ?? []).map { .init(ok: $0.ok, ms: $0.latencyMilliseconds, inconclusive: $0.inconclusive) },
-                         changes: (state?.changes.suffix(10) ?? []).map { .init(time: $0.time, status: $0.status.rawValue, detail: $0.detail) })
+                         changes: (state?.changes.suffix(10) ?? []).map { .init(time: $0.time, status: $0.status.rawValue, detail: $0.detail) },
+                         app: target.enhancedStatus ? webAppStatus(state) : nil)
         }
     }
 

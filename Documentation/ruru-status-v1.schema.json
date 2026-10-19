@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/johnwatso/ruru/blob/main/Documentation/ruru-status-v1.schema.json",
+  "title": "Ruru app status document, version 1",
+  "description": "Served at GET /.well-known/ruru with Content-Type application/json and HTTP 200. At most 16 KiB. Unknown fields are ignored. Display text has control and format characters removed before the length check. See APP_STATUS.md.",
+  "type": "object",
+  "required": ["ruru", "app", "state"],
+  "properties": {
+    "ruru": { "const": 1 },
+    "app": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/code", "description": "Reverse-DNS style app identifier. Display and grouping only, never identity." },
+        "name": { "$ref": "#/$defs/text64" },
+        "version": { "$ref": "#/$defs/text32" },
+        "build": { "$ref": "#/$defs/text32" }
+      }
+    },
+    "state": { "$ref": "#/$defs/state" },
+    "reasonCode": { "$ref": "#/$defs/code" },
+    "uptimeSeconds": { "type": "integer", "minimum": 0, "maximum": 316224000, "description": "The app's own process uptime. A decrease is shown as a restart." },
+    "components": {
+      "type": "array",
+      "maxItems": 16,
+      "description": "Component ids must be unique.",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "state"],
+        "properties": {
+          "id": { "$ref": "#/$defs/code" },
+          "name": { "$ref": "#/$defs/text64" },
+          "state": { "$ref": "#/$defs/state" },
+          "reasonCode": { "$ref": "#/$defs/code" }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "maxItems": 16,
+      "description": "Metric ids must be unique.",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "value"],
+        "properties": {
+          "id": { "$ref": "#/$defs/code" },
+          "name": { "$ref": "#/$defs/text64" },
+          "value": { "type": "number" },
+          "unit": { "type": "string", "minLength": 1, "maxLength": 16 }
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "maxItems": 4,
+      "description": "Ruru shows only https links on the monitored host; others are dropped.",
+      "items": {
+        "type": "object",
+        "required": ["rel", "title", "url"],
+        "properties": {
+          "rel": { "enum": ["dashboard", "status", "docs", "support"] },
+          "title": { "$ref": "#/$defs/text64" },
+          "url": { "type": "string", "format": "uri", "maxLength": 2048 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "state": { "enum": ["ready", "synchronizing", "outdated", "degraded", "unknown"] },
+    "code": { "type": "string", "pattern": "^[a-z0-9._-]{1,48}$" },
+    "text64": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "text32": { "type": "string", "minLength": 1, "maxLength": 32 }
+  }
+}

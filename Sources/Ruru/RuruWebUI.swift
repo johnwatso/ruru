@@ -51,10 +51,24 @@ actor RuruWebUI {
         let detail: String?
         let history: [Sample]
         let changes: [Change]
+        /// Enhanced HTTP monitors only: the app's own report. Links are not
+        /// sent, so the browser never renders an app-supplied URL.
+        var app: AppStatus? = nil
 
         struct Sample: Encodable, Sendable { let ok: Bool; let ms: Int?; let inconclusive: Bool }
+        struct AppStatus: Encodable, Sendable {
+            let name: String?
+            let version: String?
+            let state: String?
+            let current: Bool
+            let issue: String?
+            let components: [Component]
+            let metrics: [Metric]
+            struct Component: Encodable, Sendable { let name: String; let state: String }
+            struct Metric: Encodable, Sendable { let name: String; let value: Double; let unit: String? }
+        }
         struct Change: Encodable, Sendable { let time: Date; let status: String; let detail: String }
-        private enum Keys: String, CodingKey { case status, latencyMilliseconds, detail, history, changes }
+        private enum Keys: String, CodingKey { case status, latencyMilliseconds, detail, history, changes, app }
 
         func encode(to encoder: Encoder) throws {
             try target.encode(to: encoder)
@@ -64,6 +78,7 @@ actor RuruWebUI {
             try values.encodeIfPresent(detail, forKey: .detail)
             try values.encode(history, forKey: .history)
             try values.encode(changes, forKey: .changes)
+            try values.encodeIfPresent(app, forKey: .app)
         }
     }
 

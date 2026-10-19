@@ -615,7 +615,9 @@ enum RuruWebAssets {
 
     // MARK: Monitors
 
-    const statusOf = (m) => (!m.enabled ? { cls: '', text: 'Paused' } : m.status === 'up' ? { cls: 'ok', text: 'Online' } : m.status === 'down' ? { cls: 'bad', text: 'Offline' } : { cls: '', text: 'Waiting' });
+    const reported = (m) => (m.app && m.app.current && (m.app.state === 'degraded' || m.app.state === 'outdated') ? m.app.state : null);
+    const titleCase = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+    const statusOf = (m) => (!m.enabled ? { cls: '', text: 'Paused' } : m.status === 'up' ? (reported(m) ? { cls: 'warn', text: titleCase(reported(m)) } : { cls: 'ok', text: 'Online' }) : m.status === 'down' ? { cls: 'bad', text: 'Offline' } : { cls: '', text: 'Waiting' });
     const address = (m) => (m.kind === 'HTTP' ? m.url : m.kind === 'DNS' ? `${m.host}:${m.port} · ${m.dnsQueryName}` : `${m.host}:${m.port}`);
 
     function monitorsCard(limit, withLink) {
@@ -752,7 +754,23 @@ enum RuruWebAssets {
           line('Last check', m.detail || 'No result yet'), line('Response', Number.isFinite(m.latencyMilliseconds) ? `${m.latencyMilliseconds} ms` : '—'), line('Uptime (recent)', percent(uptimeOf(m))),
           line('Schedule', `Every ${m.intervalSeconds} s · down after ${m.failureThreshold} ${m.failureThreshold === 1 ? 'failure' : 'failures'}`)),
         sparkline(m.history || []),
+        appStatus(m),
         el('div', { className: 'actions' }, remove, check));
+    }
+
+    // Enhanced monitors: the app's own report, rendered as text only.
+    function appStatus(m) {
+      if (!m.app) return null;
+      const a = m.app;
+      const line = (label, value) => el('li', {}, el('span', { textContent: label }), el('span', { textContent: value }));
+      const items = [];
+      if (a.name) items.push(line('App', [a.name, a.version].filter(Boolean).join(' ')));
+      if (a.state) items.push(line('Reported', titleCase(a.state) + (a.current ? '' : ' (stale)')));
+      if (a.issue) items.push(line('Status document', a.issue));
+      for (const c of a.components || []) items.push(line(c.name, titleCase(c.state)));
+      for (const x of a.metrics || []) items.push(line(x.name, `${Number(x.value).toLocaleString()}${x.unit && x.unit !== 'count' ? ' ' + x.unit : ''}`));
+      if (!items.length) items.push(line('App status', 'Waiting for the first report'));
+      return el('ul', { className: 'inset' }, ...items);
     }
 
     function field(label, input) { return el('label', { textContent: label }, input); }

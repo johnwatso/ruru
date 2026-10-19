@@ -77,6 +77,24 @@ if (try await client.describe()).supports("operationalStatus") {
 }
 ```
 
+## Enhanced monitoring status
+
+An app that Ruru only monitors can serve `RuruStatusDocument` at
+`/.well-known/ruru` (no token, pairing or lease involved). Ruru discovers it
+automatically when an operator adds an HTTP(S) monitor. `encoded()` validates
+Ruru's limits; `response(exposure:requestHeaders:remoteAddress:)` also applies
+an off / local-network / everywhere setting (`RuruStatusExposure`, which should
+default to `.off`). See `Documentation/APP_STATUS.md` for other languages.
+
+```swift
+let body = try RuruStatusDocument(
+    app: .init(id: "app.example", name: "Example", version: "1.2.0"),
+    state: .ready,
+    components: [.init(id: "database", name: "Database", state: .ready)],
+    metrics: [.init(id: "queue", name: "Queued jobs", value: 4, unit: "count")]
+).encoded() // serve with Content-Type: application/json and HTTP 200
+```
+
 ## Credential rotation
 
 `describe()` reports `credentialRotation` and `credentialRotationPending`.

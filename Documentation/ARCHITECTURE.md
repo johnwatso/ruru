@@ -70,6 +70,12 @@ Notify! senders. Rules are `alert-rules.json`; incidents, history and monitoring
 rollups are `Alerts/alerts.duckdb`, a separate bounded DuckDB file that is set aside, never
 deleted, if damaged. A failure in any of this cannot touch leases, terms, fencing or quarantine.
 
+An HTTP(S) monitor can opt in to [enhanced monitoring](ENHANCED_MONITORING.md):
+its single check reads a bounded `/.well-known/ruru` status document from the
+same origin, so a monitored app (one that never pairs or takes a lease) can show
+its version, components and metrics. The document is held in memory only, is
+display data, and never counts a reachable app as down.
+
 ## Coordinator direction
 
 Ruru's intended direction is a general service coordinator, with lease guarding

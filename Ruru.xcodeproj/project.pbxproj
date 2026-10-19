@@ -24,6 +24,7 @@
 		1CE4C97197BA1DDFB518DAA2 /* ParticipantPresenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E781CE2113EE42FD5459A118 /* ParticipantPresenceTests.swift */; };
 		1F7FB343D5F14EC550ADA791 /* OperationalStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2006424C788DF3112944C3C4 /* OperationalStatusTests.swift */; };
 		20CE0CC1E83ED2CB67D44E95 /* WitnessServiceIconViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F123AF7A4DD99345B3C56D4D /* WitnessServiceIconViews.swift */; };
+		21126ED699A807D7265AD06E /* MonitorStatusDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = F91C91C9F41CB36F47DF2FD4 /* MonitorStatusDocument.swift */; };
 		22D6B330228246AA32E8920F /* CoordinationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29634F205646A0A16F47ABEF /* CoordinationModels.swift */; };
 		23E1D42CA1DE6CBA18E52B3B /* WitnessConsoleStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 891A5721155305E6E037FA30 /* WitnessConsoleStyle.swift */; };
 		23EDEFA0BB12F1685702EB1C /* AlertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF00FFD0764524C3F4B90383 /* AlertTests.swift */; };
@@ -53,6 +54,7 @@
 		4E9F0ED1C16047BBDFDFDE43 /* AlertRuleStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A0F195374BD5F31A7A19E91 /* AlertRuleStorage.swift */; };
 		56B7A83DD2DC5C773E0EFF69 /* Sparkle-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 53BAEA3F57493AEC0AD71AD3 /* Sparkle-LICENSE.txt */; };
 		56D348F58DEEC4238CB35229 /* RuruWebUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8F93F0B323D6AFD02C8FFCE /* RuruWebUI.swift */; };
+		57E36E3FE57A253F00261321 /* EnhancedMonitoringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAFDD89A31829117E76C8DF6 /* EnhancedMonitoringTests.swift */; };
 		5A7A0715F1F8EF3FFF74E1DC /* LeaseDurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D97E8AAAF34560CCDBDFD0D6 /* LeaseDurationTests.swift */; };
 		5BBB1913D8A1C40FC0C80D6C /* CloudflareDNSProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 361B6452A7FA6B958247E39C /* CloudflareDNSProvider.swift */; };
 		5D7FB7DFC165C57646866D11 /* RuruApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41754CE5DDF212A3E5D325FC /* RuruApp.swift */; };
@@ -302,6 +304,8 @@
 		EF8D3058FEE8AA4A62308A99 /* CloudflareTunnelClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareTunnelClient.swift; sourceTree = "<group>"; };
 		F018A0414FBFE44DE1E447D5 /* cloudflared */ = {isa = PBXFileReference; path = cloudflared; sourceTree = "<group>"; };
 		F123AF7A4DD99345B3C56D4D /* WitnessServiceIconViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessServiceIconViews.swift; sourceTree = "<group>"; };
+		F91C91C9F41CB36F47DF2FD4 /* MonitorStatusDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitorStatusDocument.swift; sourceTree = "<group>"; };
+		FAFDD89A31829117E76C8DF6 /* EnhancedMonitoringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnhancedMonitoringTests.swift; sourceTree = "<group>"; };
 		FB0DE86CD88FFB20F836FC48 /* WitnessInternetAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WitnessInternetAccess.swift; sourceTree = "<group>"; };
 		FE5F9423E6D5E47B73BDE8A3 /* AlertStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -376,6 +380,7 @@
 				D0425971E5EFD8DD4C38C82F /* CoordinationTests.swift */,
 				624A2689B2A341F9EFBD4900 /* CredentialRotationTests.swift */,
 				665E47E1E6268C552D5F5490 /* DuckDBStorageTests.swift */,
+				FAFDD89A31829117E76C8DF6 /* EnhancedMonitoringTests.swift */,
 				586EBC0DA94DFAED75EF6299 /* KnownNodeGroupingTests.swift */,
 				D97E8AAAF34560CCDBDFD0D6 /* LeaseDurationTests.swift */,
 				120B98F2D24A44275C2F392F /* LeaseFencingTests.swift */,
@@ -493,6 +498,7 @@
 				26B9F3DF5E6D5909C8F67940 /* LeaseStore.swift */,
 				072A55EE0516065DBFAD2DCD /* LegacyAuthorityReplacement.swift */,
 				A6B593CCB86129D4F176F104 /* Monitoring.swift */,
+				F91C91C9F41CB36F47DF2FD4 /* MonitorStatusDocument.swift */,
 				B5DB2F5A10FD8280BF656C4F /* OperationalStatus.swift */,
 				9932375055BEB2EE0933958E /* Pairing.swift */,
 				0C2B6A412A802552345A9762 /* ParticipantPresence.swift */,
@@ -830,6 +836,7 @@
 				001251692BBC01E44BE02992 /* LeaseModels.swift in Sources */,
 				EEE9B3D345E31C7AF9B2C3F6 /* LeaseStore.swift in Sources */,
 				7C1E0FDDDDA27A7205FC37EA /* LegacyAuthorityReplacement.swift in Sources */,
+				21126ED699A807D7265AD06E /* MonitorStatusDocument.swift in Sources */,
 				6850F2CFF02B787F343D7F26 /* Monitoring.swift in Sources */,
 				B50D638A136EDC6FD8D1621A /* OperationalStatus.swift in Sources */,
 				BECFD308F35EC7A73DA09916 /* Pairing.swift in Sources */,
@@ -870,6 +877,7 @@
 				78DCF4BD209CECEA1DBC9E4E /* CoordinationTests.swift in Sources */,
 				C73D1C156AC931B62814CF69 /* CredentialRotationTests.swift in Sources */,
 				FD995F83B6EFB5D9F2D8855D /* DuckDBStorageTests.swift in Sources */,
+				57E36E3FE57A253F00261321 /* EnhancedMonitoringTests.swift in Sources */,
 				ECE9355D5CB554C0501DFC94 /* KnownNodeGroupingTests.swift in Sources */,
 				5A7A0715F1F8EF3FFF74E1DC /* LeaseDurationTests.swift in Sources */,
 				C9BD57CAD645E11895040F51 /* LeaseFencingTests.swift in Sources */,
