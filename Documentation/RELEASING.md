@@ -12,12 +12,12 @@ Ruru embeds Sparkle **2.9.5**, matching SwiftMiner, with these publishing inputs
 
 - Xcode project/scheme: `Ruru.xcodeproj` / `Ruru`, configuration `Release`.
 - Bundle identifier: `dev.ruruapp.ruru` (formerly `com.swiftmesh.witness`); product: `Ruru.app`.
-- Stable source feed: `docs/appcast.xml`, served at
+- Stable source feed: `Website/appcast.xml`, served at
   `https://johnwatso.github.io/ruru/appcast.xml`.
-- Beta source feed: `docs/beta/appcast.xml`, served at
+- Beta source feed: `Website/beta/appcast.xml`, served at
   `https://johnwatso.github.io/ruru/beta/appcast.xml`.
 - Feed hosting: configure GitHub Pages to serve the publishing repository's
-  `docs/` folder, or an equivalent deployment preserving those URLs.
+  `Website/` folder, or an equivalent deployment preserving those URLs.
 - Minimum macOS: `15.0`; application, WitnessKit and connector are universal.
 - `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` come from `project.yml`.
 - Background checks default on; automatic downloads default off.

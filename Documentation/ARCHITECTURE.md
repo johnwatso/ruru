@@ -289,7 +289,7 @@ is no second polling timer. A separate Ruru preference selects the channel.
 
 ShipHook owns release signing, publication and appcast items. The stable feed is
 `https://johnwatso.github.io/ruru/appcast.xml`; beta uses `/ruru/beta/appcast.xml`.
-`docs/` holds the source feeds for publishing, initially empty. The ShipHook
+`Website/` holds the public website and source feeds for publishing. The ShipHook
 Ed25519 public key is pending; the build setting `SPARKLE_PUBLIC_ED_KEY` is empty
 and the updater cannot start until a valid public key is embedded. No private
 release key or local signing pipeline is part of this repository.

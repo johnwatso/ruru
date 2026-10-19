@@ -2,6 +2,8 @@
 
 ## 2026-10-20 — Website search and sharing metadata
 
+- Moved the complete static site and Sparkle feed tree into the dedicated
+  top-level `Website/` folder and updated the Pages workflow and release docs.
 - Clarified the landing page title, description and hero copy around Ruru’s
   native macOS service coordination, exclusive ownership and safe server
   failover. The visual structure and runtime demo are unchanged.

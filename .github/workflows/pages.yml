@@ -2,7 +2,7 @@ name: Deploy Ruru website
 on:
   push:
     branches: [main]
-    paths: ['docs/**', '.github/workflows/pages.yml']
+    paths: ['Website/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: docs
+          path: Website
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
