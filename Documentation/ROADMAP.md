@@ -1,5 +1,21 @@
 # Development log and next steps
 
+## 2026-10-20 — SwiftMiner enhanced support (roadmap, Debug only)
+
+- SwiftMiner, the intended first adopter, serves `/.well-known/ruru` (version,
+  miner health, SwiftBot connection and account counts; no account names,
+  games or Discord IDs) behind an off-by-default **Settings → Web Dashboard →
+  Ruru Monitoring** toggle with local-network and everywhere exposure.
+- To match Ruru's own gate, that support is now Debug only in SwiftMiner from
+  1.45.1: Release builds hide the setting and always answer 404 at the path. A
+  saved exposure value is kept but ignored, so no configuration migration is
+  needed when the gate lifts.
+- Next: ship both sides together once the Intel Mac mini validation pass in the
+  [proposal](ENHANCED_MONITORING.md) is complete; that ships SwiftMiner as the
+  committed adopter the proposal requires. Lift SwiftMiner's `#if DEBUG` gate
+  in `Settings+WebDashboard.swift` and `IntegrationsSettingsPanes.swift` in the
+  same release as Ruru's.
+
 ## 2026-10-20 — Enhanced monitoring deferred
 
 - Moved `/.well-known/ruru` enhanced monitoring out of the Release product and
