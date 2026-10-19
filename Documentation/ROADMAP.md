@@ -1,5 +1,22 @@
 # Development log and next steps
 
+## 2026-10-20 — Enhanced monitoring deferred
+
+- Moved `/.well-known/ruru` enhanced monitoring out of the Release product and
+  back to the roadmap pending a committed adopter and the Intel/resource
+  validation listed in the [proposal](ENHANCED_MONITORING.md).
+- The bounded parser, client builder, prototype UI and tests remain available
+  for development. Debug builds have an off-by-default **Settings → General →
+  Developer → Enhanced monitoring** toggle. When it is off, and in every
+  Release build, Ruru checks the configured HTTP URL normally, does not probe or
+  auto-detect `/.well-known/ruru`, and omits reported app status from both
+  consoles and Activity.
+- Existing `enhancedStatus` configuration is preserved for forward
+  compatibility but is ignored at runtime while the gate is off. This avoids a
+  destructive configuration migration and keeps the additive `RuruClient`
+  contract available without advertising it as a shipping integration.
+- Validation: pending in this change; see the final validation note below.
+
 ## 2026-10-20 — Website search and sharing metadata
 
 - Moved the complete static site and Sparkle feed tree into the dedicated

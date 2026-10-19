@@ -31,6 +31,12 @@ final class WitnessAppModel: ObservableObject {
     @Published private(set) var serviceIcons: [String: NSImage] = [:]
     /// Latest check state by monitor target ID. Observation only.
     @Published private(set) var monitorStates: [String: MonitorState] = [:]
+#if DEBUG
+    /// Experimental app-status documents remain available to developers without
+    /// making them part of the Release product surface.
+    @Published private(set) var enhancedMonitoringDeveloperEnabled =
+        UserDefaults.standard.bool(forKey: "RuruDeveloperEnhancedMonitoring")
+#endif
     @Published private(set) var pairingCodes: [PairingDesk.Code] = []
     @Published private(set) var pairingRequests: [PairingDesk.Request] = []
     /// Servers approved this session, by cluster ID, for the setup assistant.
@@ -191,7 +197,7 @@ final class WitnessAppModel: ObservableObject {
             notifyConfigured = notifyToken != nil && RuruNotify.validID(configuration.notifyID) != nil
             // Monitoring does not depend on the lease authority: it starts first, and
             // keeps running even when authority storage fails to open below.
-            let monitor = monitor, targets = configuration.monitorTargets
+            let monitor = monitor, targets = runtimeMonitorTargets(configuration.monitorTargets)
             Task { await monitor.configure(targets) }
             beginMonitoring()
             startAlerting()
@@ -535,6 +541,41 @@ final class WitnessAppModel: ObservableObject {
 
     var monitorDownCount: Int { configuration.monitorTargets.filter { monitorStates[$0.id]?.status == .down }.count }
 
+    /// Enhanced monitoring is deliberately unavailable in Release builds. A
+    /// Debug build also requires the explicit developer preference.
+    var enhancedMonitoringEnabled: Bool {
+#if DEBUG
+        enhancedMonitoringDeveloperEnabled
+#else
+        false
+#endif
+    }
+
+    private func runtimeMonitorTarget(_ target: MonitorTarget) -> MonitorTarget {
+        guard !enhancedMonitoringEnabled, target.enhancedStatus else { return target }
+        var target = target
+        target.enhancedStatus = false
+        return target
+    }
+
+    private func runtimeMonitorTargets(_ targets: [MonitorTarget]) -> [MonitorTarget] {
+        targets.map(runtimeMonitorTarget)
+    }
+
+    func monitorAddress(_ target: MonitorTarget) -> String {
+        runtimeMonitorTarget(target).address
+    }
+
+#if DEBUG
+    func setEnhancedMonitoringDeveloperEnabled(_ enabled: Bool) {
+        guard enhancedMonitoringDeveloperEnabled != enabled else { return }
+        UserDefaults.standard.set(enabled, forKey: "RuruDeveloperEnhancedMonitoring")
+        enhancedMonitoringDeveloperEnabled = enabled
+        let monitor = monitor, targets = runtimeMonitorTargets(configuration.monitorTargets)
+        Task { await monitor.configure(targets) }
+    }
+#endif
+
     /// Adds a target, or replaces the one with the same ID. Never touches leases or listeners.
     func saveMonitorTarget(_ target: MonitorTarget) async throws {
         guard !busy, !savingConfiguration, !shuttingDown, target.isValid else { throw WitnessStorage.ConfigurationError.invalid }
@@ -545,10 +586,10 @@ final class WitnessAppModel: ObservableObject {
         guard saved.isValid else { throw WitnessStorage.ConfigurationError.invalid }
         if !preview { try WitnessStorage.save(saved) }
         configuration = saved
-        if !preview { await monitor.configure(saved.monitorTargets) }
-        // Any app can opt in by serving /.well-known/ruru; Ruru needs no app-specific
-        // setup. Look once when an HTTP(S) target is added, from either console.
-        if isNew, !preview, target.kind == .http, !target.enhancedStatus {
+        if !preview { await monitor.configure(runtimeMonitorTargets(saved.monitorTargets)) }
+        // The Debug-only prototype needs no app-specific setup. Look once when
+        // an HTTP(S) target is added while its developer gate is enabled.
+        if enhancedMonitoringEnabled, isNew, !preview, target.kind == .http, !target.enhancedStatus {
             Task { await enableStatusDocumentIfServed(targetID: target.id) }
         }
     }
@@ -575,7 +616,7 @@ final class WitnessAppModel: ObservableObject {
         configuration = saved
         monitorStates[id] = nil
         setServiceIcon(nil, for: id)
-        if !preview { await monitor.configure(saved.monitorTargets) }
+        if !preview { await monitor.configure(runtimeMonitorTargets(saved.monitorTargets)) }
     }
 
     func checkMonitorNow(_ id: String) async {
@@ -856,11 +897,12 @@ final class WitnessAppModel: ObservableObject {
     func webMonitorSnapshot() -> [RuruWebUI.WebMonitor] {
         configuration.monitorTargets.map { target in
             let state = monitorStates[target.id]
-            return .init(target: target, status: state?.status.rawValue ?? "unknown",
+            let runtimeTarget = runtimeMonitorTarget(target)
+            return .init(target: runtimeTarget, status: state?.status.rawValue ?? "unknown",
                          latencyMilliseconds: state?.last?.latencyMilliseconds, detail: state?.last?.detail,
                          history: (state?.history.suffix(60) ?? []).map { .init(ok: $0.ok, ms: $0.latencyMilliseconds, inconclusive: $0.inconclusive) },
                          changes: (state?.changes.suffix(10) ?? []).map { .init(time: $0.time, status: $0.status.rawValue, detail: $0.detail) },
-                         app: target.enhancedStatus ? webAppStatus(state) : nil)
+                         app: runtimeTarget.enhancedStatus ? webAppStatus(state) : nil)
         }
     }
 

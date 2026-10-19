@@ -3,14 +3,15 @@
 App developers: start with [Adding Ruru status to your app](APP_STATUS.md)
 and the [JSON Schema](ruru-status-v1.schema.json). This page is Ruru's design.
 
-**Status:** phases 1 and 2 are implemented (the contract, the `RuruClient`
-builder and enhanced HTTP(S) monitors in the native and Web consoles). Phase 3
-(alerts on reported state) and phase 4 (private documents) are not. The
-operator approved phases 1–2 as a v1-scope exception (see
-[below](#v1-scope-exception)).
+**Status:** deferred to the roadmap. The phase 1 contract and phase 2 prototype
+remain in the tree, but Ruru exposes them only behind an off-by-default
+developer toggle in Debug builds. Release builds always perform ordinary HTTP
+reachability checks, do not auto-detect status documents, and do not show the
+enhanced controls or reported app data. Phase 3 (alerts on reported state) and
+phase 4 (private documents) are not implemented.
 
-Today an HTTP(S) monitor tells the operator one thing: whether a URL answered
-with 200–399 in time. This proposal lets any app opt in to richer monitoring by
+In Release builds, an HTTP(S) monitor tells the operator one thing: whether a
+URL answered with 200–399 in time. This proposal would let any app opt in to richer monitoring by
 serving a small, bounded JSON status document at a well-known path. Ruru reads
 it instead of a plain page and shows the app's identity, version, component
 health and a few headline metrics on the monitor's detail page.

@@ -1,10 +1,11 @@
 # Adding Ruru status to your app
 
-Any app with an HTTP(S) server or Web UI can give Ruru a richer view of itself
-by serving one small JSON document. Ruru needs no code, configuration or
-pairing for your app: when an operator adds an HTTP(S) monitor for your
-address, Ruru checks for the document and shows your app's version, overall
-state, components, metrics and links if it finds one.
+> **Deferred:** this is a proposed integration, not a Release feature. Ruru
+> exposes it only behind a developer toggle in Debug builds while the work is
+> parked on the [roadmap](ROADMAP.md#2026-10-20--enhanced-monitoring-deferred).
+
+The proposal lets an app with an HTTP(S) server or Web UI give Ruru a richer
+view of itself by serving one small JSON document.
 
 This is monitoring only. Serving the document gives your app no lease, token or
 special access to Ruru, and Ruru never treats it as proof of identity.
@@ -146,7 +147,5 @@ curl -i http://localhost:8080/.well-known/ruru
 ```
 
 Check that the answer is `200` with `application/json`, and that it validates
-against the schema. Then add an HTTP(S) monitor for your address in Ruru. When
-you save it, Ruru checks for the document and turns on **Read app status** if
-it finds one. **Check Address** in the monitor's settings checks again at any
-time.
+against the schema. Testing it with Ruru currently requires a Debug build and
+the **Settings → General → Developer → Enhanced monitoring** toggle.

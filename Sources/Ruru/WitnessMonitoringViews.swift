@@ -34,7 +34,8 @@ extension MonitorStatusDocument.State {
 extension WitnessAppModel {
     /// An enhanced target's current reported state, when its latest check read one.
     func monitorReportedState(_ target: MonitorTarget) -> MonitorStatusDocument.State? {
-        guard target.enhancedStatus, let state = monitorStates[target.id], state.statusDocumentIsCurrent else { return nil }
+        guard enhancedMonitoringEnabled, target.enhancedStatus,
+              let state = monitorStates[target.id], state.statusDocumentIsCurrent else { return nil }
         return state.statusDocument?.state
     }
 
@@ -154,9 +155,10 @@ private struct WitnessMonitorRow: View {
     }
 
     private func subtitle(_ state: MonitorState?) -> String {
-        var parts = [target.kind.rawValue, target.address]
-        if target.enhancedStatus, let app = state?.statusDocument?.app {
-            parts = [[app.name, app.version].compactMap { $0 }.joined(separator: " "), target.address]
+        let address = model.monitorAddress(target)
+        var parts = [target.kind.rawValue, address]
+        if model.enhancedMonitoringEnabled, target.enhancedStatus, let app = state?.statusDocument?.app {
+            parts = [[app.name, app.version].compactMap { $0 }.joined(separator: " "), address]
         }
         if let last = state?.last {
             parts.append(last.ok ? (last.latencyMilliseconds.map { "\($0) ms" } ?? last.detail) : last.detail)
@@ -203,7 +205,7 @@ private struct WitnessMonitorDetailSheet: View {
                 WitnessMonitorTargetIcon(target: target, size: 44)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(target.name).font(.title2.weight(.semibold))
-                    Text(target.address).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(model.monitorAddress(target)).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 Spacer()
                 WitnessStatusBadge(text: model.monitorStatusText(target), health: model.monitorHealth(target))
@@ -215,7 +217,9 @@ private struct WitnessMonitorDetailSheet: View {
                 fact("Checks", "Every \(Self.duration(target.intervalSeconds)), \(target.timeoutSeconds) s timeout")
                 fact("Reported down after", "\(target.failureThreshold) failed \(target.failureThreshold == 1 ? "check" : "checks") in a row")
             }
-            if target.enhancedStatus { WitnessMonitorAppStatusSection(target: target, state: state) }
+            if model.enhancedMonitoringEnabled, target.enhancedStatus {
+                WitnessMonitorAppStatusSection(target: target, state: state)
+            }
             VStack(alignment: .leading, spacing: 8) {
                 Text("Recent checks").font(.headline)
                 WitnessMonitorHistoryBar(results: state?.history ?? [], count: 60).frame(height: 28)
@@ -434,24 +438,28 @@ struct WitnessMonitorTargetSheet: View {
                     LabeledContent("Address") { TextField("Address", text: $url, prompt: Text("https://example.com/health")).labelsHidden() }
                     Text("Counts as up when the server answers with a status below 400. Redirects are not followed.")
                         .font(.callout).foregroundStyle(.secondary)
-                    Toggle("Read app status", isOn: $enhancedStatus)
-                    HStack(spacing: 10) {
-                        Text(existing == nil
-                             ? "Apps that support Ruru serve a status document at /.well-known/ruru. Ruru looks for one when you add this target and turns this on if it finds it."
-                             : "Apps that support Ruru serve a status document at /.well-known/ruru on this address. Ruru checks that instead and shows the app's version, components and metrics.")
-                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 0)
-                        Button(statusCheck == .checking ? "Checking…" : "Check Address") { checkStatusDocument() }
-                            .disabled(statusCheck == .checking || MonitorTarget.validURL(draft.url) == nil)
+#if DEBUG
+                    if model.enhancedMonitoringDeveloperEnabled {
+                        Toggle("Read app status", isOn: $enhancedStatus)
+                        HStack(spacing: 10) {
+                            Text(existing == nil
+                                 ? "Apps that support Ruru serve a status document at /.well-known/ruru. Ruru looks for one when you add this target and turns this on if it finds it."
+                                 : "Apps that support Ruru serve a status document at /.well-known/ruru on this address. Ruru checks that instead and shows the app's version, components and metrics.")
+                                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                            Button(statusCheck == .checking ? "Checking…" : "Check Address") { checkStatusDocument() }
+                                .disabled(statusCheck == .checking || MonitorTarget.validURL(draft.url) == nil)
+                        }
+                        switch statusCheck {
+                        case .found(let app):
+                            Label("Found \(app)", systemImage: "checkmark.circle.fill").font(.callout).foregroundStyle(.green)
+                        case .notFound(let reason):
+                            Label(reason, systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
+                        case .idle, .checking:
+                            EmptyView()
+                        }
                     }
-                    switch statusCheck {
-                    case .found(let app):
-                        Label("Found \(app)", systemImage: "checkmark.circle.fill").font(.callout).foregroundStyle(.green)
-                    case .notFound(let reason):
-                        Label(reason, systemImage: "info.circle").font(.callout).foregroundStyle(.secondary)
-                    case .idle, .checking:
-                        EmptyView()
-                    }
+#endif
                 case .dns:
                     LabeledContent("DNS server") { TextField("DNS server", text: $host, prompt: Text("IP address or name, e.g. 1.1.1.1")).labelsHidden() }
                     LabeledContent("Port") { TextField("Port", value: $port, format: .number.grouping(.never)).labelsHidden().frame(width: 100) }

@@ -49,8 +49,8 @@ extension WitnessAppModel {
                     id: "monitor-\(target.id)-\(change.time.timeIntervalSince1970)", time: change.time,
                     symbol: down ? "xmark.octagon" : "checkmark.circle", tint: down ? .red : .green,
                     title: down ? "\(target.name) went down" : "\(target.name) is back up",
-                    service: "Monitoring", node: target.address)
-            } + (target.enhancedStatus ? (monitorStates[target.id]?.statusEvents ?? []) : []).map { event -> ActivityFeedItem in
+                    service: "Monitoring", node: monitorAddress(target))
+            } + (enhancedMonitoringEnabled && target.enhancedStatus ? (monitorStates[target.id]?.statusEvents ?? []) : []).map { event -> ActivityFeedItem in
                 let (symbol, tint, title): (String, Color, String) = switch event.kind {
                 case .stateChanged(_, let to):
                     (to.health == .warning ? "exclamationmark.triangle" : "info.circle", to.health == .warning ? .orange : .accentColor,
@@ -59,7 +59,7 @@ extension WitnessAppModel {
                 case .restarted: ("arrow.clockwise.circle", .accentColor, "\(target.name) restarted")
                 }
                 return ActivityFeedItem(id: "monitor-status-\(target.id)-\(event.time.timeIntervalSince1970)-\(title)", time: event.time,
-                                        symbol: symbol, tint: tint, title: title, service: "Monitoring", node: target.address)
+                                        symbol: symbol, tint: tint, title: title, service: "Monitoring", node: monitorAddress(target))
             }
         }
         // Alert rules that record Activity add what was raised and recovered. A monitor's own

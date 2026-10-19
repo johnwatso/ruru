@@ -60,6 +60,11 @@ without changing system preferences. Capture the window without the cursor.
 
 The screenshots in the README show isolated preview data, not a live authority. Sparkle is disabled in preview mode, including network checks and preference writes. Do not enable login registration, alter power settings, or deploy a tunnel as part of development verification.
 
+The deferred enhanced-monitoring prototype is available only in Debug builds.
+Enable **Settings → General → Developer → Enhanced monitoring** to expose
+its monitor controls and `/.well-known/ruru` probes. The preference defaults off;
+Release builds ignore it and always use the configured HTTP URL directly.
+
 ## Updates
 
 `AppUpdater.swift` adapts SwiftMiner's Sparkle integration. ShipHook owns the

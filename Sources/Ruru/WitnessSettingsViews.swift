@@ -114,6 +114,22 @@ struct WitnessSettingsView: View {
             Text("Reports exclude credentials, endpoints, URLs and raw error text. They use Ruru’s existing bounded ownership history and current observations only.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
+#if DEBUG
+        Section {
+            Toggle(isOn: Binding(
+                get: { model.enhancedMonitoringDeveloperEnabled },
+                set: { model.setEnhancedMonitoringDeveloperEnabled($0) }
+            )) {
+                Text("Enhanced monitoring")
+                Text("Reads experimental /.well-known/ruru app-status documents.")
+            }
+        } header: {
+            Text("Developer")
+        } footer: {
+            Text("Debug builds only. Release builds always use ordinary reachability checks.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+#endif
         Section {
             let host = RuruHostInfo.current
             LabeledContent("Computer", value: host.computerName)

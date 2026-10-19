@@ -30,24 +30,6 @@ digits, `.`, `_`, `-`), not user-provided prose. Clients must call
 authorities remain compatible. The typed `RuruLeaseClient.reportOperationalStatus`
 method is the supported Swift integration boundary.
 
-## Enhanced monitoring (no pairing)
-
-An app that Ruru only *monitors* (it never asks for a lease or reports
-presence) can still give Ruru a richer view. Serve a small JSON status document
-at `GET /.well-known/ruru` from the app's own HTTP(S) server or Web UI. In
-Ruru, add an HTTP(S) monitor for that address: Ruru finds the document and
-turns on **Read app status** automatically.
-Ruru then shows the app's version, overall state, components, a few metrics
-with sparklines, and same-host `https` links.
-
-No token, pairing or Ruru capability check is involved, and the document is
-never identity or ownership evidence. It must be safe to publish: use machine
-`reasonCode`s, not account names, hostnames, paths or logs. Swift apps can use
-`RuruStatusDocument` and `RuruStatusExposure` from `RuruClient`; any other
-language can follow [Adding Ruru status to your app](APP_STATUS.md) and the
-[JSON Schema](ruru-status-v1.schema.json). Offer an exposure setting that is off
-by default.
-
 ## Register a service
 
 In **Guarding → Add Service**, choose a template (SwiftBot or Other app), a
