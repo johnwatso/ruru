@@ -13,8 +13,11 @@
 - Added a root crawler policy, one-page XML sitemap and GitHub Pages custom-domain marker for
   `https://ruruapp.dev/`; canonical, structured-data and social-preview URLs use
   that public origin. Local validation covers HTML structure, JSON-LD, XML and
-  referenced assets. Production indexing and rendered search/social cards still
-  depend on crawler refreshes; Search Console registration remains an operator step.
+  referenced assets. GitHub Pages was enabled with the existing Actions workflow,
+  and the first protected `main` deployment passed. The custom domain is attached,
+  but Cloudflare apex DNS records and subsequent HTTPS certificate issuance remain
+  the live-hosting validation gap. Production indexing, rendered search/social cards
+  and Search Console registration also remain dependent on external crawler refreshes.
 
 ## 2026-10-19 — App status for any app (auto-detection, spec, exposure)
 
