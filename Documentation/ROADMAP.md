@@ -1,5 +1,19 @@
 # Development log and next steps
 
+## 2026-10-20 — Website search and sharing metadata
+
+- Clarified the landing page title, description and hero copy around Ruru’s
+  native macOS service coordination, exclusive ownership and safe server
+  failover. The visual structure and runtime demo are unchanged.
+- Added a canonical URL, explicit indexing policy, Open Graph and Twitter card
+  metadata, a large screenshot preview, and `SoftwareApplication` structured
+  data describing platform support, source, licence and core capabilities.
+- Added a root crawler policy, one-page XML sitemap and GitHub Pages custom-domain marker for
+  `https://ruruapp.dev/`; canonical, structured-data and social-preview URLs use
+  that public origin. Local validation covers HTML structure, JSON-LD, XML and
+  referenced assets. Production indexing and rendered search/social cards still
+  depend on crawler refreshes; Search Console registration remains an operator step.
+
 ## 2026-10-19 — App status for any app (auto-detection, spec, exposure)
 
 - Ruru now looks for `/.well-known/ruru` once whenever an HTTP(S) monitor is added (native or Web console), and turns on **Read app status** only if a valid document comes back. No app-specific code or operator toggle is needed. Edited monitors are never switched on automatically. Check Address now reports an HTTP error (such as 401) as an answer, not as an unreachable address.
