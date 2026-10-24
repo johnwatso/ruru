@@ -1,5 +1,16 @@
 # Development log and next steps
 
+## 2026-10-24 — App icon refresh
+
+- `ruru.icon` now puts the owl on a soft sky-blue gradient instead of
+  lavender, with a near-black dark-mode fill. Translucency is
+  off for the opaque owl artwork, which is centred and slightly larger.
+- The owl asset was cleaned of about 6,900 stray semi-transparent halo pixels,
+  cropped and recentred on a 1024 px canvas, and renamed `ruru-owl.png`.
+- Validation: checked Default, Dark and Mono previews in Icon Composer; Debug
+  build passed and the compiled Sequoia `ruru.icns` fallback was inspected. Not
+  checked on a physical Intel/Sequoia Mac or at menu bar/Finder list sizes.
+
 ## 2026-10-22 — Quiet transient operational-report gaps
 
 - Stale/unavailable operational reports now have a 60-second notification grace
