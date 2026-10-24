@@ -14,7 +14,7 @@ settings:
     CODE_SIGN_STYLE: Manual
     GENERATE_INFOPLIST_FILE: YES
     MARKETING_VERSION: "0.2.0"
-    CURRENT_PROJECT_VERSION: "2026101617"
+    CURRENT_PROJECT_VERSION: "2026102212"
   configs:
     Debug:
       ONLY_ACTIVE_ARCH: YES
@@ -29,12 +29,6 @@ packages:
     exactVersion: 1.1.3
   RuruClient:
     path: Clients/RuruClient
-  # WebAuthn verification for the operator Web UI. This is deliberately the
-  # only Web UI-specific server dependency: the existing bounded Network
-  # listener and Cloudflare Tunnel continue to own transport.
-  WebAuthn:
-    url: https://github.com/brokenhandsio/swift-webauthn.git
-    revision: 2b6b4d4cfe9a3d65955ba94dbc09425637952dae
 targets:
   WitnessKit:
     type: framework
@@ -62,7 +56,11 @@ targets:
     type: application
     platform: macOS
     sources:
-      - Sources/Ruru
+      - path: Sources/Ruru
+        excludes:
+          # Shelved until Ruru is active and in use; see Documentation/WEB_UI.md.
+          - RuruWebUI.swift
+          - RuruWebAssets.swift
       - path: ruru.icon
         type: file
         buildPhase: resources
@@ -78,8 +76,6 @@ targets:
         product: DuckDB
       - package: Sparkle
         product: Sparkle
-      - package: WebAuthn
-        product: WebAuthn
     info:
       path: Configuration/Ruru-Info.plist
       properties:
@@ -118,6 +114,8 @@ targets:
       - Sources/Ruru/RuruAlertDelivery.swift
       - Sources/Ruru/RuruServiceIcons.swift
       - Sources/Ruru/RuruDiagnostics.swift
+      - Sources/Ruru/RuruInteractionActivity.swift
+      - Sources/Ruru/WitnessLeasePresentation.swift
     dependencies:
       - target: WitnessKit
       - target: RuruAlerting
@@ -138,7 +136,9 @@ targets:
   WitnessStorageProbe:
     type: tool
     platform: macOS
-    sources: [Tests/StorageProbe]
+    sources:
+      - Tests/StorageProbe
+      - Sources/Ruru/RuruDiagnostics.swift
     dependencies:
       - target: WitnessKit
     settings:

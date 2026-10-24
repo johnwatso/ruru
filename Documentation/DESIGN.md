@@ -5,6 +5,9 @@ Follow SwiftBot's current native console, as defined by SwiftBot's
 window is no longer the visual baseline. This app remains native SwiftUI and
 must run on macOS 15 Sequoia, including the Intel Mac mini.
 
+All Web UI design and implementation is shelved until Ruru is active and in use.
+Use the native console for current operator flows; see [Web UI status](WEB_UI.md).
+
 ## Layout and surfaces
 
 - Use `NavigationSplitView` with a SwiftMiner-style 200pt sidebar: Overview,
@@ -80,7 +83,19 @@ must run on macOS 15 Sequoia, including the Intel Mac mini.
   grant sized to the service's lease length. The ring interpolates between
   one-second polls, refills on each renewal, and is green while renewals keep
   up, orange ("Renewal late") below a third, red in the last seconds. No
-  progress bars for leases. Respect Reduce Motion.
+  progress bars for leases. Respect Reduce Motion. Countdown text updates at
+  most once per second; animate the ring stroke between ticks without rebuilding
+  labels at frame rate. Unowned and recovering leases have no countdown timer.
+  After five minutes without input in Ruru, replace the ring with a status SF
+  Symbol. Current renewals show a green
+  `arrow.trianglehead.2.clockwise.rotate.90.circle.fill` and “In Sync” (lease
+  renewals only, not application data synchronisation); late renewals retain
+  orange/red warnings, recovery is orange and no owner remains neutral. Fade
+  briefly on status changes, with no continuous pulse or rotation. Mouse/keyboard
+  input, activation or reopening restores the ring using the current grant.
+  Respect Reduce Motion for these fades too. One app-local input monitor and
+  one monotonic inactivity deadline control presentation only; authority work,
+  polling and alerts continue while idle or the window is closed.
 - First run opens a four-step setup assistant sheet that gets Ruru working
   before any servers: Welcome, Public Address, Keep Ruru Running, Ready (with
   Add Your First App). Step dots, Finish Later, Back and one primary action.

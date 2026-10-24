@@ -570,16 +570,21 @@ extension WitnessAppModel {
 }
 
 /// The lease shown like a one-time code: the ownership term in grouped digits
-/// with a countdown ring for the current grant. Ruru polls once a second; the
-/// ring interpolates between polls so it drains smoothly.
+/// with a countdown ring for the current grant. Text updates once a second;
+/// SwiftUI animates only the ring's stroke between ticks. After app inactivity,
+/// a status symbol replaces the countdown without a view-owned timer.
 struct WitnessLeaseCode: View {
     let lease: LeaseStatus?
     let leaseSeconds: Double
     var recovering = false
     @State private var anchor = (remaining: 0.0, at: Date.distantPast)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.ruruLeaseAnimationsEnabled) private var animationsEnabled
 
     private var owned: Bool { (lease?.remainingSeconds ?? 0) > 0 }
+    private var idleState: WitnessLeasePresentation {
+        .init(lease: lease, leaseSeconds: leaseSeconds, recovering: recovering)
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -589,36 +594,90 @@ struct WitnessLeaseCode: View {
                     .font(.system(size: 30, weight: .semibold, design: .monospaced))
                     .foregroundStyle(owned ? .primary : .secondary)
                     .contentTransition(.numericText(value: Double(lease?.term ?? 0)))
-                    .animation(reduceMotion ? nil : .snappy, value: lease?.term)
+                    .animation(reduceMotion || !animationsEnabled ? nil : .snappy, value: lease?.term)
                     .textSelection(.enabled)
                     .accessibilityLabel("Ownership term \(lease?.term ?? 0)")
             }
             Spacer(minLength: 12)
-            TimelineView(.periodic(from: .now, by: reduceMotion ? 1 : 1.0 / 30)) { context in
-                let remaining = max(0, anchor.remaining - context.date.timeIntervalSince(anchor.at))
-                HStack(spacing: 10) {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(caption(remaining)).font(.callout.weight(.medium)).foregroundStyle(tint(remaining))
-                        Text("\(Int(leaseSeconds)) s lease").font(.caption).foregroundStyle(.secondary)
-                    }
-                    WitnessLeaseRing(fraction: owned ? remaining / leaseSeconds : 0, seconds: owned ? remaining : nil,
-                                     tint: tint(remaining))
+            if !animationsEnabled {
+                idleStatus
+                    .transition(.opacity)
+            } else if owned, !recovering {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    countdown(max(0, anchor.remaining - context.date.timeIntervalSince(anchor.at)))
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(owned ? "\(Int(ceil(remaining))) seconds left in this grant" : caption(remaining))
+            } else {
+                countdown(0)
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 14)
         .consoleRowGroup()
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: animationsEnabled)
         // Keep the animated/selectable code a single stable accessibility node.
         // macOS can otherwise recurse while resolving its child labels.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Ownership term \(lease?.term ?? 0), \(owned ? "\(Int(ceil(lease?.remainingSeconds ?? 0))) seconds left in this grant" : caption(0))")
+        .accessibilityLabel("Ownership term \(lease?.term ?? 0), \(animationsEnabled && owned && !recovering ? "\(Int(ceil(lease?.remainingSeconds ?? 0))) seconds left in this grant" : idleState.idleCaption)")
         .onAppear(perform: resetAnchor)
         .onChange(of: lease?.remainingSeconds) { resetAnchor() }
+        .onChange(of: animationsEnabled) { resetAnchor() }
     }
 
     private func resetAnchor() { anchor = (lease?.remainingSeconds ?? 0, Date()) }
+
+    private var idleStatus: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(idleState.idleCaption).font(.callout.weight(.medium)).foregroundStyle(idleTint)
+                Text("\(Int(leaseSeconds)) s lease").font(.caption).foregroundStyle(.secondary)
+            }
+            ZStack {
+                Image(systemName: idleSymbolName)
+                    .font(.system(size: 36))
+                    .foregroundStyle(idleTint)
+                    .id(idleState)
+                    .transition(.opacity)
+            }
+            .frame(width: 40, height: 40)
+            .accessibilityHidden(true)
+        }
+        // Fade only on a status edge, never on each poll or renewal.
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: idleState)
+        .help(idleState == .renewing ? "Lease renewals are current." : idleState.idleCaption)
+    }
+
+    private var idleTint: Color {
+        switch idleState {
+        case .renewing: .green
+        case .late, .recovering: .orange
+        case .critical: .red
+        case .unowned: .secondary
+        }
+    }
+
+    private var idleSymbolName: String {
+        // Keep a native fallback on older system symbol catalogues.
+        idleState == .renewing ? Self.idleRenewalSymbolName : idleState.symbolName
+    }
+
+    private static let idleRenewalSymbolName: String = {
+        let requested = WitnessLeasePresentation.renewing.symbolName
+        return NSImage(systemSymbolName: requested, accessibilityDescription: nil) != nil
+            ? requested : "arrow.triangle.2.circlepath.circle.fill"
+    }()
+
+    private func countdown(_ remaining: Double) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(caption(remaining)).font(.callout.weight(.medium)).foregroundStyle(tint(remaining))
+                Text("\(Int(leaseSeconds)) s lease").font(.caption).foregroundStyle(.secondary)
+            }
+            WitnessLeaseRing(fraction: owned && !recovering ? remaining / leaseSeconds : 0,
+                             seconds: owned && !recovering ? remaining : nil, tint: tint(remaining),
+                             animatesCountdown: owned && !recovering && !reduceMotion)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(owned && !recovering ? "\(Int(ceil(remaining))) seconds left in this grant" : caption(remaining))
+    }
 
     private func caption(_ remaining: Double) -> String {
         if recovering { return "Recovering" }
@@ -656,6 +715,7 @@ struct WitnessLeaseRing: View {
     let seconds: Double?
     let tint: Color
     var size: CGFloat = 40
+    var animatesCountdown = false
 
     var body: some View {
         ZStack {
@@ -664,6 +724,7 @@ struct WitnessLeaseRing: View {
                 .trim(from: 0, to: min(1, max(0, fraction)))
                 .stroke(tint, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                .animation(animatesCountdown ? .linear(duration: 1) : nil, value: fraction)
             if let seconds {
                 Text("\(Int(ceil(seconds)))")
                     .font(.system(size: size * 0.32, weight: .semibold, design: .rounded)).monospacedDigit()

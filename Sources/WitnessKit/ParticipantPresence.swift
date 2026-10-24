@@ -55,7 +55,7 @@ public struct ParticipantReport: Codable, Sendable {
     }
 }
 
-public struct ParticipantObservation: Sendable {
+public struct ParticipantObservation: Sendable, Equatable {
     public let clusterID: String
     public let nodeID: String
     public let nodeName: String?

@@ -121,7 +121,7 @@ final class AlertTests: XCTestCase {
                                      serviceNames: ["bot": "SwiftBot"], at: start + 46)
         XCTAssertEqual(result.events.first?.kind, .operationalUnavailable)
         XCTAssertEqual(result.events.first?.detail, "Ruru observed that the operational report is stale or unavailable.")
-        XCTAssertEqual(result.alerts.map(\.kind), [.operationalDegraded, .failoverProtectionImpaired])
+        XCTAssertTrue(result.alerts.isEmpty, "Staleness is recorded immediately but notifications wait for confirmation")
     }
 
     func testFailoverUsesNodeIdentityAndTheNewOwnersWebsite() throws {
@@ -289,6 +289,20 @@ final class AlertSignalTests: XCTestCase {
         }
     }
 
+    func testAServiceWithNoOwnerIsNeverReportedAsRecovered() {
+        var monitor = RuruAlertMonitor()
+        // After a restart quarantine the loss history is gone and nobody owns the lease.
+        _ = monitor.observe(observe([:], recovering: true), at: start)
+        _ = monitor.observe(observe([:]), at: start + 1)
+        guard case .condition(.inconclusive) = unreachable(monitor.conditionSignals(subjects: subjects, at: start + 2))?.shape else {
+            return XCTFail("An unowned service must not clear an open down incident")
+        }
+        _ = monitor.observe(observe(["bot": "Home Mac"]), at: start + 3)
+        let signal = unreachable(monitor.conditionSignals(subjects: subjects, at: start + 4))
+        guard case .condition(.clear) = signal?.shape else { return XCTFail("A live owner clears the condition") }
+        XCTAssertEqual(signal?.detail, "Home Mac now owns SwiftBot.")
+    }
+
     func testAuthorityProblemsAreContinuousReadingsThatClearWhenResolved() {
         var monitor = RuruAlertMonitor()
         _ = monitor.observe(observe([:], tunnel: "Connector exited"), at: start)
@@ -332,6 +346,75 @@ final class AlertSignalTests: XCTestCase {
         signals = monitor.conditionSignals(subjects: subjects, at: start + 101)
         guard case .condition(.clear) = signals.first(where: { $0.trigger == .nodeDegraded })?.shape else { return XCTFail() }
         guard case .condition(.clear) = signals.first(where: { $0.trigger == .protectionImpaired })?.shape else { return XCTFail() }
+    }
+
+    func testTransientStalenessDoesNotNotifyAndSustainedStalenessNotifiesOnce() {
+        for missing in [false, true] {
+            var monitor = OperationalAlertMonitor()
+            var engine = AlertEngineCore()
+            _ = engine.setRules([
+                AlertRule(name: "Readiness", trigger: .nodeDegraded, cooldownSeconds: 0),
+                AlertRule(name: "Protection", trigger: .protectionImpaired, cooldownSeconds: 0)
+            ], now: start)
+            let standby = ParticipantObservation(clusterID: "bot", nodeID: "backup", nodeName: "Backup",
+                                                 role: .standby, ageSeconds: 0, fresh: true)
+            func report(_ state: OperationalState = .ready, fresh: Bool = true) -> OperationalStatusObservation {
+                .init(clusterID: "bot", nodeID: "backup", nodeName: "Backup", state: state,
+                      components: [], ageSeconds: fresh ? 0 : 46, fresh: fresh)
+            }
+            func poll(_ reports: [OperationalStatusObservation], uptime: TimeInterval, wall: TimeInterval? = nil)
+                -> ([RuruAlert.Kind], [AlertHistoryEntry.Kind]) {
+                let now = start + (wall ?? uptime)
+                let result = monitor.observe(reports, participants: [standby], owners: ["bot"],
+                                             serviceNames: ["bot": "SwiftBot"], at: now, uptime: uptime)
+                let notes = monitor.conditionSignals(subjects: subjects, at: now).flatMap { signal in
+                    engine.ingest(signal, now: now).compactMap { effect -> OutgoingNotification? in
+                        if case .history(_, let note) = effect { return note }; return nil
+                    }
+                }
+                return (result.alerts.map(\.kind), notes.map(\.kind))
+            }
+            let absent = missing ? [] : [report(fresh: false)]
+            XCTAssertTrue(poll([report()], uptime: 0).1.isEmpty)
+            XCTAssertTrue(poll(absent, uptime: 46).0.isEmpty)
+            XCTAssertTrue(poll(absent, uptime: 70, wall: 10_000).1.isEmpty, "Wall-clock changes cannot bypass grace")
+            let transientRecovery = poll([report()], uptime: 80)
+            XCTAssertTrue(transientRecovery.0.isEmpty)
+            XCTAssertTrue(transientRecovery.1.isEmpty, "No recovery notice for a suppressed outage")
+            XCTAssertTrue(poll(absent, uptime: 100).1.isEmpty)
+            XCTAssertTrue(poll(absent, uptime: 159).1.isEmpty)
+            let sustained = poll(absent, uptime: 160)
+            XCTAssertEqual(sustained.0, [.operationalDegraded, .failoverProtectionImpaired])
+            XCTAssertEqual(sustained.1, [.opened, .opened])
+            XCTAssertTrue(poll(absent, uptime: 161).1.isEmpty)
+            let recovery = poll([report()], uptime: 170)
+            XCTAssertEqual(recovery.0.count, 2)
+            XCTAssertEqual(recovery.1, [.recovered, .recovered])
+            XCTAssertTrue(poll([report()], uptime: 171).1.isEmpty)
+        }
+    }
+
+    func testReportedFaultDuringStaleGraceStillNotifiesAndStalenessCannotRecoverIt() {
+        var monitor = OperationalAlertMonitor()
+        let standby = ParticipantObservation(clusterID: "bot", nodeID: "backup", nodeName: nil,
+                                             role: .standby, ageSeconds: 0, fresh: true)
+        func poll(_ state: OperationalState, fresh: Bool = true, uptime: TimeInterval)
+            -> [RuruAlert] {
+            monitor.observe([.init(clusterID: "bot", nodeID: "backup", nodeName: nil, state: state,
+                                   components: [], ageSeconds: fresh ? 0 : 46, fresh: fresh)],
+                            participants: [standby], owners: ["bot"], serviceNames: ["bot": "SwiftBot"],
+                            at: start + uptime, uptime: uptime).alerts
+        }
+        _ = poll(.ready, uptime: 0)
+        XCTAssertTrue(poll(.ready, fresh: false, uptime: 46).isEmpty)
+        XCTAssertEqual(poll(.degraded, uptime: 50).map(\.kind), [.operationalDegraded, .failoverProtectionImpaired])
+        XCTAssertTrue(poll(.degraded, fresh: false, uptime: 96).isEmpty)
+        let signals = monitor.conditionSignals(subjects: subjects, at: start + 96)
+        XCTAssertEqual(signals.first { $0.trigger == .nodeDegraded }?.shape, .condition(.inconclusive))
+        guard case .condition(.active) = signals.first(where: { $0.trigger == .protectionImpaired })?.shape else {
+            return XCTFail("Staleness must not recover an existing protection incident")
+        }
+        XCTAssertEqual(poll(.ready, uptime: 100).map(\.kind), [.operationalRecovered, .failoverProtectionRestored])
     }
 
     func testOwnershipTransfersIncludePlannedHandoffsButNotRestartsOrQuarantine() {

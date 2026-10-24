@@ -1,5 +1,220 @@
 # Development log and next steps
 
+## 2026-10-22 — Quiet transient operational-report gaps
+
+- Stale/unavailable operational reports now have a 60-second notification grace
+  measured with monotonic uptime, after the existing freshness limit. A report
+  that resumes during the grace produces neither a readiness warning nor a
+  recovery notification. Sustained absence still alerts once and resolves with
+  fresh ready evidence. This covers both retained stale and missing reports,
+  rule-based delivery and the legacy delivery fallback.
+- Related failover-protection notifications also wait for confirmation when
+  impairment is solely a transient reporting gap. Explicit application-reported
+  faults still alert immediately; staleness cannot resolve an existing incident.
+  Raw report freshness and node activity remain immediate. Lease authority,
+  client contracts, report expiry and ownership behaviour are unchanged.
+- Validation: 61 targeted Xcode alert tests passed, including new deterministic
+  checks for transient/sustained gaps, missing reports, exact grace boundary,
+  repeated polls, fresh recovery, wall-clock changes and faults during grace.
+  Debug app build and `git diff --check` passed. No live DevMini/Discord failure drill or
+  physical Intel/Sequoia execution was performed.
+
+## 2026-10-22 — No false "is back" alerts for unowned services
+
+- A service with no lease owner and no observed loss (typically after a Ruru
+  restart quarantine wipes loss history) now reports its down condition as
+  inconclusive instead of clear. Previously that cleared an open "is down"
+  incident and sent "SwiftBot is back — Ownership is normal." while SwiftBot
+  was not running. Only a live owner now resolves the incident.
+- Validation: `AlertSignalTests`, `AlertEngineTests` and `AlertServiceTests`
+  pass (46 tests). Not yet re-checked against a live SwiftBot restart cycle.
+
+## 2026-10-22 — Universal test archive 2026102212
+
+- Exported Ruru 0.2.0 (2026102212) as
+  `~/Desktop/Ruru-0.2.0-2026102212-universal.zip`, with a SHA-256 sidecar.
+  Refreshed the build number in `project.yml` and regenerated with XcodeGen.
+  The retained ZIP, receipt, installation notes and validation logs are in
+  `Build/Testing/2026102212/`. This export includes the current working tree's
+  console/resource fixes, inactivity status symbol and shelved Web UI changes;
+  the Discord mention discussion did not add mention support.
+- Release build, whole-bundle universal/minimum-OS/dependency checks and strict
+  signatures passed before and after ZIP extraction. ZIP integrity/app-only
+  content checks passed; built and extracted executable hashes match. The
+  extracted bundle stayed running for eight seconds in isolated preview. macOS
+  emitted a nonfatal sandbox-extension warning during that local launch; the
+  preview process did not exit. All 297 source tests passed before this export's
+  build-number-only change; the log is retained with the receipt.
+- SHA-256: `f1c326d19dbfe8ec9b5a78125d51dd2727a92bd565f952305255cf081ca4e603`.
+- Limits: ad-hoc development export, not notarised; updates remain disabled
+  without ShipHook's public key. Physical Intel/Sequoia execution, multi-day RAM
+  behaviour and live failure drills remain operator testing. No production
+  storage, credentials, login item, power setting or tunnel was changed.
+
+## 2026-10-22 — Rest the lease animation after five minutes
+
+- Five minutes without input in Ruru replaces the lease countdown with a status
+  symbol. Healthy renewals use the requested green
+  `arrow.trianglehead.2.clockwise.rotate.90.circle.fill` and “In Sync”; late or
+  expiring grants show orange/red warnings, recovery shows an orange clock and
+  unowned services a neutral clock. “In Sync” describes lease renewals only.
+  Older symbol catalogues use the native circular-arrows equivalent.
+- Status edges fade briefly with Reduce Motion respected; there is no repeating
+  pulse/rotation or idle countdown timeline. Interaction, activation and reopening
+  restore the ring anchored to the current grant. An app-owned local input monitor
+  and at most one sleeping task use a monotonic deadline; repeated input does not
+  create timers or publish unchanged activity flags. Passive polling cannot reset
+  inactivity. Settings and menu interaction count too. Shutdown removes the monitor
+  and cancels the sleeper. Lease handling, polling, alerts and menu bar lifetime
+  remain independent of this presentation state.
+- Validation: all 297 Xcode tests passed on the final full run. The first full
+  run failed the existing restart-lock and metadata-admission tests; both passed
+  a targeted retry and the final full run without changes to those tests or their
+  implementations. XcodeGen, Debug app compilation, Release universal build and
+  artifact verification passed for x86_64/arm64 with
+  macOS 15 deployment targets. Four isolated inactivity/presentation tests cover
+  deadline boundaries, deadline extension, publication suppression, timeout/resume,
+  cancellation and warning/expiry/recovery states. A native preview driver checked
+  the five-minute transition using an injected clock, live status changes without
+  input, real AppKit local mouse-event dispatch restoring the ring and window mouse
+  movement configuration. Healthy, late, critical, recovering, unowned and resumed
+  native views were rendered and inspected.
+- Limits: no physical Intel/Sequoia run or multi-day resource soak; this does not
+  establish that the reported 8.2 GB growth is fixed. The system Reduce Motion
+  toggle, sleep/wake and distribution/update installation were not exercised.
+
+## 2026-10-22 — Shelve all Web UI work
+
+- All Web UI related implementation, design, integration proposals and browser
+  validation are deferred until Ruru is active and in use, when need and scope
+  will be reassessed. No scheduled resumption. This supersedes Web UI follow-ups
+  in earlier entries, including richer standby websites and browser administration.
+- Removed Ruru’s browser handler wiring and native enrollment controls. Retained
+  prototype sources are excluded from Debug/Release; removed the active WebAuthn
+  dependency. Existing saved passkeys are untouched. Native operation, public
+  service APIs and participating apps’ existing Web UI metadata remain compatible.
+- Recorded the full scope in [Web UI status](WEB_UI.md), architecture, design,
+  development and operations guidance. Historical work remains documented.
+- Validation: XcodeGen and Debug build passed; all 293 Xcode tests passed,
+  including browser-route 404 checks alongside successful health and lease
+  requests. Release build passed and its app executable contains x86_64 and
+  arm64 slices. Live Intel/Sequoia execution and native UI visual inspection
+  were not performed for this change.
+
+
+## 2026-10-22 — Bound idle Guarding console updates
+
+- The supplied Intel/macOS 15.8 process sample confirms an 8.2 GB physical
+  footprint after roughly 5 days 17 hours of uptime. The accompanying screenshot
+  shows Guarding details with no active owner. The sample contains substantial
+  SwiftUI/AttributeGraph update and layout work; it does not identify the retained
+  allocations or prove that SwiftUI owns all of that memory.
+- Removed the unconditional 30 Hz countdown view updates. Unowned/recovering
+  grants now show a static ring; active countdown text updates once a second and
+  only the ring stroke animates between ticks, respecting Reduce Motion.
+- Polling now publishes lease snapshots, participant activity, presence,
+  operational reports, pairing state, catalogue state and monitor state only
+  when their values differ. Exact equality preserves countdown, recovery,
+  owner/term, names, history and report-age changes. Sampling, monitoring,
+  alerts and the lease authority continue independently of presentation updates.
+- Validation: all 293 isolated Xcode tests passed. A native app-model check
+  suppressed 10,000 identical snapshots and delivered acquisition, countdown,
+  refill, names, owner/term, expiry, recovery, history and unavailable-state
+  changes. The 60-second ownerless preview's CPU work fell from about 3.29 to
+  0.053 CPU seconds after startup; its physical footprint settled near 38 MB.
+  Native ownerless, active, late and recovering renders were checked. Release
+  universal build and artifact verification passed for x86_64/arm64 and macOS 15
+  deployment targets. Temporary native drivers were not added to the shipped app.
+- Limits: these changes remove demonstrated unnecessary UI work; a multi-day
+  Intel/Sequoia run is still needed to confirm whether memory growth stops. The
+  local arm64 preview did not reproduce the multi-day 8.2 GB use. The actual
+  system Reduce Motion toggle and distribution/update installation were not
+  exercised; the existing Reduce Motion environment guard remains in place.
+  No lease protocol, fencing, persistence, quarantine or client capability changed.
+
+## 2026-10-22 — Investigate reported 8 GB memory use
+
+- Reviewed both supplied Intel/Sequoia diagnostic exports from build
+  `2026101617`. They describe one service and bounded ownership history, but
+  contain no process memory measurements or process age. They do not identify
+  the cause of the reported 8 GB use.
+- Diagnostic exports now measure Ruru's own resident bytes, physical footprint
+  (including compressed memory charged to the process) and process age, with
+  unavailable values handled explicitly. Measurements happen only on export;
+  no sampling timer or growing history is added to the authority.
+- Added an isolated, bounded `WitnessStorageProbe --memory-soak` workload with
+  49 ownership events, snapshots and renewals, stable-term/history checks and
+  periodic JSON memory samples. Documented its use and how to capture an
+  affected process in Activity Monitor before restarting.
+- Validation so far: all 292 Xcode Debug tests passed, including process-resource
+  capture, redacted report output and a subprocess soak smoke check. The final
+  advancing-clock helper and diagnostics passed a further four focused Xcode
+  checks. The arm64
+  workload with advancing simulated time completed 10,000 snapshots and 2,000
+  renewals against the existing Release framework, ending around 33 MB resident
+  and 17 MB physical footprint (peak sampled footprint about 20 MB), with term,
+  deadline and history checks passing. A fresh Release universal app build and
+  artifact preflight passed for x86_64/arm64 and macOS 15 deployment targets.
+  Fixed the read-only Sparkle validator's stale `docs/` appcast references to
+  the existing `Website/` directory. ShipHook signing, notarisation and update
+  installation remain separate release validation.
+- Limits: the 8 GB growth is not reproduced or fixed. Storage-only accelerated
+  checks do not cover the SwiftUI console, monitoring/alerts, live HTTP/tunnel
+  traffic or multi-day Intel/Sequoia operation. An affected-process capture and
+  window-open/window-closed growth comparison remain necessary to locate the
+  allocations. No lease protocol, client API, fencing or database policy changed.
+
+## 2026-10-21 — Ordinary SwiftBot standby takeover
+
+- SwiftBot now lets started, configured standbys with a Ruru identity retry
+  acquisition through their existing local preflight at a serial five-second
+  interval. A non-preferred backup can acquire once the former owner's lease
+  expires; only a valid grant permits activation. Workers, stopped nodes and
+  legacy nodes gain no automatic election path. Local takeover readiness is
+  displayed separately from listener health and operational-status reports.
+- SwiftBot checks readiness before and after acquisition, excludes unfinished
+  state imports from activation, preserves same-identity leases across hook
+  refreshes and rejects stale connection/session replies. RuruClient's existing
+  typed minimum-term acquisition API is reused. No authority, client-package API,
+  lease wire contract, database, resource budget or generic capability changed.
+- Validation: SwiftBot Debug build and 183 selected tests passed using isolated
+  stores, fake authorities/output, mock HTTP and loopback sockets. Coverage
+  includes outstanding-grant expiry, competing backups, unavailable authority,
+  blocked readiness, Stop, bounded retries, state changes during acquisition and
+  stale replies. Offscreen light/dark checks covered ready and blocked states in
+  SwiftMesh and Overview; the temporary renderer was removed. No live two-Mac/Ruru/Discord,
+  sleep/wake, Release universal or target Intel/Sequoia drill was performed.
+- Remaining client work: automatic Preferred Primary return scheduling (the
+  coordinated handback protocol remains), shared administration/current-owner
+  navigation, and the richer standby website. These are SwiftBot workflows;
+  Ruru remains the application-neutral lease authority.
+
+## 2026-10-21 — SwiftBot failover host-console separation
+
+- Reviewed SwiftBot's legacy standby restrictions against Ruru's ownership and
+  coordination boundaries. The first client-side pass keeps local host controls
+  available while guarding shared bot configuration and exclusive output.
+  Current Owner, Preferred Primary and reported readiness remain separate facts.
+- SwiftBot now permits local appearance, updates, startup, local sign-in, cache
+  clearing and companion pairing on standby, with shared credentials/policy
+  still guarded. Runtime ownership, standby transport and recovery drive
+  lifecycle wording; the UI no longer claims the removed peer watch is active.
+- Restored SwiftBot's existing eligible Ruru recovery path after settings apply
+  and demotion, including recovery following a Ruru restart,
+  guarded by Start/Stop intent. Autostart off and settings saves after Stop do
+  not reacquire; a grant arriving after Stop is returned before local ownership.
+- No Ruru runtime, lease protocol or public RuruClient capability change is
+  needed. Shared editing through the current owner and a richer standby website
+  remain the next client-side phase.
+- Validation: SwiftBot Debug build and the final 159 selected tests passed with
+  no exclusions, including recovery after Ruru restart, preferred-primary
+  handback, stopped-intent, late-grant, lease/output, shared/local configuration
+  and credential/storage isolation coverage. Offscreen light/dark checks covered
+  the affected Discord, Integrations, Web Interface and Updates settings.
+  The ordinary-standby acquisition gap is closed by the next client pass above;
+  a running listener is not takeover readiness. No live two-Mac/Ruru drill,
+  Release update installation or Intel/Sequoia deployment was performed.
+
 ## 2026-10-20 — SwiftMiner enhanced support (roadmap, Debug only)
 
 - SwiftMiner, the intended first adopter, serves `/.well-known/ruru` (version,

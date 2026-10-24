@@ -303,13 +303,19 @@ struct OperationalAlertMonitor {
         var standby = false
         var wasReady = false
         var changedAt = Date.distantPast
+        var unavailableSince: TimeInterval?
+        var awaitingStaleConfirmation = false
     }
 
+    /// Notification debounce only; raw report freshness and node activity stay immediate.
+    private static let staleAlertGrace: TimeInterval = 60
+    private var alertConditions: [String: Condition] = [:]
     private var states: [String: State] = [:]
     private var protectionImpaired: [String: Date] = [:]
 
     mutating func observe(_ observations: [OperationalStatusObservation], participants: [ParticipantObservation],
-                          owners: Set<String>, serviceNames: [String: String], at now: Date)
+                          owners: Set<String>, serviceNames: [String: String], at now: Date,
+                          uptime: TimeInterval = ProcessInfo.processInfo.systemUptime)
         -> (alerts: [RuruAlert], events: [ParticipantActivityTransition]) {
         let roles = Dictionary(uniqueKeysWithValues: participants.filter(\.fresh).map {
             ("\($0.clusterID)|\($0.nodeID)", $0.role)
@@ -323,23 +329,15 @@ struct OperationalAlertMonitor {
             let nodeName = observation.nodeName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? observation.nodeID
             let standby = roles[key] == .standby
             let prior = states[key]
+            let unavailableSince = condition == .unavailable ? (prior?.unavailableSince ?? uptime) : nil
             states[key] = State(condition: condition, nodeName: nodeName, standby: standby || prior?.standby == true,
                                 wasReady: condition == .ready || prior?.wasReady == true,
-                                changedAt: prior?.condition == condition ? prior!.changedAt : now)
+                                changedAt: prior?.condition == condition ? prior!.changedAt : now,
+                                unavailableSince: unavailableSince,
+                                awaitingStaleConfirmation: unavailableSince.map { uptime - $0 < Self.staleAlertGrace } ?? false)
             guard prior?.condition != condition else { continue }
             events.append(.init(clusterID: observation.clusterID, nodeID: observation.nodeID, nodeName: nodeName,
                                 date: now, kind: condition.activityKind, detail: condition.detail))
-            if prior?.condition == .ready, condition != .ready {
-                let service = serviceNames[observation.clusterID] ?? observation.clusterID
-                alerts.append(.init(kind: .operationalDegraded, key: "operational|\(key)",
-                                    title: "\(nodeName) needs attention", detail: "\(service) · \(condition.detail)",
-                                    context: .init(service: service, server: nodeName)))
-            } else if prior != nil, prior!.condition != .ready, condition == .ready {
-                let service = serviceNames[observation.clusterID] ?? observation.clusterID
-                alerts.append(.init(kind: .operationalRecovered, key: "operational|\(key)",
-                                    title: "\(nodeName) is operationally ready", detail: "\(service) · SwiftBot reported that readiness checks are complete.",
-                                    context: .init(service: service, server: nodeName)))
-            }
         }
 
         // A retained report that stops refreshing becomes a Ruru-observed
@@ -351,14 +349,30 @@ struct OperationalAlertMonitor {
             guard pieces.count == 2 else { continue }
             let clusterID = pieces[0], nodeID = pieces[1]
             states[key] = State(condition: .unavailable, nodeName: prior.nodeName, standby: prior.standby,
-                                wasReady: prior.wasReady, changedAt: now)
+                                wasReady: prior.wasReady, changedAt: now, unavailableSince: uptime,
+                                awaitingStaleConfirmation: true)
             events.append(.init(clusterID: clusterID, nodeID: nodeID, nodeName: prior.nodeName, date: now,
                                 kind: .operationalUnavailable, detail: Condition.unavailable.detail))
-            if prior.condition == .ready {
-                let service = serviceNames[clusterID] ?? clusterID
+        }
+
+        for (key, var state) in states.sorted(by: { $0.key < $1.key }) {
+            if let since = state.unavailableSince {
+                state.awaitingStaleConfirmation = uptime - since < Self.staleAlertGrace
+                states[key] = state
+            }
+            guard !state.awaitingStaleConfirmation else { continue }
+            let prior = alertConditions.updateValue(state.condition, forKey: key)
+            let clusterID = String(key.split(separator: "|", maxSplits: 1)[0])
+            guard let service = serviceNames[clusterID] else { continue }
+            if prior == .ready, state.condition != .ready {
                 alerts.append(.init(kind: .operationalDegraded, key: "operational|\(key)",
-                                    title: "\(prior.nodeName) needs attention", detail: "\(service) · \(Condition.unavailable.detail)",
-                                    context: .init(service: service, server: prior.nodeName)))
+                                    title: "\(state.nodeName) needs attention", detail: "\(service) · \(state.condition.detail)",
+                                    context: .init(service: service, server: state.nodeName)))
+            } else if let prior, prior != .ready, state.condition == .ready {
+                alerts.append(.init(kind: .operationalRecovered, key: "operational|\(key)",
+                                    title: "\(state.nodeName) is operationally ready",
+                                    detail: "\(service) · \(state.condition.detail)",
+                                    context: .init(service: service, server: state.nodeName)))
             }
         }
 
@@ -366,6 +380,7 @@ struct OperationalAlertMonitor {
             let standbys = states.filter { key, state in key.hasPrefix(clusterID + "|") && state.standby && state.wasReady }
             let protected = !standbys.isEmpty && standbys.contains { $0.value.condition == .ready }
             let impaired = owners.contains(clusterID) && !standbys.isEmpty && !protected
+                && (protectionImpaired[clusterID] != nil || standbys.contains { !$0.value.awaitingStaleConfirmation })
             if impaired, protectionImpaired[clusterID] == nil {
                 protectionImpaired[clusterID] = now
                 events.append(.init(clusterID: clusterID, nodeID: "ruru", nodeName: "Ruru", date: now,
@@ -386,6 +401,7 @@ struct OperationalAlertMonitor {
             }
         }
         states = states.filter { key, _ in serviceNames[key.split(separator: "|", maxSplits: 1).first.map(String.init) ?? ""] != nil }
+        alertConditions = alertConditions.filter { states[$0.key] != nil }
         protectionImpaired = protectionImpaired.filter { serviceNames[$0.key] != nil }
         return (alerts, events)
     }
@@ -411,8 +427,9 @@ struct OperationalAlertMonitor {
                 let observed = state.condition == .unavailable
                 signals.append(AlertSignal(
                     trigger: .nodeDegraded, subject: subject,
-                    shape: .condition(.active(.init(since: state.changedAt == .distantPast ? nil : state.changedAt,
-                                                    confirmed: true, maxGap: 30))),
+                    shape: state.awaitingStaleConfirmation ? .condition(.inconclusive)
+                        : .condition(.active(.init(since: state.changedAt == .distantPast ? nil : state.changedAt,
+                                                  confirmed: true, maxGap: 30))),
                     title: "\(state.nodeName) needs attention",
                     detail: "\(service) · " + (observed ? "Ruru observed that the operational report is stale or unavailable."
                                                        : state.condition.neutralDetail),
@@ -428,8 +445,13 @@ struct OperationalAlertMonitor {
                     detail: "The Primary still owns the service, but no previously-ready standby is operationally ready.",
                     basis: .ruruObserved, observedAt: now))
             } else {
+                let pending = states.contains { key, state in
+                    key.hasPrefix(clusterID + "|") && state.standby && state.wasReady && state.awaitingStaleConfirmation
+                } && !states.contains { key, state in
+                    key.hasPrefix(clusterID + "|") && state.standby && state.wasReady && state.condition == .ready
+                }
                 signals.append(AlertSignal(
-                    trigger: .protectionImpaired, subject: subject, shape: .condition(.clear),
+                    trigger: .protectionImpaired, subject: subject, shape: pending ? .condition(.inconclusive) : .condition(.clear),
                     title: "\(subject.name) failover protection is restored",
                     detail: "Ruru observed an operationally ready standby again.", basis: .ruruObserved, observedAt: now))
             }
@@ -766,7 +788,7 @@ struct RuruAlertMonitor {
         }
         for (clusterID, subject) in subjects.services.sorted(by: { $0.key < $1.key }) {
             let shape: AlertSignal.Shape
-            var title = "\(subject.name) is back", detail = "Ownership is normal."
+            var title = "\(subject.name) is back", detail = "No server owns \(subject.name)."
             if !serving {
                 shape = .condition(.inconclusive)
             } else if let loss = lost[clusterID] ?? down[clusterID] {
@@ -777,9 +799,13 @@ struct RuruAlertMonitor {
                     detail: "\(loss.owner.name) stopped renewing and no other server has taken over.",
                     basis: .authoritativeLease, observedAt: now))
                 continue
-            } else {
-                if let owner = owners[clusterID] { detail = "\(owner.name) now owns \(subject.name)." }
+            } else if let owner = owners[clusterID] {
+                detail = "\(owner.name) now owns \(subject.name)."
                 shape = .condition(.clear)
+            } else {
+                // No owner and no observed loss (for example right after a restart
+                // quarantine) says nothing about recovery; only a live owner clears.
+                shape = .condition(.inconclusive)
             }
             title = "\(subject.name) is back"
             signals.append(AlertSignal(trigger: .primaryUnreachable, subject: subject, shape: shape,

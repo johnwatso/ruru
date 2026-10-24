@@ -178,7 +178,6 @@ private struct WitnessInternetPage: View {
     @State private var error: String?
     @State private var confirmingPause = false
     @State private var showingConnectionSettings = false
-    @State private var webEnrollmentCode: String?
 
     var body: some View {
         ScrollView {
@@ -226,36 +225,6 @@ private struct WitnessInternetPage: View {
                             HStack { ProgressView().controlSize(.small); Text(model.internetProgress).font(.callout) }
                         }
                     }
-                })
-                ConsoleSection("Web Console", content: {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if let origin = model.webUIOrigin {
-                            ConsoleSettingRow(title: "Operator address", subtitle: "A passkey is required before Ruru exposes monitors.") {
-                                VStack(alignment: .trailing, spacing: 6) {
-                                    Text(origin).font(.callout.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
-                                    Button("Copy Address", systemImage: "doc.on.doc") { model.copy(origin) }.buttonStyle(.borderless)
-                                }
-                            }
-                            Text("Sign-in uses passkeys only. Cloudflare Access can optionally sit in front of this page, but it must allow /v1/* and /health so servers keep working unattended.")
-                                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            HStack(spacing: 12) {
-                                Button("Create One-Time Enrolment Code") {
-                                    Task {
-                                        do { webEnrollmentCode = try await model.beginWebUIEnrollment(); error = nil }
-                                        catch let caught { self.error = caught.localizedDescription }
-                                    }
-                                }.buttonStyle(.bordered)
-                                if let webEnrollmentCode {
-                                    Text(webEnrollmentCode).font(.callout.monospaced()).textSelection(.enabled)
-                                    Text("Expires in 10 minutes.").font(.callout).foregroundStyle(.secondary)
-                                }
-                            }
-                        } else {
-                            Text("Set up and start the Cloudflare tunnel first. The Web Console only operates behind its public HTTPS address.")
-                                .font(.callout).foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(16)
                 })
                 ConsoleSection(title: "Connection Check", accessory: {
                     Button(model.transportDiagnosticsBusy ? "Checking…" : "Test Connection") {

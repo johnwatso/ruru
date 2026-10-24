@@ -15,15 +15,24 @@ final class RuruDiagnosticsTests: XCTestCase {
                               participants: [.init(identifier: "participant-1", role: "active", ageSeconds: 3.2,
                                                    fresh: true, hasWebUI: true)],
                               events: [.init(time: Date(timeIntervalSince1970: 1_700_000_000), action: "Acquired",
-                                             participant: "participant-1", term: 42)])]
+                                             participant: "participant-1", term: 42)])],
+            resources: .init(residentBytes: 123_456, physicalFootprintBytes: 234_567, processAgeSeconds: 3_661)
         ))
 
         XCTAssertTrue(report.contains("=== Ruru Diagnostic Report ==="))
         XCTAssertTrue(report.contains("state=Running listener=port 38990 recovery=12s authorityError=present"))
         XCTAssertTrue(report.contains("participant=participant-1 role=active contact=fresh age=3s webUI=reported"))
         XCTAssertTrue(report.contains("action=Acquired participant=participant-1 term=42"))
+        XCTAssertTrue(report.contains("residentBytes=123456 physicalFootprintBytes=234567 processAge=1h 1m"))
         XCTAssertFalse(report.localizedCaseInsensitiveContains(secret))
         XCTAssertFalse(report.contains("https://"))
+    }
+
+    func testResourceCaptureMeasuresOnlyTheCurrentProcess() throws {
+        let resources = RuruDiagnostics.Resources.capture()
+        XCTAssertGreaterThan(try XCTUnwrap(resources.residentBytes), 0)
+        XCTAssertGreaterThan(try XCTUnwrap(resources.physicalFootprintBytes), 0)
+        XCTAssertGreaterThanOrEqual(try XCTUnwrap(resources.processAgeSeconds), 0)
     }
 
     func testFilenameIsStableAndSafeForSaving() {

@@ -381,6 +381,33 @@ final class WitnessHTTPTests: XCTestCase {
         if case .reject(400) = HTTPParser.parse(pipelined) { } else { XCTFail("Pipelined request accepted") }
     }
 
+    func testShelvedWebRoutesReturnNotFoundWhileServiceAPIRemainsAvailable() async throws {
+        let database = try store()
+        let server = try WitnessHTTPServer(store: database, clusterID: "bot", token: token)
+        let port = try await server.start(port: 0)
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        do {
+            for path in ["/", "/web/", "/web/app.js", "/api/web/monitors", "/api/web/auth/options"] {
+                let (_, response) = try await session.data(from: URL(string: "http://127.0.0.1:\(port)\(path)")!)
+                XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 404, path)
+            }
+            let (_, health) = try await session.data(from: URL(string: "http://127.0.0.1:\(port)/health")!)
+            XCTAssertEqual((health as? HTTPURLResponse)?.statusCode, 200)
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/v1/lease/acquire")!)
+            request.httpMethod = "POST"
+            request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+            request.httpBody = try JSONEncoder().encode(LeaseRequest(clusterID: "bot", nodeID: "primary", term: 0))
+            let (body, response) = try await session.data(for: request)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            XCTAssertEqual(try JSONDecoder().decode(LeaseGrant.self, from: body).ownerNodeID, "primary")
+            await server.stop()
+        } catch {
+            await server.stop()
+            throw error
+        }
+    }
+
     func testWebHandlerIsBoundedToWebNamespaceAndCannotInterceptLeases() async throws {
         let database = try store()
         let server = try WitnessHTTPServer(store: database, clusterID: "bot", token: token,

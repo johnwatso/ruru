@@ -44,7 +44,11 @@ history: SwiftBot-reported ready/synchronising/outdated/degraded states are
 labelled separately from Ruru-observed stale reports and failover-protection
 changes. A previously ready standby becoming degraded or stale can alert the
 operator even while the current owner remains healthy; recovery produces a
-separate resolved alert. These observations and delivery failures never affect
+separate resolved alert. Stale/unavailable readiness reports must remain unavailable
+for a further 60 seconds of monotonic time before readiness or related failover-
+protection notifications open. Fresh reports cancel this notification grace;
+application-reported faults remain immediate. Raw freshness and node activity
+history still record staleness immediately. These observations and delivery failures never affect
 the lease route, term, output permission, or promotion decision.
 
 ## Monitoring and alerts
@@ -131,6 +135,18 @@ failure behaviour, sleep/wake, a two-server failover drill, backup/restore,
 and a bounded long-running resource check. Features already implemented are not
 removed merely to make the source tree smaller; removal is justified only by a
 demonstrated safety, maintenance, or operator-cost problem.
+
+## Web UI shelved
+
+All Web UI work is shelved until Ruru is active and in use, when its need and
+scope will be reassessed. The app does not install a browser handler or expose
+operator enrollment controls. The retained browser prototype is excluded from
+builds, and its WebAuthn dependency is no longer included. See
+[Web UI status](WEB_UI.md) for the deferred scope and reassessment criteria.
+
+Existing participant-reported Web UI origins and client contracts remain
+compatible; they are metadata for participating apps, not a Ruru browser console.
+The native console and service API remain the operational interfaces.
 
 ## Wire compatibility
 

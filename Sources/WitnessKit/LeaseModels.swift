@@ -39,7 +39,7 @@ public struct LeaseReply: Sendable {
     static let released = Self(status: 200, body: Data(#"{"released":true}"#.utf8))
 }
 
-public struct LeaseStatus: Identifiable, Sendable {
+public struct LeaseStatus: Identifiable, Sendable, Equatable {
     public var id: String { clusterID }
     public let clusterID: String
     public let ownerNodeID: String
@@ -53,7 +53,7 @@ public struct LeaseStatus: Identifiable, Sendable {
     }
 }
 
-public struct WitnessEvent: Identifiable, Sendable {
+public struct WitnessEvent: Identifiable, Sendable, Equatable {
     public let clusterID: String
     public let id: Int64
     public let time: Date
@@ -71,7 +71,7 @@ public struct WitnessEvent: Identifiable, Sendable {
 /// Durable display history for self-reported participant telemetry and
 /// Ruru-observed operational transitions. These records are informational only
 /// and never participate in lease decisions.
-public struct ParticipantActivityRecord: Identifiable, Sendable {
+public struct ParticipantActivityRecord: Identifiable, Sendable, Equatable {
     public let id: Int64
     public let clusterID: String
     public let nodeID: String
@@ -97,7 +97,7 @@ public enum WitnessNodeName {
     }
 }
 
-public struct WitnessSnapshot: Sendable {
+public struct WitnessSnapshot: Sendable, Equatable {
     public let recoverySeconds: Double
     public let leases: [LeaseStatus]
     public let events: [WitnessEvent]

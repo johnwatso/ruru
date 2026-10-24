@@ -27,6 +27,13 @@ framework used by both WitnessKit and RuruAlerting. Keep this dependency even
 though the app's SwiftUI code does not import DuckDB. A successful link alone
 does not prove that the distributed bundle can find all its libraries.
 
+## Shelved Web UI
+
+The browser console prototype is excluded from both Debug and Release builds,
+with no WebAuthn package dependency or runtime handler. All Web UI development,
+design and validation tasks are deferred until Ruru is active and in use; see
+[Web UI status](WEB_UI.md). Do not re-enable it as part of deployment validation.
+
 ## Tests and preview
 
 The RuruClient package has its own unit tests:
@@ -36,6 +43,24 @@ server. CI (`.github/workflows/ci.yml`) runs both on macOS 15 and verifies the
 universal Release binary.
 
 Tests use temporary storage and injected credentials. The test-only `WitnessStorageProbe` verifies recovery after killing an authority process immediately after an acknowledged grant. It is not bundled in the app.
+
+For an accelerated memory investigation, build `WitnessStorageProbe` in Release
+with Xcode and run the resulting executable:
+
+```sh
+xcodebuild -project Ruru.xcodeproj -target WitnessStorageProbe -configuration Release build
+/path/to/Release/WitnessStorageProbe --memory-soak /tmp/ruru-storage-memory.json 10000
+```
+
+The probe creates and removes its own temporary authority, seeds 49 ownership
+events, polls snapshots and renews every fifth poll, checking the term and
+retained history. It writes at most 101 resource samples (one per 1,000 cycles,
+plus the start/end), including resident memory and physical footprint. The
+iteration limit is 100,000. This is a storage-only workload with an advancing
+simulated monotonic clock (renewals change the expiry), not a wall-time soak or
+coverage of the SwiftUI console, HTTP listener,
+monitoring, alert delivery or Cloudflare helper. Run those checks separately on
+the Intel/Sequoia deployment before claiming the reported growth is fixed.
 
 Run the application with `--preview` to inspect the native console without creating Keychain data, opening a listener, or registering a login item:
 

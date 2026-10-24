@@ -1,5 +1,5 @@
 {
-  "originHash" : "475f9f2ce57de8a36f8c20c5e754a23fc8001e70a5929da64e416cf08913cb2f",
+  "originHash" : "01fbe0ee88176cdb44ddc51c9607c301032a7f04dda9bb329a09b630082bfffe",
   "pins" : [
     {
       "identity" : "duckdb-swift",
@@ -17,50 +17,6 @@
       "state" : {
         "revision" : "79bc9e872948e47877e76f194cb0c8e0412b0b90",
         "version" : "2.9.5"
-      }
-    },
-    {
-      "identity" : "swift-asn1",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-asn1.git",
-      "state" : {
-        "revision" : "3b6410f7dee09eb33cdd26260c5fd47fda19b0e2",
-        "version" : "1.7.3"
-      }
-    },
-    {
-      "identity" : "swift-crypto",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-crypto.git",
-      "state" : {
-        "revision" : "da9d28d69ebe3894b18376c8f2395c2f37b8448f",
-        "version" : "4.5.2"
-      }
-    },
-    {
-      "identity" : "swift-log",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-log.git",
-      "state" : {
-        "revision" : "4038b6a4f74a1426f47eb1dd5b4bb5628a15d597",
-        "version" : "1.16.1"
-      }
-    },
-    {
-      "identity" : "swift-webauthn",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/brokenhandsio/swift-webauthn.git",
-      "state" : {
-        "revision" : "2b6b4d4cfe9a3d65955ba94dbc09425637952dae"
-      }
-    },
-    {
-      "identity" : "swiftcbor",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/unrelentingtech/SwiftCBOR.git",
-      "state" : {
-        "revision" : "fd929a6d8f7651ce0f63fc99397fd5762358cc29",
-        "version" : "0.6.0"
       }
     }
   ],

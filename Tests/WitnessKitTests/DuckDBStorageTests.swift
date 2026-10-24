@@ -205,4 +205,31 @@ final class DuckDBStorageTests: XCTestCase {
         let next = try JSONDecoder().decode(LeaseGrant.self, from: acquired.body)
         XCTAssertEqual(next.term, original.term + 1)
     }
+
+    func testMemorySoakProbeUsesAnIsolatedAuthorityAndExportsResourceSamples() async throws {
+        let directory = try location().deletingLastPathComponent()
+        let report = directory.appendingPathComponent("memory.json")
+        let products = Bundle(for: Self.self).bundleURL.deletingLastPathComponent()
+        let child = Process()
+        child.executableURL = products.appendingPathComponent("WitnessStorageProbe")
+        child.arguments = ["--memory-soak", report.path, "10"]
+        child.standardOutput = FileHandle.nullDevice
+        child.standardError = FileHandle.nullDevice
+        try child.run()
+        defer { if child.isRunning { kill(child.processIdentifier, SIGKILL); child.waitUntilExit() } }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+        while child.isRunning, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertFalse(child.isRunning, "The bounded storage probe must finish.")
+        guard !child.isRunning else { return }
+        XCTAssertEqual(child.terminationStatus, 0)
+        struct Sample: Decodable { let iteration: Int; let resources: RuruDiagnostics.Resources }
+        let samples = try JSONDecoder().decode([Sample].self, from: Data(contentsOf: report))
+        XCTAssertEqual(samples.map(\.iteration), [0, 10])
+        for sample in samples {
+            XCTAssertGreaterThan(try XCTUnwrap(sample.resources.physicalFootprintBytes), 0)
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["memory.json"])
+    }
 }

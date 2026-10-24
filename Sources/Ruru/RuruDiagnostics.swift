@@ -1,9 +1,35 @@
+import Darwin
 import Foundation
 
 /// A deliberately small, redacted support report. It is assembled from the
 /// app's existing bounded snapshots and does not read credentials, the lease
 /// database, or a participant's files.
 enum RuruDiagnostics {
+    /// Read only our own process. No credentials, paths or other processes are inspected.
+    struct Resources: Sendable, Codable {
+        let residentBytes: UInt64?
+        /// Includes compressed memory charged to Ruru, unlike resident size.
+        let physicalFootprintBytes: UInt64?
+        let processAgeSeconds: Double?
+
+        static func capture() -> Self {
+            var memory = task_vm_info_data_t()
+            var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+            let status = withUnsafeMutablePointer(to: &memory) { pointer in
+                pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                    task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+                }
+            }
+            var process = proc_bsdinfo()
+            let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+            let received = proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &process, size)
+            let started = Double(process.pbi_start_tvsec) + Double(process.pbi_start_tvusec) / 1_000_000
+            return Self(residentBytes: status == KERN_SUCCESS ? memory.resident_size : nil,
+                        physicalFootprintBytes: status == KERN_SUCCESS ? memory.phys_footprint : nil,
+                        processAgeSeconds: received == size ? max(0, Date().timeIntervalSince1970 - started) : nil)
+        }
+    }
+
     struct Snapshot: Sendable {
         struct Lease: Sendable {
             let owner: String?
@@ -53,6 +79,7 @@ enum RuruDiagnostics {
         let internetState: String
         let hasInternetError: Bool
         let services: [Service]
+        var resources: Resources? = nil
     }
 
     static func buildReport(_ snapshot: Snapshot) -> String {
@@ -64,6 +91,12 @@ enum RuruDiagnostics {
         report += "Generated: \(timestamp.string(from: snapshot.generatedAt))\n"
         report += "App: \(snapshot.appVersion) (build \(snapshot.appBuild))\n"
         report += "OS: \(snapshot.operatingSystem) · arch \(snapshot.architecture)\n\n"
+
+        report += "=== Process resources ===\n"
+        report += "residentBytes=\(snapshot.resources?.residentBytes.map(String.init) ?? "unavailable")"
+        report += " physicalFootprintBytes=\(snapshot.resources?.physicalFootprintBytes.map(String.init) ?? "unavailable")"
+        report += " processAge=\(snapshot.resources?.processAgeSeconds.map(duration) ?? "unavailable")\n"
+        report += "Physical footprint includes compressed memory charged to Ruru. These are process measurements, not the DuckDB memory budget.\n\n"
 
         report += "=== Authority ===\n"
         report += "state=\(snapshot.authorityState)"

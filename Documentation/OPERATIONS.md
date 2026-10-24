@@ -12,6 +12,10 @@ Deployment testing is underway; the operator reported it working well on
 15 October 2026. Record exact builds, machines and completed scenarios in the
 acceptance record below before treating that report as coverage of every drill.
 
+Ruru’s Web UI is shelved until the app is active and in use. Operate Ruru through
+its native console; the public address continues to serve client APIs and health
+checks. No browser enrollment or passkey setup is needed. See [Web UI status](WEB_UI.md).
+
 ## When SwiftBot reports Ruru unreachable
 
 SwiftBot checks Ruru from its own Mac. Its Overview and SwiftMesh views flag an
@@ -27,6 +31,28 @@ Ruru is unavailable. A green health check never grants ownership. These flags
 do not send Discord messages or bypass standby output restrictions. They need
 SwiftBot to be running and reachable; independent external monitoring is still
 needed to detect loss of both applications or their shared network path.
+
+## Unexpected memory growth
+
+An 8 GB Ruru process is an investigation trigger on the 16 GB test Mac. The
+DuckDB budgets (128 MB for leases and 32 MB for alerts) do not cap total process
+memory. The diagnostic reports from build `2026101617` contain no memory or
+process-age measurements, so they cannot identify an allocation leak.
+
+Before restarting a large process, select **Ruru** in Activity Monitor and
+record its Memory and Compressed Memory, then use **Sample Process** and save
+the sample. Record the app build, approximate time since launch, selected page,
+and whether memory continues to rise with the console window closed. Distinguish
+Ruru from the separate Cloudflare helper. Samples help identify active work;
+allocation profiling may still be needed to locate retained memory.
+
+Export a Ruru diagnostic report while memory is high. Updated builds include
+resident bytes, physical footprint (including compressed memory charged to the
+process) and process age. Take a second report later to compare growth. Review
+Activity Monitor samples separately before sharing them: they are system
+reports and do not use Ruru's redaction rules. If a restart is needed to relieve
+pressure, quit normally and allow restart quarantine before expecting new grants.
+Never delete the authority database or its safety markers to reduce RAM use.
 
 ## Recovering from a backup
 

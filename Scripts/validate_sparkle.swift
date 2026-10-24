@@ -79,7 +79,7 @@ do {
         } else { failures.append("Missing \(setting) in project.yml.") }
     }
     require(FileManager.default.fileExists(atPath: appURL.appendingPathComponent("Contents/Frameworks/Sparkle.framework/Sparkle").path), "Sparkle framework is not embedded.")
-    for path in ["docs/appcast.xml", "docs/beta/appcast.xml"] {
+    for path in ["Website/appcast.xml", "Website/beta/appcast.xml"] {
         let parser = XMLParser(data: try Data(contentsOf: root.appendingPathComponent(path)))
         let validator = FeedValidator()
         parser.delegate = validator

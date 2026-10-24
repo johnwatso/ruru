@@ -102,9 +102,6 @@ final class WitnessAppModel: ObservableObject {
 
     private var store: LeaseStore?
     private var server: WitnessHTTPServer?
-    /// Browser UI state is volatile by design; an authority restart invalidates
-    /// browser sessions and unfinished passkey enrolments.
-    private var webUI: RuruWebUI?
     private var serviceCredentials: [String: String] = [:]
     /// Replaced shared tokens still admitted until `expires`, so a client can collect the new one.
     struct PreviousServiceToken: Codable, Equatable { var token: String; var expires: Date }
@@ -800,7 +797,7 @@ final class WitnessAppModel: ObservableObject {
                      authorityState: statusText, listenerPort: listenerPort,
                      recoverySeconds: snapshot?.recoverySeconds ?? 0, hasAuthorityError: error != nil,
                      internetState: internetStatus.state.rawValue, hasInternetError: internetError != nil || internetStatus.state == .error,
-                     services: services)
+                     services: services, resources: .capture())
     }
 
     func start() async {
@@ -819,31 +816,12 @@ final class WitnessAppModel: ObservableObject {
             let appBundle = Bundle.main
             let authorityVersion = appBundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             let authorityBuild = appBundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-            let webUI = RuruWebUI(
-                origin: { [weak self] in await MainActor.run { self?.webUIOrigin } },
-                monitorSnapshot: { [weak self] in await MainActor.run { self?.webMonitorSnapshot() ?? [] } },
-                serviceSnapshot: { [weak self] in await MainActor.run { self?.webServiceSnapshot() ?? .init(running: false, startedAt: nil) } },
-                guardedSnapshot: { [weak self] in await MainActor.run { self?.webGuardedSnapshot() ?? [] } },
-                monitorSave: { [weak self] target in
-                    guard let self else { throw WitnessStorage.ConfigurationError.invalid }
-                    try await self.saveMonitorTarget(target)
-                },
-                monitorRemove: { [weak self] id in
-                    guard let self else { throw WitnessStorage.ConfigurationError.invalid }
-                    try await self.removeMonitorTarget(id: id)
-                },
-                monitorCheck: { [weak self] id in
-                    guard let self else { return }
-                    await self.checkMonitorNow(id)
-                })
             let server = try WitnessHTTPServer(store: store, services: accessCredentials(), catalogue: catalogue, pairing: pairing,
                                                participants: participants, operationalStatus: operationalStatus,
                                                authorityVersion: authorityVersion, authorityBuild: authorityBuild,
-                                               webHandler: { request in await webUI.route(request) },
                                                credentialRotator: { [weak self] cluster, node, usedPrevious in
                                                    await self?.rotateCredential(clusterID: cluster, nodeID: node, usedPrevious: usedPrevious) ?? .failed
                                                })
-            self.webUI = webUI
             self.server = server
             listenerPort = try await server.start(bindAddress: configuration.bindAddress, port: UInt16(configuration.port))
             state = .running
@@ -852,7 +830,6 @@ final class WitnessAppModel: ObservableObject {
         } catch {
             await server?.stop()
             server = nil
-            webUI = nil
             state = .failed
             serviceStartedAt = nil
             self.error = error.localizedDescription
@@ -870,85 +847,10 @@ final class WitnessAppModel: ObservableObject {
         transportDiagnostics = nil
         await server?.stop()
         server = nil
-        webUI = nil
         listenerPort = nil
         state = .stopped
         serviceStartedAt = nil
         busy = false
-    }
-
-    /// Shows a one-time code in the native console. The public route still
-    /// requires a passkey, and the code expires after ten minutes.
-    func beginWebUIEnrollment() async throws -> String {
-        guard state == .running, let webUI, webUIOrigin != nil else { throw WitnessStorage.ConfigurationError.invalid }
-        return try await webUI.beginEnrollment()
-    }
-
-    /// Targets with their live state for the browser console. Bounded by the
-    /// monitor target and history limits.
-    private func webAppStatus(_ state: MonitorState?) -> RuruWebUI.WebMonitor.AppStatus {
-        let document = state?.statusDocument
-        return .init(name: document?.app.name, version: document?.app.version, state: document?.state.rawValue,
-                     current: state?.statusDocumentIsCurrent ?? false, issue: state?.statusIssue?.title,
-                     components: (document?.components ?? []).map { .init(name: $0.name, state: $0.state.rawValue) },
-                     metrics: (document?.metrics ?? []).map { .init(name: $0.name, value: $0.value, unit: $0.unit) })
-    }
-
-    func webMonitorSnapshot() -> [RuruWebUI.WebMonitor] {
-        configuration.monitorTargets.map { target in
-            let state = monitorStates[target.id]
-            let runtimeTarget = runtimeMonitorTarget(target)
-            return .init(target: runtimeTarget, status: state?.status.rawValue ?? "unknown",
-                         latencyMilliseconds: state?.last?.latencyMilliseconds, detail: state?.last?.detail,
-                         history: (state?.history.suffix(60) ?? []).map { .init(ok: $0.ok, ms: $0.latencyMilliseconds, inconclusive: $0.inconclusive) },
-                         changes: (state?.changes.suffix(10) ?? []).map { .init(time: $0.time, status: $0.status.rawValue, detail: $0.detail) },
-                         app: runtimeTarget.enhancedStatus ? webAppStatus(state) : nil)
-        }
-    }
-
-    /// Read-only guarded service state for the browser console. Bounded by the
-    /// configured service count, five activity rows and sixteen participants each.
-    func webGuardedSnapshot() -> [RuruWebUI.WebGuardedService] {
-        configuration.guardedServices.map { service in
-            let lease = lease(for: service.clusterID)
-            let owned = (lease?.remainingSeconds ?? 0) > 0
-            let owner = lease.flatMap { lease -> RuruWebUI.WebGuardedService.Owner? in
-                guard owned else { return nil }
-                return .init(name: nodeDisplayName(for: lease.ownerNodeID, reportedName: lease.ownerNodeName, clusterID: service.clusterID),
-                             term: lease.term, remainingSeconds: lease.remainingSeconds)
-            }
-            let participants = participantObservations.filter { $0.clusterID == service.clusterID }.prefix(16).map { observation in
-                RuruWebUI.WebGuardedService.Participant(
-                    name: nodeDisplayName(for: observation.nodeID, reportedName: observation.nodeName, clusterID: service.clusterID),
-                    role: observation.role.rawValue, fresh: observation.fresh, ageSeconds: observation.ageSeconds)
-            }
-            let activity = (snapshot?.events ?? []).filter { $0.clusterID == service.clusterID && $0.action != "renew" }
-                .sorted { $0.time > $1.time }.prefix(5).map { event in
-                    RuruWebUI.WebGuardedService.Activity(
-                        time: event.time, action: event.action,
-                        name: nodeDisplayName(for: event.nodeID, reportedName: event.nodeName, clusterID: service.clusterID), term: event.term)
-                }
-            return .init(id: service.id, name: service.name, kind: service.kind.rawValue, leaseSeconds: service.leaseSeconds,
-                         state: owned ? "owned" : isRecovering ? "recovering" : "waiting", recoverySeconds: snapshot?.recoverySeconds ?? 0,
-                         owner: owner, participants: Array(participants), activity: Array(activity))
-        }
-    }
-
-    func webServiceSnapshot() -> RuruWebUI.WebService {
-        let started = serviceStartedAt.map { instant -> Date in
-            let elapsed = instant.duration(to: .now)
-            return Date().addingTimeInterval(-(Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18))
-        }
-        return .init(running: state == .running, startedAt: state == .running ? started : nil)
-    }
-
-    var webUIOrigin: String? {
-        guard configuration.tunnel.isConfigured, configuration.tunnel.enabled,
-              let url = URL(string: configuration.publicEndpoint), url.scheme == "https",
-              url.host != nil, url.user == nil, url.password == nil,
-              url.query == nil, url.fragment == nil, url.path.isEmpty || url.path == "/" else { return nil }
-        let value = url.absoluteString
-        return value.hasSuffix("/") ? String(value.dropLast()) : value
     }
 
     func saveConfiguration(_ draft: WitnessConfiguration) async throws {
@@ -1414,7 +1316,8 @@ final class WitnessAppModel: ObservableObject {
 
     private func refreshMonitoring() async {
         guard !preview, !shuttingDown else { return }
-        monitorStates = await monitor.snapshot()
+        let updatedStates = await monitor.snapshot()
+        if monitorStates != updatedStates { monitorStates = updatedStates }
         let observations = await monitor.drainObservations()
         let transitions = await monitor.drainTransitions()
         guard alertEngineReady else { return }
@@ -1707,22 +1610,35 @@ final class WitnessAppModel: ObservableObject {
         copy(text)
     }
 
+    /// Publishing an identical value still invalidates every EnvironmentObject
+    /// reader. An idle authority must not rebuild the whole console each poll.
+    func publishAuthoritySnapshot(_ updated: WitnessSnapshot?) {
+        if snapshot != updated { snapshot = updated }
+        let activity = updated?.participantActivity ?? []
+        if participantActivity != activity { participantActivity = activity }
+    }
+
     private func refresh() async {
-        participantObservations = await participants.snapshot().filter { observation in
+        let updatedParticipants = await participants.snapshot().filter { observation in
             configuration.guardedServices.contains { $0.clusterID == observation.clusterID }
         }
-        operationalObservations = await operationalStatus.snapshot().filter { observation in
+        if participantObservations != updatedParticipants { participantObservations = updatedParticipants }
+        let updatedOperational = await operationalStatus.snapshot().filter { observation in
             configuration.guardedServices.contains { $0.clusterID == observation.clusterID }
         }
-        pairingCodes = await pairing.activeCodes()
-        pairingRequests = await pairing.pendingRequests()
-        coordinationEnrollments = await catalogue.pendingEnrollments()
-        coordinationLocations = await catalogue.snapshot().filter { location in
+        if operationalObservations != updatedOperational { operationalObservations = updatedOperational }
+        let updatedCodes = await pairing.activeCodes()
+        if pairingCodes != updatedCodes { pairingCodes = updatedCodes }
+        let updatedRequests = await pairing.pendingRequests()
+        if pairingRequests != updatedRequests { pairingRequests = updatedRequests }
+        let updatedEnrollments = await catalogue.pendingEnrollments()
+        if coordinationEnrollments != updatedEnrollments { coordinationEnrollments = updatedEnrollments }
+        let updatedLocations = await catalogue.snapshot().filter { location in
             configuration.guardedServices.contains { $0.clusterID == location.clusterID && configuration.coordinationPolicy(for: $0.id).enabled }
         }
+        if coordinationLocations != updatedLocations { coordinationLocations = updatedLocations }
         do {
-            snapshot = try await store?.snapshot()
-            participantActivity = snapshot?.participantActivity ?? []
+            publishAuthoritySnapshot(try await store?.snapshot())
             if let failure = await server?.failure() {
                 state = .failed
                 serviceStartedAt = nil

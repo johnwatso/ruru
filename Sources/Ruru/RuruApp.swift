@@ -7,10 +7,14 @@ struct RuruApp: App {
     @StateObject private var model = WitnessAppModel()
     @StateObject private var updater = AppUpdater()
     @StateObject private var diagnostics = RuruDiagnosticExportSession()
+    @StateObject private var interactionActivity = RuruInteractionActivity()
 
     var body: some Scene {
         Window("Ruru", id: "witness") {
             WitnessWindowContent(delegate: delegate).environmentObject(model).environmentObject(updater).environmentObject(diagnostics)
+                .environment(\.ruruLeaseAnimationsEnabled, interactionActivity.leaseAnimationsEnabled)
+                .background { RuruMouseActivityWindow().frame(width: 0, height: 0) }
+                .onAppear { prepareInteractionMonitoring() }
                 .ruruDiagnosticExportPresenter(diagnostics)
         }
         .defaultSize(width: 1180, height: 850)
@@ -28,21 +32,34 @@ struct RuruApp: App {
         Settings {
             WitnessSettingsView(configuration: model.configuration)
                 .environmentObject(model).environmentObject(updater).environmentObject(diagnostics)
+                .background { RuruMouseActivityWindow().frame(width: 0, height: 0) }
+                .onAppear {
+                    prepareInteractionMonitoring()
+                    interactionActivity.recordInteraction()
+                }
         }
         .windowResizability(.contentSize)
         MenuBarExtra("Ruru", systemImage: model.menuBarSymbol) {
             WitnessMenu().environmentObject(model).environmentObject(updater).environmentObject(diagnostics).onAppear {
+                prepareInteractionMonitoring()
+                interactionActivity.recordInteraction()
                 delegate.model = model
                 updater.prepareForInstallation = model.shutdown
                 updater.start()
             }
         }
     }
+
+    private func prepareInteractionMonitoring() {
+        delegate.interactionActivity = interactionActivity
+        interactionActivity.startMonitoring()
+    }
 }
 
 @MainActor
 final class WitnessAppDelegate: NSObject, NSApplicationDelegate {
     weak var model: WitnessAppModel?
+    weak var interactionActivity: RuruInteractionActivity?
     var openMainWindow: (() -> Void)?
 
     private var terminating = false
@@ -59,7 +76,16 @@ final class WitnessAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        interactionActivity?.recordInteraction()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        interactionActivity?.stopMonitoring()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        interactionActivity?.recordInteraction()
         if !flag { openMainWindow?() }
         return true
     }
