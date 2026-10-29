@@ -9,8 +9,11 @@ Apple silicon executables.
 On first launch Ruru opens a **setup assistant** that gets Ruru itself working
 before any servers are involved: paste a Cloudflare API token, choose one of its
 domains and a subdomain, connect (Ruru checks the address answers from the
-internet), then turn on login, auto-start and alerts. Adding apps and pairing
-servers comes afterwards, from Guarding. **Finish Later** closes it; Overview
+internet), then turn on login, auto-start and alerts. Its **Pair SwiftBot**
+step adds a SwiftBot service with the five-minute lease and shows the pairing
+panel: create a code, paste the line it shows into SwiftBot, and approve the
+request there. **Skip** it for other apps, which you add from Guarding.
+**Finish Later** closes it; Overview
 then lists what's left, and **More → Run Setup Assistant…** reopens it.
 **Internet Access → Set Up Cloudflare** uses the same token → domain flow.
 The manual steps are:

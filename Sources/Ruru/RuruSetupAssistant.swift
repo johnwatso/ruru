@@ -1,17 +1,19 @@
 import SwiftUI
 import WitnessKit
 
-/// First-run setup: get Ruru itself working before any servers are added —
-/// a public address, staying running, and alerts. Each step reads real state,
-/// so closing the assistant and coming back resumes where setup stands.
+/// First-run setup: get Ruru itself working — a public address, staying
+/// running, and alerts — then pair SwiftBot, the app most people run it for.
+/// Each step reads real state, so closing the assistant and coming back
+/// resumes where setup stands.
 struct RuruSetupAssistant: View {
     enum Step: Int, CaseIterable {
-        case welcome, address, running, ready
+        case welcome, address, running, swiftBot, ready
         var title: String {
             switch self {
             case .welcome: "Welcome"
             case .address: "Public Address"
             case .running: "Keep Ruru Running"
+            case .swiftBot: "Pair SwiftBot"
             case .ready: "Ready"
             }
         }
@@ -31,6 +33,7 @@ struct RuruSetupAssistant: View {
                     case .welcome: RuruSetupWelcome()
                     case .address: RuruSetupAddress(onSkip: { advance() })
                     case .running: RuruSetupFinish()
+                    case .swiftBot: RuruSetupSwiftBot()
                     case .ready: RuruSetupReady()
                     }
                 }
@@ -93,7 +96,7 @@ struct RuruSetupAssistant: View {
             }
             if step == .ready {
                 Button("Done") { finish(then: nil) }
-                Button("Add Your First App") { finish(then: .guarding) }
+                Button(model.configuration.services.isEmpty ? "Add Your First App" : "Open Guarding") { finish(then: .guarding) }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             } else {
                 Button(continueTitle) { advance() }
@@ -106,13 +109,18 @@ struct RuruSetupAssistant: View {
 
     private var canContinue: Bool {
         switch step {
-        case .welcome, .running, .ready: true
+        case .welcome, .running, .swiftBot, .ready: true
         case .address: model.configuration.tunnel.isConfigured || model.configuration.setup.localOnly
         }
     }
 
     private var continueTitle: String {
-        step == .welcome ? "Get Started" : "Continue"
+        switch step {
+        case .welcome: "Get Started"
+        // Pairing SwiftBot is optional; Ruru guards other apps too.
+        case .swiftBot where RuruSetupSwiftBot.service(in: model) == nil: "Skip"
+        default: "Continue"
+        }
     }
 
     private func finish(then page: WitnessPage?) {
@@ -149,7 +157,7 @@ private struct RuruSetupWelcome: View {
                 RuruSetupBullet(symbol: "powerplug", title: "This Mac stays on",
                                 detail: "Run Ruru on a Mac that isn’t one of your servers, and keep it awake and online.")
             }
-            Text("Setup gets Ruru itself working; you’ll add apps like SwiftBot and pair their servers afterwards. It takes a few minutes, and you can stop and continue later.")
+            Text("Setup gets Ruru working, then pairs SwiftBot if you use it. It takes a few minutes, and you can stop and continue later.")
                 .font(.callout).foregroundStyle(.secondary)
         }
     }
@@ -237,6 +245,56 @@ private struct RuruSetupFinish: View {
     }
 }
 
+/// Adds a SwiftBot service with its template defaults, then shows the same
+/// pairing panel as the service's Connection Details: a code, the line to
+/// paste into SwiftBot, and the request to approve.
+private struct RuruSetupSwiftBot: View {
+    @EnvironmentObject private var model: WitnessAppModel
+    @State private var adding = false
+    @State private var error: String?
+
+    static func service(in model: WitnessAppModel) -> GuardedService? {
+        model.configuration.services.first { $0.kind == .swiftBot }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Pair SwiftBot").font(.title3.weight(.semibold))
+            if let service = Self.service(in: model) {
+                Text("Create a code, then paste the line it shows into SwiftBot on your Primary Mac: SwiftMesh → Ruru → Set Up Ruru…, or Connect Ruru… on its web page. Approve the request here when it appears. Backups you pair later get the connection from the Primary.")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let paired = model.pairedNodes[service.clusterID], !paired.isEmpty {
+                    Label("Paired: " + paired.map { $0.name ?? $0.nodeID }.joined(separator: ", "), systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                }
+                WitnessPairingPanel(service: service)
+            } else {
+                Text("Running SwiftBot on more than one Mac? Add it here and pair your Primary in one go. Ruru uses SwiftBot’s recommended five-minute lease; you can change it later under Guarding.")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button(adding ? "Adding…" : "Add SwiftBot", systemImage: "plus") { add() }
+                    .buttonStyle(.borderedProminent).disabled(adding)
+                if let error { ConsoleIssue(title: "SwiftBot couldn’t be added", detail: error) }
+                Text("Using Ruru for another app? Skip this and add it under Guarding.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func add() {
+        adding = true
+        Task {
+            do {
+                try await model.addGuardedService(name: "SwiftBot", clusterID: model.suggestedClusterID(for: "SwiftBot"),
+                                                  kind: .swiftBot, leaseSeconds: GuardedService.defaultLeaseSeconds(for: .swiftBot))
+                error = nil
+            } catch {
+                self.error = "Ruru is busy or its settings couldn’t be saved. Try again in a moment."
+            }
+            adding = false
+        }
+    }
+}
+
 private struct RuruSetupReady: View {
     @EnvironmentObject private var model: WitnessAppModel
 
@@ -252,8 +310,13 @@ private struct RuruSetupReady: View {
                 }
                 check(model.launchAtLogin, "Opens at login")
                 check(model.configuration.alerts.notifications || model.discordConfigured, "Alerts are on")
+                if let swiftBot = RuruSetupSwiftBot.service(in: model) {
+                    check(!(model.pairedNodes[swiftBot.clusterID] ?? []).isEmpty, "SwiftBot paired")
+                }
             }
-            Text("Next, add the app your servers run — SwiftBot or your own — then pair each server with a code. You’ll find everything under Guarding.")
+            Text(RuruSetupSwiftBot.service(in: model) == nil
+                 ? "Next, add the app your servers run, then pair each server with a code. You’ll find everything under Guarding."
+                 : "Pair more servers, or add other apps, under Guarding.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .onAppear { model.refreshLoginStatus() }

@@ -96,9 +96,10 @@ Use the native console for current operator flows; see [Web UI status](WEB_UI.md
   Respect Reduce Motion for these fades too. One app-local input monitor and
   one monotonic inactivity deadline control presentation only; authority work,
   polling and alerts continue while idle or the window is closed.
-- First run opens a four-step setup assistant sheet that gets Ruru working
-  before any servers: Welcome, Public Address, Keep Ruru Running, Ready (with
-  Add Your First App). Step dots, Finish Later, Back and one primary action.
+- First run opens a five-step setup assistant sheet that gets Ruru working,
+  then pairs SwiftBot: Welcome, Public Address, Keep Ruru Running, Pair
+  SwiftBot (Add SwiftBot, then the shared pairing panel; Skip for other apps),
+  Ready (with Add Your First App, or Open Guarding once a service exists). Step dots, Finish Later, Back and one primary action.
   Steps read real state so it resumes correctly. A public address is expected;
   "Skip — Local Testing Only" is a small link.
 - Cloudflare setup (assistant and Internet Access) is token → choose one of the
