@@ -38,6 +38,16 @@ public enum RuruPairing {
         throw Failure.expired
     }
 
+    /// Ruru's code alphabet has no 0/1/I/L/O/U. "7kq4 m2xp" → "7KQ4-M2XP";
+    /// nil if the text isn't a short code.
+    public static func normalizedCode(_ text: String) -> String? {
+        let cleaned = text.uppercased().filter { $0 != "-" && !$0.isWhitespace }
+        guard cleaned.count == 8, cleaned.allSatisfy(codeAlphabet.contains) else { return nil }
+        return String(cleaned.prefix(4)) + "-" + String(cleaned.suffix(4))
+    }
+
+    private static let codeAlphabet = Set("23456789ABCDEFGHJKMNPQRSTVWXYZ")
+
     private static func post(_ endpoint: URL, _ path: String, _ body: [String: String],
                              _ session: URLSession) async throws -> [String: Any] {
         var request = URLRequest(url: endpoint.appendingPathComponent(path))
@@ -58,5 +68,42 @@ public enum RuruPairing {
         case 429: throw Failure.throttled
         default: throw Failure.server(status: status, code: object["error"] as? String ?? "")
         }
+    }
+}
+
+/// Ruru's address and a pairing code in one line, such as
+/// `ruru.example.com 7KQ4-M2XP`, so an operator copies a single thing. The
+/// code carries no credential, so neither does the invite.
+public struct RuruPairingInvite: Equatable, Sendable {
+    public let endpoint: URL
+    public let code: String
+
+    public init?(endpoint: URL, code: String) {
+        guard Self.isAcceptable(endpoint), let code = RuruPairing.normalizedCode(code) else { return nil }
+        self.endpoint = endpoint
+        self.code = code
+    }
+
+    /// Parses `host code`, `https://host code` or `https://host/ code`. The
+    /// code may contain a space or dash. A bare host means HTTPS.
+    public init?(_ text: String) {
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let first = words.first, words.count > 1 else { return nil }
+        var address = first.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if !address.contains("://") { address = "https://" + address }
+        guard let url = URL(string: address) else { return nil }
+        self.init(endpoint: url, code: words.dropFirst().joined())
+    }
+
+    /// The single line Ruru shows. HTTPS drops its scheme; anything else keeps it.
+    public var text: String {
+        let address = endpoint.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let shown = endpoint.scheme == "https" ? String(address.dropFirst("https://".count)) : address
+        return shown + " " + code
+    }
+
+    private static func isAcceptable(_ url: URL) -> Bool {
+        guard let host = url.host, !host.isEmpty, url.user == nil, url.query == nil, url.fragment == nil else { return false }
+        return url.scheme == "https" || (url.scheme == "http" && ["127.0.0.1", "localhost", "::1"].contains(host))
     }
 }

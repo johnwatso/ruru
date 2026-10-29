@@ -184,4 +184,16 @@ final class RuruStatusExposureTests: XCTestCase {
         let broken = RuruStatusDocument(app: .init(id: "Bad", name: "X"), state: .ready)
         XCTAssertEqual(broken.response(exposure: .everywhere, requestHeaders: [:]).status, 500)
     }
+
+    func testPairingInviteCarriesAddressAndCodeOnOneLine() throws {
+        let invite = try XCTUnwrap(RuruPairingInvite(endpoint: URL(string: "https://ruru.example.com")!, code: "7kq4m2xp"))
+        XCTAssertEqual(invite.text, "ruru.example.com 7KQ4-M2XP")
+        XCTAssertEqual(RuruPairingInvite(invite.text), invite)
+        XCTAssertEqual(RuruPairingInvite("https://ruru.example.com/  7kq4 m2xp\n")?.code, "7KQ4-M2XP")
+        XCTAssertEqual(RuruPairingInvite("ruru.example.com:8443 7KQ4-M2XP")?.endpoint.absoluteString, "https://ruru.example.com:8443")
+        XCTAssertEqual(RuruPairingInvite("http://localhost:38990 7KQ4-M2XP")?.text, "http://localhost:38990 7KQ4-M2XP")
+        XCTAssertNil(RuruPairingInvite("7KQ4-M2XP"), "A bare code has no address")
+        XCTAssertNil(RuruPairingInvite("http://ruru.example.com 7KQ4-M2XP"), "Remote Ruru must be HTTPS")
+        XCTAssertNil(RuruPairingInvite("ruru.example.com 7KQ4-M2X0"), "0 is not in Ruru's alphabet")
+    }
 }

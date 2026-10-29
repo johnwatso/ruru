@@ -746,13 +746,34 @@ struct WitnessPairingPanel: View {
 
     private var code: PairingDesk.Code? { model.pairingCodes.first { $0.clusterID == service.clusterID } }
 
+    /// `ruru.example.com 7KQ4-M2XP`, the line RuruClient's `RuruPairingInvite`
+    /// parses. Nil until Ruru has a public address.
+    private func inviteText(for code: PairingDesk.Code) -> String? {
+        let address = model.configuration.publicEndpoint.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: address), url.host != nil else { return nil }
+        let shown = url.scheme == "https" ? String(address.dropFirst("https://".count)) : address
+        return shown + " " + code.code
+    }
+
     var body: some View {
         ConsoleSection(title: "Pair a Server", accessory: { Text("Single use") }, content: {
             VStack(alignment: .leading, spacing: 14) {
                 if let code {
                     WitnessPairingCodeView(code: code) { Task { await model.cancelPairingCode(code.code) } }
-                    Text("On the server, enter this Ruru’s address and the code. You’ll approve the request here before it receives any credentials.")
-                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let invite = inviteText(for: code) {
+                        HStack(spacing: 10) {
+                            Text(invite).font(.body.monospaced()).textSelection(.enabled)
+                            Spacer(minLength: 8)
+                            Button("Copy", systemImage: "doc.on.doc") { model.copy(invite) }
+                        }
+                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        .consoleRowGroup()
+                        Text("Paste this line into the server’s Ruru setup. It includes this Ruru’s address and the code, but no credentials; you’ll approve the request here.")
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("On the server, enter this Ruru’s address and the code. You’ll approve the request here before it receives any credentials.")
+                            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                 } else {
                     HStack(alignment: .center, spacing: 12) {
                         Text("Pair without copying the token: create a code, enter it on the server, then approve the request here.")
